@@ -31,11 +31,23 @@ _NANONETS_FURNITURE = re.compile(
     r"<(page_number|watermark|header|footer)>.*?</\1>", re.DOTALL | re.IGNORECASE
 )
 
+# The "markdown" profile's prompt. Several sentences answer a failure measured on reference
+# pages: display equations lose their numbers, headings and table header rows are added
+# that the page does not have, text inside a cover picture is read as if it were prose,
+# and a contents page comes back with long dot leaders on some runs and without on others.
+# The rest (reading order, lists, no headers or footers, no commentary) is the earlier prompt.
 GENERIC_PROMPT = (
-    "Transcribe this document page to clean Markdown. Preserve reading order, "
-    "headings (#), paragraphs, lists, and tables (Markdown tables). Render math "
-    "as LaTeX ($...$). Omit page headers/footers and line-break hyphenation. "
-    "Output only the transcription, no commentary."
+    "Transcribe this document page to clean Markdown, exactly as printed. Preserve "
+    "reading order, paragraphs, lists, and tables (Markdown tables). Mark a heading "
+    "with # only where the page shows a heading; never add one. Write a table with the "
+    "rows and columns the page shows; do not add a header row or a column that is not "
+    "printed. Render math as LaTeX: $...$ inline and $$...$$ for displayed equations. "
+    "Keep the number of a numbered equation as \\tag{n} inside the display, for example "
+    "$$ ... \\tag{12} $$. A figure, photo, diagram or cover picture is not text: do "
+    "not transcribe words that are part of the picture, but do transcribe its caption. "
+    "On a contents page write each entry followed by its page number, without dot "
+    "leaders. Omit running headers, running footers, the number of the page itself "
+    "and line-break hyphenation. Output only the transcription, no commentary."
 )
 
 # allenai/olmocr `build_no_anchoring_v4_yaml_prompt` (olmOCR-2 training prompt).

@@ -16,7 +16,7 @@ import pytest
 
 from docingest.adapters.ocr.mlx_vlm import MlxVlmOcr
 from docingest.adapters.ocr.openai_compat import OpenAICompatibleOcr
-from docingest.adapters.ocr.profiles import PROFILES
+from docingest.adapters.ocr.profiles import GENERIC_PROMPT, PROFILES
 from docingest.domain.models import ModelRef
 
 MODEL = ModelRef(repo_id="org/model", revision="a" * 40)
@@ -93,3 +93,39 @@ def test_a_new_profile_code_version_is_a_new_engine_fingerprint(make):
     bumped = replace(profile, code_version=profile.code_version + 1)
     assert make(bumped).fingerprint != make(profile).fingerprint
     assert make(replace(profile)).fingerprint == make(profile).fingerprint
+
+
+def test_the_markdown_prompt_carries_each_instruction():
+    # One check per failure the prompt answers; the wording may change, the instruction not.
+    prompt = " ".join(PROFILES["markdown"].prompt.split())
+    assert PROFILES["markdown"].prompt == GENERIC_PROMPT
+    assert "\\tag{n}" in prompt and "$$" in prompt  # equation numbers stay in the display
+    assert "never add one" in prompt  # headings only where the page has them
+    assert "do not add a header row" in prompt  # tables as printed
+    assert "do not transcribe words that are part of the picture" in prompt
+    assert "do transcribe its caption" in prompt  # captions are text
+    assert "without dot leaders" in prompt  # contents pages
+    assert "running headers, running footers" in prompt  # furniture stays out
+    assert "no commentary" in prompt
+
+
+def test_the_other_profiles_keep_their_own_prompts():
+    for name in ("olmocr", "nanonets", "glm-ocr", "paddleocr-vl"):
+        assert PROFILES[name].prompt != GENERIC_PROMPT
+    assert PROFILES["glm-ocr"].prompt == "Text Recognition:"
+    assert PROFILES["paddleocr-vl"].prompt == "OCR:"
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda p: MlxVlmOcr(MODEL, p),
+        lambda p: OpenAICompatibleOcr(MODEL, p, base_url="http://127.0.0.1:8000/v1"),
+    ],
+    ids=["mlx-vlm", "openai-compatible"],
+)
+def test_another_prompt_is_another_engine_fingerprint(make):
+    # A prompt edit changes what the model writes: cached OCR output must be redone.
+    profile = PROFILES["markdown"]
+    edited = replace(profile, prompt=profile.prompt + " Extra.")
+    assert make(edited).fingerprint != make(profile).fingerprint

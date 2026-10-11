@@ -192,7 +192,14 @@ A profile captures how a model's authors run it: the prompt, the input size, the
 
 The prompts:
 
-- `GENERIC_PROMPT` asks for clean Markdown in reading order, with `#` headings, lists, Markdown tables and `$...$` LaTeX math, without page headers, footers or hyphenation, and without commentary.
+- `GENERIC_PROMPT` asks for clean Markdown, exactly as printed, in reading order, with lists, Markdown tables and LaTeX math (`$...$` inline, `$$...$$` displayed). It also carries one instruction for each failure measured on reference pages:
+  - the number of a numbered equation stays inside the display as `\tag{n}` (the model used to drop most of them);
+  - a `#` heading only where the page shows a heading, and no table header row or column that is not printed;
+  - no transcription of words that are part of a figure, photo, diagram or cover picture, while its caption is transcribed;
+  - a contents page is written as entry and page number, without dot leaders (the model used to return them on some runs and not on others);
+  - no running headers, running footers, number of the page itself or line-break hyphenation, and no commentary.
+
+  The prompt is part of the engine fingerprint, so editing it makes every cached OCR result be computed again. The other profiles keep their own prompts.
 - `OLMOCR_PROMPT` is olmOCR-2's training prompt (`build_no_anchoring_v4_yaml_prompt` in allenai/olmocr): natural reading order, LaTeX equations, HTML tables, figure placeholders, and a YAML front matter block with `primary_language`, `is_rotation_valid`, `rotation_correction`, `is_table` and `is_diagram`.
 - `NANONETS_PROMPT` is the Nanonets-OCR2 model-card prompt: HTML tables, LaTeX equations, `<img>` descriptions, and `<watermark>` / `<page_number>` tags.
 - `glm-ocr` and `paddleocr-vl` use the short task prompts of their official pipelines. GLM-OCR needs `enable_thinking=True` in the chat template, otherwise mlx-vlm appends `/nothink` to the prompt.

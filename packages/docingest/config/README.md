@@ -260,7 +260,7 @@ The first problem in that order decides. The adapters use the checks to choose t
 
 | Profile | Prompt | `max_side` | `max_tokens` | `repetition_penalty` | Other behaviour |
 |---|---|---|---|---|---|
-| `markdown` | This project's Markdown prompt (reading order, headings, Markdown tables, LaTeX math, omit page headers and footers) | 1600 | 4096 | 1.05 | |
+| `markdown` | This project's Markdown prompt (reading order, Markdown tables, LaTeX math with equation numbers kept as `\tag{n}`, no added headings or table header rows, no text read from inside pictures, contents entries without dot leaders, omit page headers and footers) | 1600 | 4096 | 1.05 | |
 | `olmocr` | olmOCR-2 training prompt (front matter, HTML tables, LaTeX) | 1288 | 8000 | 1.05 | Prompt before the image; olmOCR temperature ladder; an output without front matter in its first lines is retried; the clean-up removes the front matter. |
 | `nanonets` | Nanonets-OCR2 model-card prompt | 1600 | 8000 | 1.05 | The clean-up removes `<page_number>`, `<watermark>`, `<header>` and `<footer>` elements with their content, and `<signature>` tags. |
 | `glm-ocr` | `Text Recognition:` | 1600 | 8192 | 1.1 | Sends `enable_thinking=True` to the chat template. |
