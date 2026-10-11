@@ -1,19 +1,37 @@
+import random
+
 import pypdfium2 as pdfium
 import pytest
-from builders import LONG, image_pdf, layout_pdf, paragraph, pdf, text_pdf
+from builders import (
+    LONG,
+    image_pdf,
+    layout_pdf,
+    paragraph,
+    pdf,
+    picture_pdf,
+    pictures_pdf,
+    text_pdf,
+)
 
-from docingest.adapters.pdf.pdfium import PdfiumReader, _Glyph, split_lines
+from docingest.adapters.pdf.pdfium import (
+    SIGNALS_VERSION,
+    PdfiumReader,
+    _Glyph,
+    _union_share,
+    split_lines,
+)
 from docingest.domain.errors import DocumentOpenError
 from docingest.domain.routing import RoutingPolicy, decide
 from docingest.domain.text import HYPHEN_MARK, clean_text_layer
 
 reader = PdfiumReader()
+PAGE = [LONG] * 6  # a page of text: 576 characters, over the 400 of the "little text" rule
 
 
-def probe(path):
+def probe(path, policy=None):
     doc = reader.open(path)
     signals, raw = doc.page(0).signals()
-    return decide(signals, RoutingPolicy()), raw
+    return decide(signals, policy or RoutingPolicy()), raw
 
 
 def test_born_digital_page_uses_text_layer(tmp_path):
@@ -73,6 +91,133 @@ def test_full_page_scan_detected_on_rotated_or_offset_boxes(tmp_path, page_box, 
     assert 50 <= p.n_chars < 400, p  # routed by coverage, not by an empty text layer
     assert p.image_coverage > 0.95, p
     assert p.needs_ocr
+
+
+def test_scan_with_an_invisible_text_layer_routes_to_ocr(tmp_path):
+    # A full-page image with a long, invisible text layer: the old OCR of an old scan.
+    # Old: a layer over 400 characters passed every rule and was trusted.
+    path = picture_pdf(tmp_path / "ocr_scan.pdf", *PAGE, invisible=True)
+    p, raw = probe(path)
+    assert p.n_chars > 400 and "Attention" in raw  # the layer is there and is long
+    assert p.image_coverage == 1.0
+    assert p.needs_ocr and [r.split(":")[0] for r in p.reasons] == [
+        "scanned page with a text layer"
+    ]
+    assert "images cover 100% of the page" in p.reasons[0]
+
+
+def test_the_rule_can_be_turned_off(tmp_path):
+    path = picture_pdf(tmp_path / "ocr_scan.pdf", *PAGE, invisible=True)
+    p, raw = probe(path, RoutingPolicy(scan_layer_to_ocr=False))
+    assert not p.needs_ocr and p.reasons == []
+    assert "Attention" in raw
+
+
+def test_a_born_digital_page_keeps_its_text_layer(tmp_path):
+    p, _ = probe(text_pdf(tmp_path / "digital.pdf", *PAGE))
+    assert p.n_images == 0 and not p.needs_ocr
+
+
+def test_a_page_with_a_figure_keeps_its_text_layer(tmp_path):
+    # A 250 x 250 pt figure on a Letter page covers 13% of it.
+    path = picture_pdf(tmp_path / "figure.pdf", *PAGE, box=(300, 300, 250, 250))
+    p, _ = probe(path)
+    assert p.n_images == 1 and 0.1 < p.image_coverage < 0.2
+    assert not p.needs_ocr, p.reasons
+
+
+def test_a_large_figure_below_the_cover_threshold_keeps_its_text_layer(tmp_path):
+    # 612 x 500 pt: 63% of the page, over the 0.6 of the "little text" rule, but with the
+    # text of a full page. Not a scan.
+    path = picture_pdf(tmp_path / "plate.pdf", *PAGE, box=(0, 0, 612, 500))
+    p, _ = probe(path)
+    assert 0.6 < p.image_coverage < 0.8
+    assert not p.needs_ocr, p.reasons
+
+
+def test_stacked_full_page_images_are_one_scan_not_two(tmp_path):
+    # Two layers of one scan (an image and its mask or a second copy): the page is covered
+    # once, however many images do it.
+    page = [(0, 0, 612, 792)] * 2
+    p, _ = probe(pictures_pdf(tmp_path / "stack.pdf", page, *PAGE, invisible=True))
+    assert p.n_images == 2 and p.image_coverage == 1.0
+    assert p.needs_ocr
+
+
+def test_overlapping_tiles_under_a_page_of_text_are_not_a_scan(tmp_path):
+    # Old: 60 copies of a 250 x 250 pt picture in one place added up (60 x 13%) to a covered
+    # page, and a born-digital page with a figure built of many pieces went to OCR.
+    tiles = [(300, 300, 250, 250)] * 60
+    p, _ = probe(pictures_pdf(tmp_path / "tiles.pdf", tiles, *PAGE))
+    assert p.n_images == 60 and 0.1 < p.image_coverage < 0.2
+    assert not p.needs_ocr, p.reasons
+
+
+def test_many_small_images_that_do_not_overlap_add_up(tmp_path):
+    # 10 x 10 grid of 61 x 79 pt pieces: a picture cut into tiles covers its area.
+    tiles = [(61 * i, 79 * j, 61, 79) for i in range(10) for j in range(10)]
+    p, _ = probe(pictures_pdf(tmp_path / "mosaic.pdf", tiles, *PAGE))
+    assert p.n_images == 100 and 0.95 <= p.image_coverage <= 1.0
+    assert p.needs_ocr and "scanned page" in p.reasons[-1]
+
+
+def test_side_by_side_strips_that_tile_the_page_are_a_scan(tmp_path):
+    strips = [(0, 0, 306, 792), (306, 0, 306, 792)]
+    p, _ = probe(pictures_pdf(tmp_path / "strips.pdf", strips, *PAGE, invisible=True))
+    assert p.n_images == 2 and p.image_coverage >= 0.99
+    assert p.needs_ocr
+
+
+def test_the_reader_fingerprint_names_the_signal_version():
+    # The cache key of a PDF holds the fingerprint: a changed measurement invalidates PDFs.
+    assert reader.fingerprint.endswith(f"signals {SIGNALS_VERSION}")
+
+
+@pytest.mark.parametrize(
+    ("rects", "share"),
+    [
+        ([], 0.0),
+        ([(0.0, 0.0, 1.0, 1.0)], 1.0),
+        ([(0.25, 0.25, 0.75, 0.75)], 0.25),
+        ([(0.25, 0.25, 0.75, 0.75)] * 5, 0.25),  # on grid lines: no extra cell
+        ([(0.0, 0.0, 0.5, 1.0), (0.5, 0.0, 1.0, 1.0)], 1.0),
+        ([(0.0, 0.0, 1.0, 1.0), (0.2, 0.2, 0.4, 0.4)], 1.0),
+        ([(0.0, 0.0, 0.333, 1.0), (0.333, 0.0, 0.666, 1.0), (0.666, 0.0, 1.0, 1.0)], 1.0),
+    ],
+)
+def test_union_share(rects, share):
+    assert _union_share(rects) == pytest.approx(share)
+
+
+def test_thousands_of_specks_do_not_make_a_page():
+    # A figure built of thousands of tiny images: 10,000 specks of 0.001 x 0.001 (0.01% of
+    # the page together) that straddle grid lines. Rounding each rectangle outwards turned
+    # them into a full page.
+    specks = [(0.0049 + 0.0097 * (i % 100), 0.0049 + 0.0097 * (i // 100)) for i in range(10_000)]
+    rects = [(x, y, x + 0.001, y + 0.001) for x, y in specks]
+    assert _union_share(rects) < 0.05
+
+
+def test_many_small_tiles_are_measured_close_to_their_union():
+    # 2,719 tiles of 0.01 x 0.012 placed pseudo-randomly: the exact union is about 0.28.
+    rng = random.Random(7)
+    rects = []
+    for _ in range(2719):
+        x, y = rng.uniform(0, 0.99), rng.uniform(0, 0.988)
+        rects.append((x, y, x + 0.01, y + 0.012))
+    exact = _exact_union(rects)
+    assert abs(_union_share(rects) - exact) < 0.02 < 0.8 - exact
+
+
+def _exact_union(rects):
+    """The union of the rectangles on a grid fine enough for the test (1000 x 1000)."""
+    n = 1000
+    rows = [0] * n
+    for left, bottom, right, top in rects:
+        x0, x1 = round(left * n), round(right * n)
+        for y in range(round(bottom * n), round(top * n)):
+            rows[y] |= ((1 << (x1 - x0)) - 1) << x0
+    return sum(r.bit_count() for r in rows) / (n * n)
 
 
 def test_real_pdfium_hyphenation_roundtrip(tmp_path):

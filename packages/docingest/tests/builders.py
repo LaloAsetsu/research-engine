@@ -131,3 +131,38 @@ def _escape(text: str) -> bytes:
     return (
         text.encode("latin-1").replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
     )
+
+
+def pictures_pdf(
+    path: Path,
+    boxes: list[tuple[int, int, int, int]],
+    *lines: str,
+    invisible: bool = False,
+) -> Path:
+    """One page of text lines and one image drawn over each of ``boxes`` (x, y, width, height
+    in points, so boxes may overlap or tile the page).
+
+    ``invisible`` draws the text in render mode 3, as an OCR program does over its scan: the
+    page looks like the images and still has a text layer.
+    """
+    mode = b"3 Tr " if invisible else b""
+    text = (
+        b"BT /F1 11 Tf "
+        + mode
+        + b"72 700 Td 14 TL "
+        + b" ".join(b"(%s) '" % s.encode() for s in lines)
+        + b" ET"
+    )
+    image = (
+        b"<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray "
+        b"/BitsPerComponent 8 /Length 4 >>\nstream\n\xc0\xc0\xc0\xc0\nendstream"
+    )
+    draws = b" ".join(b"q %d 0 0 %d %d %d cm /Im1 Do Q" % (w, h, x, y) for x, y, w, h in boxes)
+    return pdf(path, draws + b" " + text, b"/XObject << /Im1 6 0 R >>", [image])
+
+
+def picture_pdf(
+    path: Path, *lines: str, box: tuple[int, int, int, int] = (0, 0, 612, 792), invisible=False
+) -> Path:
+    """``pictures_pdf`` with one image: the full page by default, or a figure in a small ``box``."""
+    return pictures_pdf(path, [box], *lines, invisible=invisible)

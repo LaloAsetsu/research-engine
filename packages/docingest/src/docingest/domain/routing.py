@@ -32,6 +32,19 @@ class RoutingPolicy(BaseModel):
     blank_ink_contrast: int = Field(default=32, ge=1, le=255)
     # A page whose median grey is below this is not paper (a black cover, a picture): all ink.
     blank_dark_page: int = Field(default=128, ge=1, le=255)
+    # Scans with an OCR layer: a page that is one image over (almost) the whole page AND has a
+    # text layer is an old scan whose layer is the output of a past OCR program. That layer is
+    # trusted today; the VLM reads such pages with a fraction of its errors (reference sample:
+    # character error rate 0.068 -> 0.011 on plain text, 0.43 -> 0.03 on math). Measured
+    # values: config/README.md. scan_layer_to_ocr = false keeps the layer.
+    scan_layer_to_ocr: bool = True
+    # Share of the page the images cover (their union, not a sum) for a page to count as a
+    # scan. On the reference corpus 593 scan pages (17 documents) cover 0.88 to 1.0. The rule
+    # also fires on a born-digital cover (full-page picture, already OCR input by the
+    # image_coverage rule); a figure of thousands of tiny images measured 1.0 as a sum of
+    # areas and 0.13 as a union. A born-digital page drawn over one full-page background image
+    # (slide, poster, cover) with a long text is read by OCR too: see config/README.md.
+    scan_image_cover: float = Field(default=0.8, gt=0, le=1)
 
 
 def could_be_blank(signals: PageSignals, policy: RoutingPolicy) -> bool:
@@ -80,6 +93,15 @@ def decide(signals: PageSignals, policy: RoutingPolicy, *, force_ocr: bool = Fal
         reasons.append(f"garbled text layer ({s.garbage_ratio:.0%} bad glyphs)")
     if s.n_chars >= p.min_chars and s.alpha_ratio < p.min_alpha_ratio:
         reasons.append(f"low alphabetic ratio ({s.alpha_ratio:.0%})")
+    if (
+        p.scan_layer_to_ocr
+        and s.n_chars >= p.min_chars  # fewer chars is already a reason above
+        and s.image_coverage >= p.scan_image_cover
+    ):
+        reasons.append(
+            f"scanned page with a text layer: images cover {s.image_coverage:.0%} of the page,"
+            f" {s.n_chars} embedded chars"
+        )
     if force_ocr and not reasons:
         reasons.append("forced (--ocr-all)")
     return PageProbe(**s.model_dump(), needs_ocr=bool(reasons), reasons=reasons)

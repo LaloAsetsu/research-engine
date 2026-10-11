@@ -25,6 +25,37 @@ FORCE_BOLD = 0x40000  # ForceBold bit of the font descriptor flags
 _BOLD_NAMES = (b"bold", b"black", b"heavy")
 BOLD_SHARE = 0.8  # share of a line's characters that must be bold for the line to be bold
 
+# Version of the measurements this adapter makes, in its fingerprint and so in the cache key of
+# every PDF. Raise it when a signal changes meaning. 2: image_coverage is the union of the image
+# rectangles (it was their sum, capped at 1, which counted overlaps twice).
+SIGNALS_VERSION = 2
+
+# Side of the grid on which the union of the image rectangles is measured.
+_GRID = 200
+
+
+def _union_share(rects: list[tuple[float, float, float, float]]) -> float:
+    """Share of the unit square covered by the rectangles ``(left, bottom, right, top)``.
+
+    Zero or one rectangle is exact. Several are drawn on a ``_GRID`` x ``_GRID`` grid, one
+    integer of bits per row, so overlaps count once and thousands of tiles cost little. Each
+    edge is rounded to the nearest grid line: an error of at most half a cell per edge,
+    unbiased, adjacent tiles that share an edge still tile exactly, and a speck smaller than
+    half a cell counts as nothing (rounding outwards would turn thousands of specks into a
+    full page).
+    """
+    if len(rects) <= 1:
+        return sum((right - left) * (top - bottom) for left, bottom, right, top in rects)
+    rows = [0] * _GRID
+    for left, bottom, right, top in rects:
+        x0, x1 = round(left * _GRID), round(right * _GRID)
+        y0, y1 = round(bottom * _GRID), round(top * _GRID)
+        if x1 > x0 and y1 > y0:
+            mask = ((1 << (x1 - x0)) - 1) << x0
+            for y in range(y0, y1):
+                rows[y] |= mask
+    return sum(row.bit_count() for row in rows) / (_GRID * _GRID)
+
 
 def _page_space_bounds(obj) -> tuple[float, float, float, float]:
     """Bounds of a page object in page space, including enclosing Form XObjects.
@@ -130,18 +161,26 @@ class PdfiumPage:
         # Visible page box in unrotated user space (same space as object bounds); it need
         # not start at the origin, and /Rotate must not swap its axes.
         box_l, box_b, box_r, box_t = self._page.get_bbox()
-        page_area = max((box_r - box_l) * (box_t - box_b), 1.0)
-        image_area, n_images = 0.0, 0
+        box_w, box_h = max(box_r - box_l, 1.0), max(box_t - box_b, 1.0)
+        rects, n_images = [], 0
         for obj in self._page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE]):
             left, bottom, right, top = _page_space_bounds(obj)
             left, bottom = max(left, box_l), max(bottom, box_b)
             right, top = min(right, box_r), min(top, box_t)
-            image_area += max(right - left, 0) * max(top - bottom, 0)
             n_images += 1
+            if right > left and top > bottom:  # on the page, as fractions of the page box
+                rects.append(
+                    (
+                        (left - box_l) / box_w,
+                        (bottom - box_b) / box_h,
+                        (right - box_l) / box_w,
+                        (top - box_b) / box_h,
+                    )
+                )
         signals = PageSignals(
             n_chars=len("".join(text.split())),
             n_images=n_images,
-            image_coverage=round(min(image_area / page_area, 1.0), 3),
+            image_coverage=round(min(_union_share(rects), 1.0), 3),
             garbage_ratio=round(garbage_ratio(text), 3),
             alpha_ratio=round(alpha_ratio(text), 3),
         )
@@ -199,7 +238,7 @@ class PdfiumDocument:
 
 
 class PdfiumReader:
-    fingerprint = f"pypdfium2 {version('pypdfium2')}"
+    fingerprint = f"pypdfium2 {version('pypdfium2')} signals {SIGNALS_VERSION}"
 
     def open(self, path: Path) -> PdfiumDocument:
         try:

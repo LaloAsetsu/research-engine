@@ -39,6 +39,11 @@ blank_max_chars = 10            # a blank page may carry a page number, up to th
 blank_max_ink = 0.0005          # ...and fewer than 0.05% inked pixels (0 turns the rule off)
 blank_ink_contrast = 32         # ink = a pixel this many grey levels darker than the paper (after a 3x3 median)
 blank_dark_page = 128           # a page with a median grey below this is not paper: all ink
+# A page that is a scan (images cover it) and also has a text layer carries the output of an old
+# OCR program. The model reads such pages much better, at about 25 to 30 s per page on the lab GPU
+# server. false keeps those layers. See config/README.md.
+scan_layer_to_ocr = true        # scan with an OCR text layer -> OCR
+scan_image_cover = 0.8          # images covering at least 80% of the page make it a scan
 
 [ocr]
 # Vision-language model used for scanned pages and images (MLX, runs on Apple Silicon).
