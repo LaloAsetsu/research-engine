@@ -95,6 +95,7 @@ flowchart LR
 | `test_chunking.py` | `domain.chunking.chunk_pages`: chunk names and page ranges, overlap, page breaks, invalid settings |
 | `test_core_fixes.py` | Regressions: config loading, the pipeline version against `pyproject.toml` and `uv.lock`, QA LLM parameters, metadata refresh and degraded results through the real `FilesystemStore` |
 | `test_domain_models.py` | `SourceMetadata` citation formatting |
+| `test_dot_leaders.py` | `collapse_dot_leaders`: contents lines with and without leaders, section numbers, ellipses of prose and Roman numerals; and where `IngestService` applies it (text-layer, structured, OCR and image pages, not converted kinds) |
 | `test_index_config.py` | `index_config`: `candidates` and `contexts` read without the index adapter, other keys ignored, bad values named |
 | `test_index_service.py` | `IndexService`: incremental `build`, `update` of given documents, pruning, `status`, `remove`, the mismatch refusal, and `close()` on every path including a failing embedder |
 | `test_blank_pages.py` | The blank-page rule: ink measurement (white, tinted and speckled paper, a page number, a title page, a dark page), `is_blank` and its thresholds, the `[routing]` keys, and `IngestService` leaving such pages empty without calling OCR |

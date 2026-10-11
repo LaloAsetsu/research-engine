@@ -13,6 +13,21 @@ _SOFT_HYPHEN = re.compile(rf"(\w+){HYPHEN_MARK}(\w+)")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 _PAGE_MARKER = re.compile(r"^<!-- page (\d+) \| method=(\w+) -->$", re.MULTILINE)
 
+# A leader is a run of dots (or middle dots, or ellipsis characters), with or without
+# any number of spaces, tabs or other blanks between them, that joins an entry of a
+# contents page to its page number.
+_LEADER_CHARS = ".·∙⋅…"
+_LEADER_RUN = re.compile(rf"[{_LEADER_CHARS}](?:[^\S\n]*[{_LEADER_CHARS}])*")
+# What may follow it: arabic, roman or lettered ("A-12", "3-14") page numbers. A Roman
+# numeral must be well formed and below 400 (front matter), in one case: a word made of
+# the same letters ("mild", "civil", "mix", "did") is not a page number.
+_ROMAN = "(?=[ivxlc])c{0,3}(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
+_PAGE_NUMBER = re.compile(
+    rf"\d{{1,4}}|{_ROMAN}|{_ROMAN.upper()}|[A-Z]-\d{{1,4}}|\d{{1,3}}-\d{{1,3}}"
+)
+_MIN_LEADER = 4  # dots; "..." and ". . ." are ellipses of prose and stay
+_MIN_LEADER_WITHOUT_PAGE = 6  # a run at the end of a line with no page number after it
+
 
 def garbage_ratio(text: str) -> float:
     """Share of characters that indicate a broken text layer."""
@@ -60,6 +75,40 @@ def clean_text_layer(text: str, vocab: set[str] | None = None) -> str:
     text = _CONTROL.sub("", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _leader_weight(run: str) -> int:
+    """Dots in a run: an ellipsis character stands for three."""
+    return sum(3 if c == "…" else 1 for c in run if not c.isspace())
+
+
+def _collapse_leader_line(line: str) -> str:
+    for run in reversed(list(_LEADER_RUN.finditer(line))):
+        weight = _leader_weight(run.group())
+        if weight < _MIN_LEADER:
+            continue
+        page = line[run.end() :].strip()
+        if page and not _PAGE_NUMBER.fullmatch(page):
+            return line  # the run is followed by text: not a contents line
+        head = line[: run.start()].rstrip()
+        if not page and (weight < _MIN_LEADER_WITHOUT_PAGE or not head.strip()):
+            return line  # prose that trails off, or a line of nothing but dots
+        return f"{head} {page}" if head.strip() and page else head or page
+    return line
+
+
+def collapse_dot_leaders(text: str) -> str:
+    """Contents lines without their dot leaders: ``Title . . . . . 23`` becomes ``Title 23``.
+
+    A vision model writes a contents page with leaders on one run and without on the next,
+    and a text layer carries them as typeset. Only a line that ends with a run of at least
+    four dots (``. . . .`` or ``....``) followed by a page number is changed, or one that
+    ends with a run of six or more. Ellipses of prose, section numbers (``1.2.3``) and
+    dots inside a line stay. The blanks between the dots do not matter. Idempotent.
+    """
+    if not any(c in text for c in _LEADER_CHARS):
+        return text
+    return "\n".join(_collapse_leader_line(line) for line in text.split("\n"))
 
 
 def render_markdown(manifest: DocumentManifest, texts: list[str]) -> str:

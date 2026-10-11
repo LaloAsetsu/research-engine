@@ -714,7 +714,7 @@ Text-layer structuring runs after all pages are read, because two of its rules n
 - Headings are lines set larger than the body text, or bold, or numbered, and are marked `#` to `####`.
 - pdfium replaces a line-end hyphen with U+0002 and joins the lines. The two halves are joined only when the joined word occurs elsewhere in the document (the vocabulary includes every kept text layer and every OCR transcription), and otherwise the hyphen is kept.
 
-A page whose adapter returned no lines still goes through `clean_text_layer` on its flat text. The rules are in [domain/README.md](../src/docingest/domain/README.md#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy). OCR pages are never restructured.
+A page whose adapter returned no lines still goes through `clean_text_layer` on its flat text. Last, every PDF and image page goes through `collapse_dot_leaders` (`Title . . . . . 23` becomes `Title 23`), whichever way it was read. The rules are in [domain/README.md](../src/docingest/domain/README.md#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy). OCR pages are never restructured.
 
 ### Images
 

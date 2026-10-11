@@ -196,7 +196,7 @@ The prompts:
   - the number of a numbered equation stays inside the display as `\tag{n}` (the model used to drop most of them);
   - a `#` heading only where the page shows a heading, and no table header row or column that is not printed;
   - no transcription of words that are part of a figure, photo, diagram or cover picture, while its caption is transcribed;
-  - a contents page is written as entry and page number, without dot leaders (the model used to return them on some runs and not on others);
+  - a contents page is written as entry and page number, without dot leaders (the model used to return them on some runs and not on others; the pipeline also collapses any that remain, see [Dot leaders](../../../../README.md#dot-leaders-on-contents-lines));
   - no running headers, running footers, number of the page itself or line-break hyphenation, and no commentary.
 
   The prompt is part of the engine fingerprint, so editing it makes every cached OCR result be computed again. The other profiles keep their own prompts.

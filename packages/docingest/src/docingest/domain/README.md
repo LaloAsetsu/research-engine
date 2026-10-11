@@ -25,7 +25,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 | `models.py` | `SourceKind`, `PageMethod`, `PageSignals`, `PageProbe`, `ModelRef`, `SourceMetadata`, `PageRecord`, `DocumentManifest` (pydantic models and `StrEnum`s) | every layer |
 | `routing.py` | `RoutingPolicy` (thresholds, the `[routing]` config section), `decide()`, and the blank-page rule (`could_be_blank`, `is_blank`, `blank_probe`) | `IngestService` for every PDF page, `config.AppConfig.routing` |
 | `ocr_guards.py` | `OcrGuards` (thresholds), `OutputProblem`, `find_problem`, `is_looping`, `retry_max_tokens`, `duplicate_pages` | the OCR adapters' retry ladder, `IngestService` |
-| `text.py` | `HYPHEN_MARK`, `garbage_ratio`, `alpha_ratio`, `text_vocabulary`, `clean_text_layer`, `render_markdown`, `split_pages` | PDF adapter (signals), `IngestService` (clean-up, rendering), synthetic benchmark suite (clean reference text), PaperQA2 adapter and hook, `eval-ocr` command (splitting) |
+| `text.py` | `HYPHEN_MARK`, `garbage_ratio`, `alpha_ratio`, `text_vocabulary`, `clean_text_layer`, `collapse_dot_leaders`, `render_markdown`, `split_pages` | PDF adapter (signals), `IngestService` (clean-up, rendering), synthetic benchmark suite (clean reference text), PaperQA2 adapter and hook, `eval-ocr` command (splitting) |
 | `layout.py` | `TextLine`, `PageLayout`, `StructuredPage` (what a PDF adapter reports about a page's lines) | `PdfPage.layout()`, `IngestService` |
 | `furniture.py` | `repeated_lines`, `page_numbers` (running headers, running footers, page numbers) | `structure.py` |
 | `headings.py` | `line_style`, `page_styles`, `level`, `is_marker`, `is_caption` | `structure.py` |
@@ -368,7 +368,7 @@ A two-page PDF whose first page has a usable text layer and whose second page is
       "removed_lines": []
     }
   ],
-  "pipeline_version": "0.4.0",
+  "pipeline_version": "0.4.1",
   "config_hash": "1a2b3c4d5e6f",
   "ocr_model": {
     "repo_id": "mlx-community/Qwen3-VL-4B-Instruct-4bit",
@@ -492,6 +492,7 @@ Pure string functions: quality signals for a PDF text layer, its clean-up, and t
 | `alpha_ratio` | `(text: str) -> float` | Share of letters among non-space characters. |
 | `text_vocabulary` | `(*texts: str) -> set[str]` | Lower-cased word set used to decide de-hyphenation. |
 | `clean_text_layer` | `(text: str, vocab: set[str] \| None = None) -> str` | Normalize a PDF text layer. |
+| `collapse_dot_leaders` | `(text: str) -> str` | Remove the dot leaders between an entry and its page number on contents lines. |
 | `render_markdown` | `(manifest: DocumentManifest, texts: list[str]) -> str` | Build `document.md` from a manifest and its page texts. |
 | `split_pages` | `(markdown: str) -> dict[int, str]` | Inverse of `render_markdown`: page number to page text. |
 
@@ -524,6 +525,24 @@ Applied to the text of every text-layer page whose reader gave no layout, and as
 | `transduc\x02tion` | (empty set) | `transduc-tion` |
 | `sequence\x02aligned` | no `sequencealigned` | `sequence-aligned` |
 | `2019-\r\n2020` | any | `2019-2020` |
+
+### `collapse_dot_leaders(text)`
+
+`Title . . . . . 23` becomes `Title 23`. Applied by `IngestService` to the text of every PDF and image page after reading, so a contents page is the same whether the model wrote the leaders or not. Line by line, only the last run of dots on a line is looked at. A run is dots, middle dots (`·`, `∙`, `⋅`) and ellipsis characters (`…`, counted as three dots), with any number of spaces, tabs or other blanks between them (`.....  .....` and `.  .  .  .` are one run). The line changes when:
+
+- the run has at least 4 dots and what follows it, after surrounding spaces, is a page number: digits (1 to 4), a well formed Roman numeral below 400 in lower or upper case (`iii`, `xiv`, `CCCXCIX`; a word that happens to be made of those letters, such as `mild`, `civil`, `mix` or `did`, is not one), a letter, a hyphen and digits (`A-12`) or two numbers joined by a hyphen (`3-14`); the result is the text before the run, a space and the page number (or only the number when nothing comes before the run);
+- or the run has at least 6 dots, text comes before it and nothing follows it: the run is removed.
+
+Anything else is returned as it was: `...` and `. . .` (ellipses of prose), `trailed off....` (an ellipsis and a full stop), `1.2.3` (a section number: the dots are not a run), a run followed by words, a run in the middle of a sentence, a line of only dots. The function is idempotent (one pass is enough, whatever the blanks between the dots) and returns its argument when the text has no dot character.
+
+| Input | Output |
+|---|---|
+| `Title . . . . . 23` | `Title 23` |
+| `1.2.3 Heaps ........ 17` | `1.2.3 Heaps 17` |
+| `Preface ...... xiv` | `Preface xiv` |
+| `Wait... what?` | unchanged |
+| `Title ... 23` | unchanged |
+| `Wait .... did` | unchanged (`did` is not a page number) |
 
 ### Markdown format: `render_markdown` and `split_pages`
 
@@ -700,7 +719,7 @@ The domain is small and everything depends on it, so changes ripple outward. Che
 | New `PageMethod` | The value must consist of word characters only (letters, digits, underscore): `split_pages` recognizes markers with `method=(\w+)`. |
 | New `DocumentManifest` or `PageRecord` field | Give it a default. Stores load manifests with `model_validate_json`; the filesystem store treats a manifest that fails validation as a cache miss and `corpus()` skips it with a warning, so a required field would make every stored result a miss. |
 | New `RoutingPolicy` field | Give it a default and use it in `decide()`. No cache work is needed: the policy JSON is part of the PDF cache key, so PDFs are re-processed automatically (and only PDFs). Add a key to `[routing]` in `config/pipeline.toml` if it should be tunable there. |
-| Different logic in `decide`, `clean_text_layer`, `structure_pages` or `render_markdown` | Bump `PIPELINE_VERSION` in `application/ingest.py`. Code changes are not part of any adapter fingerprint, so without the bump cached results produced by the old logic would still be served. |
+| Different logic in `decide`, `clean_text_layer`, `collapse_dot_leaders`, `structure_pages` or `render_markdown` | Bump `PIPELINE_VERSION` in `application/ingest.py`. Code changes are not part of any adapter fingerprint, so without the bump cached results produced by the old logic would still be served. |
 | New error type | Subclass the closest existing error so that existing handlers keep working. Put adapter-specific errors in the adapter module, as `OcrServerError` does. |
 
-Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_chunking.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).
+Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).

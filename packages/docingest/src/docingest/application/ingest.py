@@ -38,7 +38,12 @@ from ..domain.routing import (
     is_page_number,
 )
 from ..domain.structure import structure_pages
-from ..domain.text import clean_text_layer, render_markdown, text_vocabulary
+from ..domain.text import (
+    clean_text_layer,
+    collapse_dot_leaders,
+    render_markdown,
+    text_vocabulary,
+)
 from ..ports import (
     DocumentConverter,
     DocumentStore,
@@ -51,7 +56,7 @@ from ..ports import (
 )
 from .ink import ink_ratio
 
-PIPELINE_VERSION = "0.4.0"
+PIPELINE_VERSION = "0.4.1"
 SIDECAR_SUFFIX = ".meta.json"  # optional SourceMetadata next to an input file
 
 Log = Callable[[str], None]
@@ -353,8 +358,32 @@ class IngestService:
             doc.close()
 
         self._drop_repeats(records, texts, raw_layers, ocr_context)
-        self._write_text_layers(records, texts, raw_layers, layouts)
+        self._finish_pages(records, texts, raw_layers, layouts)
         return records, texts, title, total
+
+    def _finish_pages(
+        self,
+        records: list[PageRecord],
+        texts: list[str],
+        raw_layers: dict[int, str],
+        layouts: dict[int, PageLayout],
+    ) -> None:
+        """Last steps on the pages of a PDF: the text of the text-layer pages, then the
+        clean-up that every page gets."""
+        self._write_text_layers(records, texts, raw_layers, layouts)
+        self._collapse_leaders(records, texts)
+
+    @staticmethod
+    def _collapse_leaders(records: list[PageRecord], texts: list[str]) -> None:
+        """Contents lines lose their dot leaders, whichever way the page was read.
+
+        Runs after the output checks and the text-layer cleaning, which see the text as it
+        came; ``n_chars`` counts the text that is written.
+        """
+        for i, text in enumerate(texts):
+            if (collapsed := collapse_dot_leaders(text)) != text:
+                texts[i] = collapsed
+                records[i].n_chars = len(collapsed)
 
     def _write_text_layers(
         self,
@@ -396,6 +425,7 @@ class IngestService:
             records.append(record)
             texts.append(text)
         self._drop_repeats(records, texts, {}, {})
+        self._collapse_leaders(records, texts)
         return records, texts, total
 
     def _convert(

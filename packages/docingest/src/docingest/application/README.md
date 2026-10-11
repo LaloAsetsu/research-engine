@@ -240,7 +240,7 @@ define their own suite and engine (see [`benchmark.py`](#benchmarkpy-ocr-benchma
 
 | Name | Kind | Description |
 |---|---|---|
-| `PIPELINE_VERSION` | `str`, currently `"0.4.0"` | Version of the ingestion logic. Part of every cache key and of every manifest. Re-exported as `docingest.__version__`. See [Versioning](#versioning-pipeline_version). |
+| `PIPELINE_VERSION` | `str`, currently `"0.4.1"` | Version of the ingestion logic. Part of every cache key and of every manifest. Re-exported as `docingest.__version__`. See [Versioning](#versioning-pipeline_version). |
 | `SIDECAR_SUFFIX` | `str`, `".meta.json"` | Suffix of the optional metadata sidecar next to an input file: `paper.pdf` has the sidecar `paper.pdf.meta.json`. |
 | `Log` | type alias | `Callable[[str], None]`, the progress logger every service accepts. |
 | `IngestOptions` | frozen dataclass | Run options, see below. |
@@ -373,7 +373,13 @@ from every raw text layer and every OCR text of the document:
 
 A page whose reader gave no layout (an empty `PageLayout`) keeps the old behaviour:
 `domain.text.clean_text_layer` on its flat text. Each text-layer record's `n_chars` is set
-after this step. The rules are in the [domain README](../domain/README.md). The routing
+after this step.
+
+As the last step of a PDF or image, every page text goes through
+`domain.text.collapse_dot_leaders` (`Title . . . . . 23` becomes `Title 23`), OCR pages
+as well as text-layer pages, and `n_chars` is set again for a page that changed. It runs
+after the output checks and the fallback to the text layer, so those see the text as it
+came. Converted kinds are not touched. The rules are in the [domain README](../domain/README.md). The routing
 thresholds are described in
 [ADR 0002](../../../docs/adr/0002-per-page-routing-and-content-addressed-cache.md) and
 the [domain README](../domain/README.md).

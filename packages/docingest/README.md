@@ -8,7 +8,7 @@ docingest is a document normalization layer for a research agent. It takes a res
 - arXiv papers are fetched as LaTeX source, so math, tables and section structure arrive intact instead of being recovered from a rendered PDF.
 - Everything is pinned and content-addressed: `uv.lock`, model commits, input checksums, and output directories named after the input's sha256.
 
-Package: `docingest` 0.4.0, Python 3.12, managed with [uv](https://docs.astral.sh/uv/). Source in [`src/docingest/`](src/docingest/README.md).
+Package: `docingest` 0.4.1, Python 3.12, managed with [uv](https://docs.astral.sh/uv/). Source in [`src/docingest/`](src/docingest/README.md).
 
 ## Contents
 
@@ -60,6 +60,7 @@ The codebase uses a hexagonal (ports and adapters) architecture, so the OCR mode
 - **Per-page OCR routing for PDFs.** Rules taken from Marker and olmOCR, and one for scans that carry an old OCR layer, decide per page between the embedded text layer and OCR, and every matching rule is recorded as a reason; a page with no text and no ink is blank and never reaches OCR ([routing](#per-page-pdf-routing), [ADR 0002](docs/adr/0002-per-page-routing-and-content-addressed-cache.md)).
 - **Local vision-language OCR.** In-process with mlx-vlm on Apple Silicon, or over HTTP to any OpenAI-compatible server. Per-model profiles set the prompt, input size, output clean-up and generation limits from each model's card; one retry handles truncated or invalid outputs, and the output is checked for loops, text no page could hold and text repeated across pages ([OCR](#ocr-models-and-benchmark)).
 - **Structure for text-layer pages.** Running headers, running footers and page numbers are left out of the page text (and listed in the manifest), the lines of a paragraph are joined, and headings are marked with `#` from their font size and weight ([text-layer structure](#text-layer-structure)).
+- **Contents lines without dot leaders.** `Title . . . . . 23` becomes `Title 23` on every PDF and image page, whichever way it was read, so a contents page does not change with the model's choice ([dot leaders](#dot-leaders-on-contents-lines)).
 - **Document-level de-hyphenation.** A line-end hyphen in the text layer is removed only when the joined word occurs elsewhere in the same document.
 - **LaTeX-first arXiv crawler.** Search by arXiv query syntax or by id list, polite rate limiting shared by every request, source-first download with PDF fallback, license lookup through OAI-PMH, and metadata sidecars ([crawl](#arxiv-crawl), [ADR 0003](docs/adr/0003-latex-first-for-arxiv.md)).
 - **Robust LaTeX conversion.** Safe archive extraction, arXiv-style main-file detection, a Python flattener for includes, pandoc in `--sandbox` mode with a timeout and heap cap, and a pylatexenc plain-text fallback ([LaTeX](#latex-conversion)).
@@ -206,7 +207,17 @@ A PDF text layer is a stream of characters in the order the producer wrote them:
 - **Hyphenation**: a hyphen at a line end is dropped when the joined word occurs elsewhere in the document, otherwise it is kept (`2019-` and `2020` stays `2019-2020`).
 - **Headings** are marked `#` to `####` when a line is set larger than the body text (the most common type size of the document), or bold and a little larger, or a section number or title in about the body size. The level follows the size (`#` for a title) and the depth of a section number (`2.1` is `###`).
 
-Everything is conservative: when a rule is not sure the text stays as the text layer wrote it, and nothing changes for math (formulas are left as the text layer has them), OCR pages, images, LaTeX, office and text inputs. A PDF read with `--max-pages 1` has no other page to compare with, so only page numbers are removed. Only pages routed to the text layer are structured: a page that is blank, that keeps a few characters because it has no other ink, or whose layer stands in for rejected OCR output keeps its flat text, cleaned as before. The rules and their thresholds are in [domain/README.md](src/docingest/domain/README.md#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy); they are constants, not configuration. Since the text-layer output changed, the pipeline version is 0.4.0 and every cached result (PDF, LaTeX, office, text, image) is computed again once.
+Everything is conservative: when a rule is not sure the text stays as the text layer wrote it, and nothing changes for math (formulas are left as the text layer has them), OCR pages, images, LaTeX, office and text inputs. A PDF read with `--max-pages 1` has no other page to compare with, so only page numbers are removed. Only pages routed to the text layer are structured: a page that is blank, that keeps a few characters because it has no other ink, or whose layer stands in for rejected OCR output keeps its flat text, cleaned as before. The rules and their thresholds are in [domain/README.md](src/docingest/domain/README.md#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy); they are constants, not configuration. Since the text-layer output changed, the pipeline version went to 0.4.0, and to 0.4.1 for the [dot-leader](#dot-leaders-on-contents-lines) change: each time every cached result (PDF, LaTeX, office, text, image) is computed again once.
+
+#### Dot leaders on contents lines
+
+A contents page joins each entry to its page number with a run of dots. A text layer has them as typeset, and a vision model writes them on one run and leaves them out on the next, so the same page would come out differently each time. After a PDF or image has been read, `domain.text.collapse_dot_leaders` removes them from every page, text layer or OCR: `Title . . . . . 23` and `Title.........23` become `Title 23`. The rule is narrow on purpose:
+
+- the line must end with a run of at least four dots (spaced or not; middle dots and ellipsis characters count too) followed by a page number: Arabic (`23`), Roman below 400 and well formed (`xiv`, `XIV`; not a word such as `mild`), lettered (`A-12`) or `3-14`; a run of six or more at the end of a line with nothing after it is removed too (the title of an entry whose number is on the next line);
+- an ellipsis of prose (`...`, `. . .`, `trailed off....`), a section number (`1.2.3`), dots inside a sentence and a line that goes on after the run are not touched;
+- converted inputs (LaTeX, office, text) are not changed, and the output checks of the OCR engine (loops, length, repeated pages) see the text as the model wrote it.
+
+`n_chars` of the page record counts the collapsed text. The OCR prompt also asks for contents without leaders ([OCR adapters](src/docingest/adapters/ocr/README.md)); the collapse makes the result the same when the model ignores it.
 
 ### Inputs and how each is handled
 
@@ -413,7 +424,7 @@ The text of a `text_layer` page is Markdown: paragraphs separated by a blank lin
 ### Caching and invalidation
 
 - **Document identity.** `doc_id` is the sha256 of the input's bytes; the canonical directory is its first 16 hex characters.
-- **Cache key.** `config_hash` is the first 12 hex characters of the sha256 of the pipeline version (`0.4.0`), the source kind, the `ocr_all` flag and the fingerprints of the adapters that produce that kind:
+- **Cache key.** `config_hash` is the first 12 hex characters of the sha256 of the pipeline version (`0.4.1`), the source kind, the `ocr_all` flag and the fingerprints of the adapters that produce that kind:
 
   | Kind | Parts of `config_hash` besides version, kind and `ocr_all` |
   |---|---|
@@ -886,7 +897,7 @@ pytest runs with `--strict-markers`; the markers are `model`, `network` and `slo
 - **v0.1:** first prototype: PDF text layer plus Qwen3-VL OCR, with PaperQA2 integration.
 - **v0.2:** 26 defects found by adversarial review and fixed (pdfium hyphen markers, cache variants, token windows, pinning, and more).
 - **v0.3:** hexagonal architecture, LaTeX ingestion and the arXiv crawler, the OpenAI-compatible OCR adapter, the benchmark harness, and quality gates.
-- **v0.4:** text-layer pages come out as Markdown with running headers and page numbers removed, paragraphs joined and headings marked. The current version is 0.4.0.
+- **v0.4:** text-layer pages come out as Markdown with running headers and page numbers removed, paragraphs joined and headings marked. 0.4.1 also collapses the dot leaders of contents lines on text-layer, OCR and image pages (and asks the `markdown` OCR profile for equation numbers, no added headings and no text read from pictures). The current version is 0.4.1.
 
 ## License
 
