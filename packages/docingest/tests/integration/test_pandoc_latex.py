@@ -8,6 +8,7 @@ pandoc loop forever, a natbib .bbl, a commented-out include and verbatim code.
 import gzip
 import io
 import os
+import re
 import tarfile
 import time
 from pathlib import Path
@@ -24,6 +25,7 @@ from docingest.ports import DocumentConverter
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "latex"
 PAPER = FIXTURES / "paper"
+REVTEX = FIXTURES / "revtex"
 TITLES = [
     "Abstract",
     "Introduction",
@@ -152,6 +154,127 @@ def test_self_referential_style_macros_do_not_hang(tmp_path):
     assert time.perf_counter() - t0 < 10
     assert conv.method == PageMethod.LATEX and "Converted quickly." in text_of(conv)
     assert any("\\normalsize" in w for w in conv.warnings)
+
+
+@needs_pandoc
+def test_revtex_paper_converts_with_pandoc_and_keeps_every_reference():
+    # The .bbl of a REVTeX-style bibliography: @ helper macros, an \href with a line break
+    # before its arguments, \href@noop and \Eprint. Each of these alone made pandoc stop
+    # (the plain-text fallback) or drop the whole list without an error. The text also
+    # cites with an empty key and a key with a dollar sign.
+    conv = CONVERTER.convert(REVTEX / "main.tex")
+
+    assert conv.method == PageMethod.LATEX and not conv.degraded
+    assert conv.warnings == []
+    assert [s.title for s in conv.segments] == ["Abstract", "Introduction", "Results", "References"]
+    text = text_of(conv)
+    assert "Lanterns drift with the tide [@quill31; @tallow29]." in text
+    assert "$\\left|0\\right\\rangle$ is used as the reference [@marsh30; @lamp_x24_32]" in text
+    refs = text.partition("# References")[2].replace("\xa0", " ")  # ~ in the names
+    assert re.findall(r"^\d+\.  \[@(\w+)\]", refs, re.M) == [
+        "quill31",
+        "tallow29",
+        "marsh30",
+        "lamp_x24_32",
+    ]
+    for entry in [
+        "I. Quill and T. Marrow, [Journal of Imaginary Hydrology **12**, 101 (2031)]"
+        "(https://example.org/lanterns/quill31)",
+        "B. Tallowick, Basin Letters **4**, 7 (2029)",  # \href@noop
+        "O. Marsh, *Lanterns of the Low Marsh*",
+        "L. Lamp, Preprint on tidal wicks, [arXiv:3201.00001](https://example.org/abs/3201.00001)",
+    ]:
+        assert entry in refs
+    for junk in ["bibfield", "bibinfo", "BibitemShut", "href@noop", "\\@"]:
+        assert junk not in text
+
+
+@needs_pandoc
+def test_nature_style_bibliography_helpers_still_expand(tmp_path):
+    # Helpers without an @ are not shimmed: dropping them left entries as ". . , ()."
+    src = tmp_path / "main.tex"
+    src.write_text(
+        DOC
+        % (
+            "\\section{Intro}\nSee \\cite{reed30}.\n"
+            "\\begin{thebibliography}{1}\n"
+            "\\providecommand{\\bibinfo}[2]{#2}\n\\providecommand{\\bibfield}[2]{#2}\n"
+            "\\bibitem{reed30}\n\\bibfield{author}{\\bibinfo{author}{Reed, A.}} "
+            "\\bibfield{title}{\\bibinfo{title}{Tidal wicks}} (\\bibinfo{year}{2030}).\n"
+            "\\end{thebibliography}"
+        )
+    )
+    conv = CONVERTER.convert(src)
+    assert conv.method == PageMethod.LATEX
+    assert "1.  [@reed30] Reed, A. Tidal wicks (2030)." in text_of(conv)
+
+
+@needs_pandoc
+def test_small_constructs_that_stopped_pandoc_convert(tmp_path):
+    src = tmp_path / "main.tex"
+    src.write_text(
+        "\\documentclass{article}\n"
+        "\\global\\long\\def\\ket#1{|#1\\rangle}\n"
+        "\\newcolumntype{P}[1]{>{\\centering\\arraybackslash}p{#1}}\n"
+        "\\begin{document}\n"
+        "\\section{Setup}\\label[app]{sec:setup}\n"
+        "The state $\\ket{0}$ is cited as \\cite{a$b,,c}.\\vskip 3pt plus 1fil\n"
+        "\\begin{table}\\caption{\\raggedright Counts}\n"
+        "\\begin{tabular}{lp{2cm}}x & 1\\\\\\end{tabular}\\end{table}\n"
+        "\\end{document}\n"
+    )
+    conv = CONVERTER.convert(src)
+    assert conv.method == PageMethod.LATEX and not conv.degraded
+    text = text_of(conv)
+    assert "$|0\\rangle$ is cited as [@a_x24_b; @c]." in text
+    assert (
+        "|:----|:----|\n| x   | 1   |\n\n:  Counts" in text
+    )  # pandoc 3.9 drops a table with \\raggedright
+
+
+@needs_pandoc
+def test_ieeetran_style_titles_survive_the_bibliography_helpers(tmp_path):
+    # IEEEtran writes the title of an entry through \BIBforeignlanguage, whose body uses
+    # \csname; making it empty deleted every title.
+    src = tmp_path / "main.tex"
+    src.write_text(
+        DOC
+        % (
+            "\\section{Intro}\nSee \\cite{reed30}.\n"
+            "\\begin{thebibliography}{1}\n"
+            "\\providecommand{\\BIBforeignlanguage}[2]{{\\expandafter\\ifx\\csname l@#1\\endcsname"
+            "\\relax \\typeout{** WARNING: unknown language #1}\\else\\language=\\csname l@#1"
+            "\\endcsname\\fi #2}}\n"
+            "\\bibitem{reed30}\nA. Reed, \\BIBforeignlanguage{en}{``Tidal wicks in shallow basins,''} "
+            "\\BIBforeignlanguage{en}{\\emph{Basin Letters}}, vol. 4, 2030.\n"
+            "\\end{thebibliography}"
+        )
+    )
+    conv = CONVERTER.convert(src)
+    assert conv.method == PageMethod.LATEX
+    text = text_of(conv)
+    assert "Tidal wicks in shallow basins," in text and "*Basin Letters*" in text
+    assert "vol. 4, 2030" in text
+
+
+@needs_pandoc
+def test_saved_and_redefined_macros_keep_their_meaning_and_convert_quickly(tmp_path):
+    # \xdef must stay: as \def the save-and-redefine idiom loops until the timeout.
+    src = tmp_path / "main.tex"
+    src.write_text(
+        DOC
+        % (
+            "\\newcommand{\\X}{base}\n\\xdef\\savedX{\\X}\n\\renewcommand{\\X}{[\\savedX]}\n"
+            "\\section{Idiom}\nThe macro prints \\X here.\n"
+        )
+    )
+    t0 = time.perf_counter()
+    conv = PandocLatexConverter(LatexConfig(timeout_s=30)).convert(src)
+    assert time.perf_counter() - t0 < 10
+    assert conv.method == PageMethod.LATEX and not conv.degraded
+    assert "The macro prints \\[base\\]here." in text_of(
+        conv
+    )  # no space before "here" in pandoc 3.9
 
 
 def fake_pandoc(tmp_path: Path, script: str) -> str:

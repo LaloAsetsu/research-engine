@@ -47,7 +47,7 @@ from .latex_source import (
     verbatim_parts,
 )
 
-REVISION = 2  # bump when this adapter's output changes for the same pandoc / pylatexenc
+REVISION = 3  # bump when this adapter's output changes for the same pandoc / pylatexenc
 # Markdown that keeps $math$, $$display$$, pipe tables and [@citations], without raw
 # HTML/TeX or attribute syntax (gfm would drop the citations).
 _DISABLED = (

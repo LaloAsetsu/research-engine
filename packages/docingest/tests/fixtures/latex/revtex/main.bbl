@@ -1,0 +1,52 @@
+%apsrev4-2.bst invented sample, shortened
+\begin{thebibliography}{4}%
+\makeatletter
+\providecommand \@ifxundefined [1]{%
+ \@ifx{#1\undefined}
+}%
+\providecommand \@ifnum [1]{%
+ \ifnum #1\expandafter \@firstoftwo
+ \else \expandafter \@secondoftwo
+ \fi
+}%
+\providecommand \@firstofone [1]{#1}%
+\providecommand \@gobble [1]{}%
+\providecommand \bibinfo [0]{\@secondoftwo}%
+\providecommand \bibfield [0]{\@secondoftwo}%
+\providecommand \BibitemOpen [0]{}%
+\providecommand \bibnamefont [1]{#1}%
+\providecommand \bibfnamefont [1]{#1}%
+\providecommand \citenamefont [1]{#1}%
+\providecommand \href@noop [0]{\@secondoftwo}%
+\providecommand \href [0]{\begingroup \@sanitize@url \@href}%
+\providecommand \Eprint [0]{\href }%
+\providecommand \BibitemShut [1]{\csname bibitem#1\endcsname}%
+\let\auto@bib@innerbib\@empty
+%</preamble>
+\bibitem [{Quill and Marrow(2031)}]{quill31}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {I.}~\bibnamefont {Quill}}
+    and\ \bibinfo {author} {\bibfnamefont {T.}~\bibnamefont {Marrow}},\ }\href
+  {https://example.org/lanterns/quill31} {\bibfield  {journal} {\bibinfo
+  {journal} {Journal of Imaginary Hydrology}\ }\textbf {\bibinfo {volume}
+  {12}},\ \bibinfo {pages} {101} (\bibinfo {year} {2031})}\BibitemShut {NoStop}%
+\bibitem [{Tallowick(2029)}]{tallow29}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {B.}~\bibnamefont
+  {Tallowick}},\ }\href@noop {} {\bibfield  {journal} {\bibinfo  {journal}
+  {Basin Letters}\ }\textbf {\bibinfo {volume} {4}},\ \bibinfo {pages} {7}
+  (\bibinfo {year} {2029})}\BibitemShut {NoStop}%
+\bibitem [{Marsh(2030)}]{marsh30}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {O.}~\bibnamefont
+  {Marsh}},\ }\bibfield  {title} {\emph {\bibinfo {title} {Lanterns of the Low
+  Marsh}},\ }\href@noop {} {} (\bibinfo {publisher} {Verdigris Press},\ \bibinfo
+  {year} {2030})\BibitemShut {NoStop}%
+\bibitem [{Lamp(2032)}]{lamp$32}%
+  \BibitemOpen
+  \bibfield  {author} {\bibinfo {author} {\bibfnamefont {L.}~\bibnamefont
+  {Lamp}},\ }\bibfield  {title} {\bibinfo {title} {Preprint on tidal wicks}},\
+  \Eprint
+  {https://example.org/abs/3201.00001} {arXiv:3201.00001} \BibitemShut
+  {NoStop}%
+\end{thebibliography}

@@ -413,9 +413,81 @@ def package_macros(sty: str) -> str:
     return "\n".join(keep)
 
 
+# pandoc 3.9 reads a citation key of letters (any script), digits and ``_:.+/-``; an empty key
+# (``\cite{a,,b}``) or a ``$``, a curly quote, a non-breaking hyphen or a brace in one stops
+# the run.
+_KEY_OTHER = re.compile(r"[^\w:.+/\-]")
+_CITE_COMMAND = re.compile(
+    r"(\\(?:[cC]ite[a-zA-Z]*|[pP]arencite|[tT]extcite|[aA]utocite|[fF]ootcite|nocite)\*?"
+    r"\s*(?:\[[^\]]{0,200}\]\s*){0,2})\{"
+)
+# What precedes a citation command that is being defined, as in ``\edef\citenum{...}``.
+_DEFINING = re.compile(r"(?:\\[a-z]*def|\\let|command\*?\s*\{?|\\Declare[A-Za-z]*\s*\{?)\s*$")
+_CITE_LOOKBEHIND = 30  # chars before a command in which to look for its definition
+
+
+_KEY_COMMENT = re.compile(r"(?<!\\)%[^\n]*")  # a comment line inside the argument
+
+
+def clean_citation_keys(keys: str) -> str:
+    """A comma-separated key list that pandoc reads: empty keys dropped, braces removed,
+    each other character it does not accept written as ``_x<hex code>_`` (``a$b`` is
+    ``a_x24_b``), so two keys that differ in such a character stay different. A ``%``
+    comment inside the list is dropped, as TeX and pandoc do."""
+    keys = _KEY_COMMENT.sub("", keys)
+    cleaned = (
+        _KEY_OTHER.sub(_escape_key_char, k.replace("{", "").replace("}", "").strip())
+        for k in keys.split(",")
+    )
+    return ",".join(k for k in cleaned if k)
+
+
+def _escape_key_char(match: re.Match[str]) -> str:
+    return f"_x{ord(match.group()):x}_"
+
+
+def sanitize_citation_keys(text: str) -> str:
+    """Apply :func:`clean_citation_keys` to the argument of every citation command.
+
+    A command with no key left disappears with its options. The definition of a citation
+    macro (``\\edef\\citenum{...}``), a key that is a macro parameter (``\\cite{#1}``) and
+    ``\\nocite{*}`` are not citations of one key and stay as they are.
+    """
+    parts: list[str] = []
+    pos = 0
+    pairs = brace_pairs(text)
+    for m in _CITE_COMMAND.finditer(text):
+        if m.start() < pos:
+            continue
+        start = max(0, m.start() - _CITE_LOOKBEHIND)
+        if _DEFINING.search(text, start, m.start()):
+            continue
+        end = _matched(pairs, m.end() - 1)
+        if end is None or "#" in text[m.end() : end] or text[m.end() : end - 1].strip() == "*":
+            continue
+        keys = clean_citation_keys(text[m.end() : end - 1])
+        parts.append(text[pos : m.start()])
+        if keys:
+            parts.append(f"{m.group(1)}{{{keys}}}")
+        pos = end
+    parts.append(text[pos:])
+    return "".join(parts)
+
+
 _THEBIB_BEGIN = re.compile(r"\\begin\s*\{thebibliography\}\s*(?:\{[^{}]*\})?")
 _THEBIB_END = re.compile(r"\\end\s*\{thebibliography\}")
 _BIBITEM = re.compile(r"\\bibitem\s*(?:\[[^\]]*\])?\s*\{(?P<key>[^{}]*)\}")
+# REVTeX writes its reference entries with \href {url}<newline>{text}, and \href@noop {} for
+# an entry without URL; pandoc 3.9 then drops the whole list without an error.
+_HREF_BREAK = re.compile(r"\\href\s*(\{[^{}]*\})\s*(?=\{)")
+_HREF_NOOP = re.compile(r"\\href@noop\s*\{\}\s*")
+# REVTeX's \providecommand \Eprint [0]{\href }: the arguments of \href come after the call.
+_EPRINT = re.compile(r"\\providecommand\s*\{?\\Eprint\}?\s*(?:\[0\])?\s*\{\\href\s*\}")
+
+
+def _bibitem(match: re.Match[str]) -> str:
+    keys = clean_citation_keys(match.group("key"))
+    return f"\\item \\cite{{{keys}}} " if keys else "\\item "
 
 
 def rewrite_bibliography(text: str) -> str:
@@ -423,7 +495,11 @@ def rewrite_bibliography(text: str) -> str:
 
     pandoc prints the widest-label argument as text, drops ``\\newblock {\\em ...}``
     groups (the venue) and emits no heading; a plain enumerate avoids all three. Each
-    item starts with its key as a citation, so ``[@key]`` in the text can be matched.
+    item starts with its key as a citation, so ``[@key]`` in the text can be matched; the
+    key goes through the same clean-up as the citations in the text.
+
+    REVTeX's ``\\href`` forms that make pandoc drop the whole list are rewritten in the
+    entries and in the preamble's ``\\Eprint``.
     """
 
     def _rewrite(body: str) -> str:
@@ -439,14 +515,143 @@ def rewrite_bibliography(text: str) -> str:
             for d in macro_definitions(preamble)
             if d.name not in ("url", "doi", "href", "urlprefix")
         )
-        items = _BIBITEM.sub(
-            lambda b: f"\\item \\cite{{{b.group('key').strip()}}} ", body[first.start() :]
-        )
+        head = shim_at_macros(head, opaque=True)
+        head = _EPRINT.sub(r"\\providecommand{\\Eprint}[2]{\\href{#1}{#2}}", head)
+        items = _BIBITEM.sub(_bibitem, body[first.start() :])
+        items = _HREF_BREAK.sub(r"\\href\1", _HREF_NOOP.sub("", items))
         return (
             f"{head}\n\\section*{{References}}\n\\begin{{enumerate}}\n{items}\n\\end{{enumerate}}\n"
         )
 
     return sub_regions(text, _THEBIB_BEGIN, _THEBIB_END, _rewrite)
+
+
+# What an @-internal stands for in a macro whose whole body it is: (arguments, body).
+_AT_PLAIN = {
+    "\\@firstofone": (1, "#1"),
+    "\\@gobble": (1, ""),
+    "\\@gobbletwo": (2, ""),
+    "\\@firstoftwo": (2, "#1"),
+    "\\@secondoftwo": (2, "#2"),
+}
+_AT_OPAQUE = re.compile(rf"\\(?:csname|catcode|spacefactor){_NOT_LETTER}")
+_CSNAME = re.compile(rf"\\csname{_NOT_LETTER}")
+_ENDCSNAME = re.compile(rf"\\endcsname{_NOT_LETTER}")
+_TYPEOUT = re.compile(rf"\\typeout{_NOT_LETTER}\s*(?=\{{)")
+_PARAMETER = re.compile(r"#\d")
+
+
+def shim_at_macros(text: str, *, opaque: bool = False) -> str:
+    """Make the ``@`` helper macros of a REVTeX or natbib ``.bbl`` preamble harmless.
+
+    pandoc cannot read a definition of an ``@`` name (``\\providecommand \\@ifxundefined
+    [1]{...}``): it reads ``\\@`` and stops at ``#1``. Such definitions are dropped. A
+    macro whose whole body is one ``@`` internal (``\\bibinfo [0]{\\@secondoftwo}``) gets the
+    plain definition that does the same. Any other body that uses an ``@`` stays: dropping
+    those lost tables and headings.
+
+    With ``opaque`` (the preamble of a bibliography, where :func:`rewrite_bibliography` uses
+    it) a macro built on ``\\csname``, ``\\catcode`` or ``\\spacefactor``
+    (``\\BibitemShut``) also gets a body that pandoc can read: empty, or just the arguments
+    it passes on outside ``\\csname`` and ``\\typeout`` (IEEEtran's ``\\BIBforeignlanguage``
+    prints its second argument, the title).
+    """
+    parts: list[str] = []
+    pos = 0
+    for d in macro_definitions(text):
+        body = " ".join(d.body.split())
+        if "@" in d.name:
+            replacement = ""
+        elif body in _AT_PLAIN:
+            replacement = _plain_definition(text, d, *_AT_PLAIN[body])
+        elif opaque and _AT_OPAQUE.search(body):
+            replacement = _plain_definition(text, d, _arguments(text, d), _passed_on(d.body))
+        else:
+            continue
+        parts += (text[pos : d.start], replacement)
+        pos = d.end
+    parts.append(text[pos:])
+    return "".join(parts)
+
+
+def _passed_on(body: str) -> str:
+    """The macro parameters of ``body`` that are used outside ``\\csname...\\endcsname`` and
+    ``\\typeout{...}``, in order of first use, as the body that keeps them."""
+    body = sub_regions(body, _CSNAME, _ENDCSNAME, lambda _: " ")
+    pairs = brace_pairs(body)
+    parts: list[str] = []
+    pos = 0
+    for m in _TYPEOUT.finditer(body):
+        end = _matched(pairs, m.end())
+        if m.start() < pos or end is None:
+            continue
+        parts.append(body[pos : m.start()])
+        pos = end
+    parts.append(body[pos:])
+    return "".join(dict.fromkeys(_PARAMETER.findall("".join(parts))))
+
+
+def _arguments(text: str, d: MacroDef) -> int:
+    """How many arguments the definition ``d`` declares (``[2]`` or ``#1#2``)."""
+    head = text[d.start : d.end - len(d.body) - 2]  # up to the brace that opens the body
+    if declared := re.search(r"\[(\d)\]", head):
+        return int(declared[1])
+    return len(_PARAMETER.findall(head))
+
+
+def _plain_definition(text: str, d: MacroDef, arguments: int, body: str) -> str:
+    count = f"[{arguments}]" if arguments else ""
+    return f"\\providecommand{{\\{d.name}}}{count}{{{body}}}"
+
+
+_NEWCOLUMNTYPE = re.compile(r"\\newcolumntype\s*\{[^{}]*\}\s*(?:\[\d\]\s*)?(?=\{)")
+
+
+def _drop_column_types(text: str) -> str:
+    """``\\newcolumntype{X}[n]{spec}`` removed: pandoc reads a tabular without it."""
+    parts: list[str] = []
+    pos = 0
+    pairs = brace_pairs(text)
+    for m in _NEWCOLUMNTYPE.finditer(text):
+        if m.start() < pos:
+            continue
+        end = _matched(pairs, m.end())
+        if end is None:
+            continue
+        parts.append(text[pos : m.start()])
+        pos = end
+    parts.append(text[pos:])
+    return "".join(parts)
+
+
+_LABEL_OPTION = re.compile(r"\\label\s*\[[^\]]{0,100}\]\s*\{")  # cleveref's \label[type]{key}
+# LyX writes \global\long\def\ket#1{...}; \def does the same for pandoc.
+_DEF_PREFIX = re.compile(
+    rf"(?:\\(?:global|long|protected){_NOT_LETTER}\s*){{1,4}}\\def{_NOT_LETTER}"
+)
+# pandoc reads \gdef, and \edef or \xdef without parameters, with the right meaning; it stops
+# at \edef\cs#1{...}, where \def is the closest form.
+_DEF_PARAMETERS = re.compile(rf"\\[ex]def{_NOT_LETTER}(?=\s*\\[a-zA-Z@]+\s*#)")
+_GLUE = r"\s*plus\s*[\d.]+\s*\w+"
+_VSKIP = re.compile(
+    rf"\\vskip\s*(?:\\[a-zA-Z]+|-?[\d.]+\s*(?:pt|mm|cm|in|em|ex|bp|pc|sp|dd|cc)(?![a-zA-Z]))(?:{_GLUE})?(?:\s*minus\s*[\d.]+\s*\w+)?"
+)
+
+
+def simplify_layout(text: str) -> str:
+    """The layout and definition forms pandoc stops at, in their plain equivalent.
+
+    cleveref's ``\\label[type]{key}`` loses its option; LyX's ``\\global\\long\\def`` (up to
+    four prefixes) and an ``\\edef``/``\\xdef`` with parameters become ``\\def``;
+    ``\\newcolumntype`` definitions,
+    ``\\raggedright`` and ``\\vskip <glue>`` go; IEEEtran's ``\\linebreakand`` is ``\\and``.
+    """
+    text = _LABEL_OPTION.sub(r"\\label{", text)
+    text = _DEF_PARAMETERS.sub(r"\\def", _DEF_PREFIX.sub(r"\\def", text))
+    text = _drop_column_types(text)
+    text = re.sub(rf"\\linebreakand{_NOT_LETTER}", r"\\and", text)
+    text = re.sub(rf"\\raggedright{_NOT_LETTER}", " ", text)
+    return _VSKIP.sub(" ", text)
 
 
 def prepare_for_pandoc(text: str) -> tuple[str, list[str]]:
@@ -456,6 +661,7 @@ def prepare_for_pandoc(text: str) -> tuple[str, list[str]]:
     # NeurIPS/ICLR styles separate authors with \And / \AND: pandoc only knows \and.
     text = re.sub(rf"\\(?:And|AND){_NOT_LETTER}", r"\\and", text)
     text = re.sub(rf"\\today{_NOT_LETTER}", "", text)  # sandboxed pandoc prints 1970-01-01
+    text = simplify_layout(sanitize_citation_keys(shim_at_macros(text)))
     warnings = []
     if dropped:
         names = ", ".join(sorted({f"\\{n}" for n in dropped}))
