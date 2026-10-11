@@ -240,7 +240,7 @@ define their own suite and engine (see [`benchmark.py`](#benchmarkpy-ocr-benchma
 
 | Name | Kind | Description |
 |---|---|---|
-| `PIPELINE_VERSION` | `str`, currently `"0.3.1"` | Version of the ingestion logic. Part of every cache key and of every manifest. Re-exported as `docingest.__version__`. See [Versioning](#versioning-pipeline_version). |
+| `PIPELINE_VERSION` | `str`, currently `"0.4.0"` | Version of the ingestion logic. Part of every cache key and of every manifest. Re-exported as `docingest.__version__`. See [Versioning](#versioning-pipeline_version). |
 | `SIDECAR_SUFFIX` | `str`, `".meta.json"` | Suffix of the optional metadata sidecar next to an input file: `paper.pdf` has the sidecar `paper.pdf.meta.json`. |
 | `Log` | type alias | `Callable[[str], None]`, the progress logger every service accepts. |
 | `IngestOptions` | frozen dataclass | Run options, see below. |
@@ -346,8 +346,11 @@ For each page index `i` below `min(len(doc), max_pages)`:
    way `PageRecord.warnings` holds the reason. A page cut off at the token limit keeps
    its text and gets a warning. After the loop, pages whose OCR text repeats an earlier
    page's (`duplicate_pages`) are replaced the same way; the first page of a group stays.
-5. Otherwise (no OCR) the raw text layer is kept aside and the record gets
-   `method=text_layer` and `engine=pdf.fingerprint`.
+5. Otherwise (no OCR) the raw text layer and `page.layout()` (the page's lines with font
+   size, weight and position) are kept aside and the record gets `method=text_layer` and
+   `engine=pdf.fingerprint`. Only these pages have a layout: a page that falls back to its
+   text layer (after rejected OCR, or because it is blank with a few characters of text)
+   keeps its flat text.
 
 **The start-up check.** `IngestService._require_ocr()` calls `ocr.check()` (the optional
 `OcrPreflight` part of an engine) before the first page of a run that reaches OCR, for
@@ -356,12 +359,22 @@ never calls it. It raises `OcrUnavailableError`; `ingest` lets it through, the `
 command stops the batch with its message, and `CrawlService` stops the crawl. It is
 checked once per service: a success is remembered, a failure is checked again next time.
 
-The PDF is closed in a `finally` block. After the loop, the text-layer pages are cleaned
-with `domain.text.clean_text_layer`, using one vocabulary built from every raw text
-layer and every OCR text of the document. This decides whether a line-end hyphen is
-real hyphenation (`transduc-tion` becomes `transduction` when that word occurs elsewhere
-in the document) or part of a compound (kept). Each text-layer record's `n_chars` is set
-after cleaning. The routing thresholds are described in
+The PDF is closed in a `finally` block. After the loop, the text-layer pages are
+structured together with `domain.structure.structure_pages`, using one vocabulary built
+from every raw text layer and every OCR text of the document:
+
+- running headers, running footers and page numbers are taken out of the page text and
+  listed in the record's `removed_lines`;
+- the lines of a paragraph are joined, and the pieces of tables, formulas and short lines
+  keep their line breaks;
+- headings are marked with `#` from their font size and weight relative to the body text;
+- a line-end hyphen is real hyphenation (`transduc-tion` becomes `transduction` when that
+  word occurs elsewhere in the document) or part of a compound (kept).
+
+A page whose reader gave no layout (an empty `PageLayout`) keeps the old behaviour:
+`domain.text.clean_text_layer` on its flat text. Each text-layer record's `n_chars` is set
+after this step. The rules are in the [domain README](../domain/README.md). The routing
+thresholds are described in
 [ADR 0002](../../../docs/adr/0002-per-page-routing-and-content-addressed-cache.md) and
 the [domain README](../domain/README.md).
 
@@ -379,6 +392,7 @@ sequenceDiagram
     participant Route as domain.routing
     participant Ocr as OcrEngine
     participant Text as domain.text
+    participant Struct as domain.structure
     Caller->>Svc: ingest(path, options)
     Svc->>Det: detect(path)
     Det-->>Svc: (PDF, application/pdf)
@@ -400,12 +414,14 @@ sequenceDiagram
             Svc->>Ocr: transcribe(image)
             Ocr-->>Svc: OcrResult
         else text layer is usable
-            Svc->>Svc: keep the raw text layer for cleaning
+            Svc->>Page: layout()
+            Page-->>Svc: lines with size, weight and position
         end
     end
     Svc->>Doc: close() in a finally block
     Svc->>Text: text_vocabulary(raw layers and OCR texts)
-    Svc->>Text: clean_text_layer(raw, vocabulary) per text-layer page
+    Svc->>Struct: structure_pages(layouts, vocabulary)
+    Struct-->>Svc: Markdown and removed lines per text-layer page
     Svc->>Text: render_markdown(manifest, texts)
     Svc->>Store: save(manifest, markdown)
     Store-->>Svc: StoredDocument
@@ -509,6 +525,12 @@ page 2 text
 `domain.text.split_pages` is the inverse: it returns `{page number: text}`, which is how
 `eval-ocr`, the PaperQA2 adapter and the PaperQA2 hook read the pages back.
 
+The text of a `text_layer` page is Markdown: paragraphs separated by a blank line, headings
+marked with `#` to `####`, no running header, running footer or page number, and the
+footnotes behind the body text when the PDF interleaves them. Lines that belong together
+but are not prose (table rows, formula pieces, a title block) keep their line breaks. The
+lines that were taken out are in the page record's `removed_lines`.
+
 The `DocumentManifest` fields that `IngestService` fills:
 
 | Field | Value |
@@ -520,7 +542,7 @@ The `DocumentManifest` fields that `IngestService` fills:
 | `n_pages` | pages, frames or segments processed in this run |
 | `source_pages` | pages, frames or segments in the source (`n_pages < source_pages` means a partial run, `complete` is `False`) |
 | `max_pages`, `ocr_all` | the run options, for provenance (`ocr_all` is `True` only for forced-OCR PDFs) |
-| `pages` | one `PageRecord` per processed page or segment: `index`, `method`, `n_chars`, `seconds`, `engine`, and when relevant `title`, `probe`, `model`, `model_revision`, `gen_tokens`, `finish_reason` |
+| `pages` | one `PageRecord` per processed page or segment: `index`, `method`, `n_chars`, `seconds`, `engine`, and when relevant `title`, `probe`, `removed_lines` (text-layer pages), `model`, `model_revision`, `gen_tokens`, `finish_reason` |
 | `pipeline_version` | `PIPELINE_VERSION` |
 | `config_hash` | the cache key |
 | `ocr_model` | the OCR engine's `ModelRef` if at least one page used OCR, else `None` |

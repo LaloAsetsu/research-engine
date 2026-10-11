@@ -5,6 +5,9 @@ from fakes import (
     FakeConverter,
     FakeImages,
     FakeOcr,
+    FakePage,
+    ScriptedOcr,
+    blank,
     digital,
     make_service,
     scanned,
@@ -12,7 +15,8 @@ from fakes import (
 
 from docingest.application.ingest import IngestOptions
 from docingest.domain.errors import DocumentOpenError, UnsupportedInputError
-from docingest.domain.models import PageMethod, SourceKind, SourceMetadata
+from docingest.domain.layout import PageLayout, TextLine
+from docingest.domain.models import PageMethod, PageSignals, SourceKind, SourceMetadata
 from docingest.ports import Segment
 
 TEXT = "Attention is all you need. " * 10
@@ -47,6 +51,92 @@ def test_swapping_the_ocr_adapter_invalidates_the_cache(src):
     other.store = store
     other.ingest(path)
     assert other.ocr.calls == 1  # different fingerprint -> different config hash
+
+
+def structured(n: int) -> FakePage:
+    """A text-layer page that reports its lines: a running header, a heading and a paragraph."""
+
+    def line(text, y, size=10.0, bold=False, x1=500.0):
+        return TextLine(text, size, bold, 72.0, x1, y)
+
+    lines = (
+        line(f"Running title {n}", 40, 9),
+        line("Results of the study", 120, 16, True, 250),
+        line("The first line of a paragraph that goes on with", 160),
+        line("a second line that finishes it.", 172, x1=250),
+        line(str(n), 760, 9, x1=310),
+    )
+    flat = "\n".join(ln.text for ln in lines)
+    signals = PageSignals(n_chars=len("".join(flat.split())), alpha_ratio=0.9)
+    return FakePage(signals, flat, layout_=PageLayout(lines, 612.0, 792.0))
+
+
+def test_text_layer_pages_with_a_layout_are_structured_and_the_rest_keep_their_text(src):
+    svc = make_service({"p.pdf": [structured(1), structured(2), digital(TEXT)]})
+    doc = svc.ingest(src("p.pdf"))
+    markdown = svc.store.markdown(doc)
+    first, second, third = (markdown.split("<!-- page ")[i] for i in (1, 2, 3))
+    body = "# Results of the study\n\nThe first line of a paragraph that goes on with a second"
+    assert body in first and "Running title" not in first + second
+    assert third.endswith(TEXT.strip() + "\n")  # no layout: the flat text, as before
+    assert doc.manifest.pages[0].removed_lines == ["Running title 1", "1"]
+    assert doc.manifest.pages[2].removed_lines == []
+    assert doc.manifest.pages[0].n_chars == len(first.split("-->", 1)[1].strip())
+
+
+def test_a_page_that_falls_back_to_its_layer_after_rejected_ocr_is_not_structured(src):
+    """Routing sent it to OCR because its layer is unreliable: the geometry is not trusted either."""
+    fallback = structured(2)
+    fallback.signals_ = PageSignals(n_chars=fallback.signals_.n_chars, alpha_ratio=0.3)
+    fallback.image = scanned().image
+    loop = "and then the model kept going " * 20
+    svc = make_service({"p.pdf": [structured(1), fallback, structured(3)]}, ocr=ScriptedOcr(loop))
+    doc = svc.ingest(src("p.pdf"))
+    second = (
+        svc.store.markdown(doc).split("<!-- page 2 | method=text_layer -->")[1].split("<!--")[0]
+    )
+    page = doc.manifest.pages[1]
+    assert page.method == PageMethod.TEXT_LAYER and "OCR output rejected" in page.warnings[0]
+    assert page.removed_lines == [] and "#" not in second
+    assert "Running title 2" in second and "Results of the study" in second  # flat text, as before
+    first = doc.manifest.pages[0]
+    assert first.removed_lines == ["Running title 1", "1"] and first.warnings == []
+
+
+def test_blank_pages_keep_no_structure_and_do_not_disturb_their_neighbours(src):
+    svc = make_service({"p.pdf": [structured(1), blank(), structured(2), structured(3)]})
+    doc = svc.ingest(src("p.pdf"))
+    methods = [p.method for p in doc.manifest.pages]
+    assert methods == [
+        PageMethod.TEXT_LAYER,
+        PageMethod.BLANK,
+        PageMethod.TEXT_LAYER,
+        PageMethod.TEXT_LAYER,
+    ]
+    assert doc.manifest.pages[1].removed_lines == [] and doc.manifest.pages[1].n_chars == 0
+    assert doc.manifest.pages[2].removed_lines == ["Running title 2", "2"]
+    assert "Running title" not in svc.store.markdown(doc)
+
+
+def test_a_short_text_layer_with_no_other_ink_is_the_page_and_stays_flat(src):
+    index = FakePage(PageSignals(n_chars=5, alpha_ratio=1.0), "Index")
+    svc = make_service({"p.pdf": [structured(1), index, structured(2)]})
+    doc = svc.ingest(src("p.pdf"))
+    page = doc.manifest.pages[1]
+    assert page.method == PageMethod.TEXT_LAYER and page.removed_lines == []
+    assert "<!-- page 2 | method=text_layer -->\nIndex\n" in svc.store.markdown(doc)
+
+
+def test_a_result_stored_by_another_pipeline_version_is_not_served(src, monkeypatch):
+    path = src("p.pdf")
+    svc = make_service({"p.pdf": [structured(1), structured(2)]})
+    svc.ingest(path)
+    svc.ingest(path)
+    assert len(svc.store.canonical) == 1
+    monkeypatch.setattr("docingest.application.ingest.PIPELINE_VERSION", "older")
+    assert svc.config_hash(SourceKind.PDF) not in {
+        m.config_hash for m, _ in svc.store.canonical.values()
+    }
 
 
 def test_swapping_the_image_source_invalidates_image_results_only(src):

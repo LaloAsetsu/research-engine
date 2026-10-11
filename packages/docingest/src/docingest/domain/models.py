@@ -99,6 +99,7 @@ class PageRecord(BaseModel):
     # What the pipeline did about this page beyond the plain route: OCR output that was
     # rejected, or cut at the token limit. Empty for an ordinary page.
     warnings: list[str] = Field(default_factory=list)
+    removed_lines: list[str] = Field(default_factory=list)  # running headers, footers, page numbers
 
 
 class DocumentManifest(BaseModel):

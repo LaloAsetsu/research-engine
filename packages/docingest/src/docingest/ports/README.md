@@ -224,11 +224,12 @@ sequenceDiagram
             S->>O: transcribe(image)
             O-->>S: OcrResult
         else text layer is usable
-            Note over S: keep the raw text for cleaning
+            S->>P: layout()
+            P-->>S: PageLayout
         end
     end
     S->>D: close()
-    Note over S: clean_text_layer with the document vocabulary, then render_markdown
+    Note over S: structure_pages with the document vocabulary (clean_text_layer for pages without a layout), then render_markdown
     S->>St: save(manifest, markdown)
     St-->>S: StoredDocument
 ```

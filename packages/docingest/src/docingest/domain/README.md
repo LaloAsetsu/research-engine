@@ -44,7 +44,9 @@ flowchart LR
     DEC --> PRB["PageProbe: needs_ocr and reasons"]
     PRB --> REC["PageRecord: method, engine, timings"]
     RAW["raw text layer"] --> CLN["text.clean_text_layer(raw, vocab)"]
-    CLN --> TXT["page texts"]
+    LAY["PageLayout from PdfPage.layout()"] --> STR["structure.structure_pages(layouts, vocab)"]
+    STR --> TXT["page texts"]
+    CLN -->|"page without a layout"| TXT
     OCRT["OCR text"] --> TXT
     REC --> MAN["DocumentManifest"]
     META["SourceMetadata: argument, sidecar or converter"] --> MAN
@@ -116,6 +118,7 @@ classDiagram
         +int gen_tokens
         +str finish_reason
         +List~str~ warnings
+        +List~str~ removed_lines
     }
     class DocumentManifest {
         +str doc_id
@@ -161,7 +164,7 @@ A `StrEnum` naming how the text of one page or segment was produced. It is store
 
 | Member | Value | Produced by | Input kinds |
 |---|---|---|---|
-| `TEXT_LAYER` | `"text_layer"` | `IngestService`, when `decide()` finds the embedded text usable; the text is the cleaned text layer | PDF |
+| `TEXT_LAYER` | `"text_layer"` | `IngestService`, when `decide()` finds the embedded text usable; the text is the structured text layer (see [Text-layer structure](#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy)); a page whose OCR output was rejected and which falls back to its layer keeps the cleaned flat text | PDF |
 | `BLANK` | `"blank"` | `IngestService`, for a page that would go to OCR for lack of text but has at most `blank_max_chars` characters and fewer than `blank_max_ink` inked pixels; the text is empty and OCR is not called | PDF |
 | `VLM_OCR` | `"vlm_ocr"` | `IngestService` through `OcrEngine.transcribe()` (an empty page whose OCR output was rejected also has this method) | PDF pages that need OCR, every image frame |
 | `DOCLING` | `"docling"` | `DoclingConverter` | OFFICE |
@@ -247,6 +250,7 @@ Provenance of one page (PDF), frame (image) or segment (converter).
 | `gen_tokens` | `int \| None` | `None` | OCR pages | Tokens generated for the attempt whose text was kept. |
 | `finish_reason` | `str \| None` | `None` | OCR pages | Why generation stopped, for example `"stop"` or `"length"` (a truncation). |
 | `warnings` | `list[str]` | `[]` | OCR pages | What the pipeline did about the page beyond the plain route: the OCR output was rejected (`OCR output rejected (<why>); the text layer was used` or `...; the page was left empty`) or cut off at the token limit. Empty for an ordinary page; manifests written before the field existed load with `[]`. |
+| `removed_lines` | `list[str]` | `[]` | text-layer pages | The running headers, running footers and page numbers taken out of the page text, in page order, white space normalized. Empty when nothing was removed or the reader gave no layout. |
 
 ### `DocumentManifest`
 
@@ -335,7 +339,8 @@ A two-page PDF whose first page has a usable text layer and whose second page is
       "model": null,
       "model_revision": null,
       "gen_tokens": null,
-      "finish_reason": null
+      "finish_reason": null,
+      "removed_lines": ["Signal Sampling 7", "7"]
     },
     {
       "index": 1,
@@ -359,10 +364,11 @@ A two-page PDF whose first page has a usable text layer and whose second page is
       "model": "mlx-community/Qwen3-VL-4B-Instruct-4bit",
       "model_revision": "2fd8dacbdb8f1e54b8c005f081ec5bf79c56376b",
       "gen_tokens": 602,
-      "finish_reason": "stop"
+      "finish_reason": "stop",
+      "removed_lines": []
     }
   ],
-  "pipeline_version": "0.3.1",
+  "pipeline_version": "0.4.0",
   "config_hash": "1a2b3c4d5e6f",
   "ocr_model": {
     "repo_id": "mlx-community/Qwen3-VL-4B-Instruct-4bit",
@@ -375,7 +381,7 @@ A two-page PDF whose first page has a usable text layer and whose second page is
 }
 ```
 
-Note that `probe.n_chars` counts non-whitespace characters of the raw text layer, while the record's `n_chars` is the length of the cleaned page text.
+Note that `probe.n_chars` counts non-whitespace characters of the raw text layer, while the record's `n_chars` is the length of the structured page text (after the running lines were taken out and the lines joined).
 
 ## routing.py
 
@@ -563,7 +569,7 @@ Every rule is conservative. When it is not sure, the text stays as the text laye
 
 A footnote (a block in type of 90% of the body size or smaller in the lower 30% of the page, starting with `*`, `†`, a number or a similar mark, and not a caption) that the stream puts before body text is moved behind it. Hyphenation is resolved when the lines are joined: a line that ends with the marker `HYPHEN_MARK` or with a real hyphen after a letter, followed by a lowercase letter, becomes `word<HYPHEN_MARK>word` and `clean_text_layer` decides with the document vocabulary (see above). A hyphen between digits or before a capital (`2019-` and `2020`, `Qwen-2.5-` and `VL`) is kept.
 
-**Headings** (`headings.py`). The body size is the type size most characters of the document are set in (half-point steps). A line is a heading when it is at least 1.2 times the body size, or at least 1.05 times and bold. A line of about the body size (0.85 and up) needs more: if bold, a section number (`2`, `2.1`, `II.`, `A.`) or a standard section title (`Abstract`, `Conclusion`, ...); if regular, a hierarchical or Roman section number, a single number followed by a title in capitals-first words (`8. Conclusions`), a standard title, or capital letters only, and no sentence end. Lines with `=`, formulas, captions, author lines (`Firstname X. Lastname`), a running head with its page number on the outermost row (`64 3. Title`, `Title 65`), body-size lines of more than 12 words, table-of-contents entries (dot leaders, a trailing page number), list items, and lines without a word of four letters are never headings. A style that makes up more than 40% of a page, or a run of more than 3 adjacent lines in one style, is a paragraph, not a list of headings. Consecutive lines of one heading style (up to 3) are one heading. Level: `#` for 1.5 times the body size or more, otherwise `##` for a section and one more `#` per level of its number (`2.1` is `###`, `2.1.3` is `####`); capped at `####`.
+**Headings** (`headings.py`). The body size is the type size most characters of the document are set in (half-point steps). A line is a heading when it is at least 1.2 times the body size, or at least 1.05 times and bold. A line of about the body size (0.85 and up) needs more: if bold, a section number (`2`, `2.1`, `II.`, `A.`) or a standard section title (`Abstract`, `Conclusion`, ...); if regular, a hierarchical or Roman section number, a single number followed by a title in capitals-first words (`8. Conclusions`), a standard title, or capital letters only, and no sentence end. Lines with `=`, formulas, captions, author lines (`Firstname X. Lastname`), a running head with its page number on the outermost row (`64 3. Title`, `Title 65`; only when the line is not bold and not larger than 1.1 times the body, so a real section heading at the top of a page keeps its mark), body-size lines of more than 12 words, table-of-contents entries (dot leaders, a trailing page number), list items, and lines without a word of four letters are never headings. A style that makes up more than 40% of a page, or a run of more than 3 adjacent lines in one style, is a paragraph, not a list of headings. Consecutive lines of one heading style (up to 3) are one heading. Level: `#` for 1.5 times the body size or more, otherwise `##` for a section and one more `#` per level of its number (`2.1` is `###`, `2.1.3` is `####`); capped at `####`.
 
 The thresholds are module constants (`ZONE`, `SIMILAR`, `MIN_PAGES`, `BIG`, `BOLD`, ... and the ones at the top of `structure.py`); there is no configuration for them. A change to any rule changes the output of text-layer pages, so it needs a `PIPELINE_VERSION` bump.
 

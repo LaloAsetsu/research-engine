@@ -12,6 +12,7 @@ from pathlib import Path
 from PIL.Image import Image
 
 from ..domain.errors import UnsupportedInputError
+from ..domain.layout import PageLayout
 from ..domain.models import (
     DocumentManifest,
     ModelRef,
@@ -36,6 +37,7 @@ from ..domain.routing import (
     is_blank,
     is_page_number,
 )
+from ..domain.structure import structure_pages
 from ..domain.text import clean_text_layer, render_markdown, text_vocabulary
 from ..ports import (
     DocumentConverter,
@@ -49,7 +51,7 @@ from ..ports import (
 )
 from .ink import ink_ratio
 
-PIPELINE_VERSION = "0.3.1"
+PIPELINE_VERSION = "0.4.0"
 SIDECAR_SUFFIX = ".meta.json"  # optional SourceMetadata next to an input file
 
 Log = Callable[[str], None]
@@ -273,6 +275,7 @@ class IngestService:
             texts: list[str] = []
             raw_layers: dict[int, str] = {}
             ocr_context: dict[int, Layer] = {}
+            layouts: dict[int, PageLayout] = {}
             for i in range(n):
                 page = doc.page(i)
                 t0 = time.perf_counter()
@@ -334,6 +337,7 @@ class IngestService:
                 else:
                     self.log(f"  p{i + 1}/{n}: text layer ({probe.n_chars} chars)")
                     raw_layers[i] = raw
+                    layouts[i] = page.layout()
                     record = PageRecord(
                         index=i,
                         method=PageMethod.TEXT_LAYER,
@@ -349,12 +353,33 @@ class IngestService:
             doc.close()
 
         self._drop_repeats(records, texts, raw_layers, ocr_context)
-        # De-hyphenate with the whole document's vocabulary, not just one page's.
-        vocab = text_vocabulary(*raw_layers.values(), *texts)
-        for i, raw in raw_layers.items():
-            texts[i] = clean_text_layer(raw, vocab)
-            records[i].n_chars = len(texts[i])
+        self._write_text_layers(records, texts, raw_layers, layouts)
         return records, texts, title, total
+
+    def _write_text_layers(
+        self,
+        records: list[PageRecord],
+        texts: list[str],
+        raw_layers: dict[int, str],
+        layouts: dict[int, PageLayout],
+    ) -> None:
+        """Set the text of every page that keeps its text layer.
+
+        Structure and de-hyphenation use the whole document's vocabulary and pages: a running
+        header is a line that comes back on other pages. Only pages routed to the text layer
+        have a layout. A page whose layer stands in for rejected OCR, or for the blank-page
+        rule, keeps its flat text: routing judged that layer unreliable (or the page nearly
+        empty), so its geometry is not trusted either.
+        """
+        vocab = text_vocabulary(*raw_layers.values(), *texts)
+        structured = structure_pages(layouts, vocab)
+        for i, raw in raw_layers.items():
+            if page := structured.get(i):
+                texts[i] = page.text
+                records[i].removed_lines = list(page.removed)
+            else:
+                texts[i] = clean_text_layer(raw, vocab)
+            records[i].n_chars = len(texts[i])
 
     def _image(self, path: Path, options: IngestOptions) -> tuple[list[PageRecord], list[str], int]:
         frames = self.images.frames(path)  # multi-page TIFF -> several frames

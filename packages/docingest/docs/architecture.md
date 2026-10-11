@@ -654,11 +654,12 @@ sequenceDiagram
                     Svc->>Ocr: transcribe(image)
                     Ocr-->>Svc: OcrResult
                 else text layer is good
-                    Note over Svc: keep the raw text for later cleaning
+                    Svc->>Pdf: page(i).layout()
+                    Pdf-->>Svc: PageLayout (lines with size, weight, position)
                 end
             end
             Svc->>Pdf: close()
-            Note over Svc: clean every kept text layer with the vocabulary of the whole document
+            Note over Svc: structure every kept text layer with the vocabulary and the pages of the whole document
         else kind is image
             Svc->>Img: frames(path)
             loop each frame up to max_pages
@@ -687,9 +688,9 @@ flowchart TD
     SG --> DEC["decide(signals, RoutingPolicy, force_ocr)"]
     DEC --> Q{"any reason recorded?"}
     Q -->|"yes"| RND["render(ocr.dpi) and OcrEngine.transcribe"]
-    Q -->|"no"| TL["keep the text layer"]
+    Q -->|"no"| TL["keep the text layer and its layout()"]
     RND --> REC1["PageRecord method = vlm_ocr, with probe, model, revision, tokens, finish reason"]
-    TL --> CLN["after the loop: clean_text_layer with document vocabulary"]
+    TL --> CLN["after the loop: structure_pages with the whole document"]
     CLN --> REC2["PageRecord method = text_layer, with probe"]
 ```
 
@@ -705,7 +706,14 @@ A page goes to OCR when at least one rule fires. The thresholds come from Marker
 
 The signals are measured by `PdfiumPage.signals`: `n_chars` counts non-whitespace characters of the embedded text, `image_coverage` is the share of the visible page box covered by image objects (measured in page space, including nested Form XObjects), `garbage_ratio` is the share of replacement, control, private-use and `(cid:N)` glyphs, and `alpha_ratio` is the share of letters. Every reason is recorded in the page's `probe.reasons`, so the manifest explains each decision. See [ADR 0002](adr/0002-per-page-routing-and-content-addressed-cache.md).
 
-Text-layer cleaning runs after all pages are read. pdfium replaces a line-end hyphen with U+0002 and joins the lines. `clean_text_layer` joins the two halves only when the joined word occurs elsewhere in the document (the vocabulary includes every kept text layer and every OCR transcription), and otherwise keeps the hyphen. That is why cleaning cannot happen page by page.
+Text-layer structuring runs after all pages are read, because two of its rules need the whole document. `domain.structure.structure_pages` receives the layout of every kept text-layer page (the lines with font size, weight and position, from `PdfPage.layout()`) and returns Markdown for each:
+
+- Running headers, running footers and page numbers are lines in the top or bottom zone of the page whose text (page number aside) comes back on other pages; they are taken out of the text and listed in the page record's `removed_lines`.
+- The lines of a paragraph are joined; table rows, formula pieces and short lines keep their line breaks; footnotes that the stream interleaves with the body move behind it.
+- Headings are lines set larger than the body text, or bold, or numbered, and are marked `#` to `####`.
+- pdfium replaces a line-end hyphen with U+0002 and joins the lines. The two halves are joined only when the joined word occurs elsewhere in the document (the vocabulary includes every kept text layer and every OCR transcription), and otherwise the hyphen is kept.
+
+A page whose adapter returned no lines still goes through `clean_text_layer` on its flat text. The rules are in [domain/README.md](../src/docingest/domain/README.md#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy). OCR pages are never restructured.
 
 ### Images
 
@@ -878,6 +886,7 @@ classDiagram
         +str model_revision
         +int gen_tokens
         +str finish_reason
+        +list~str~ removed_lines
     }
     class PageSignals {
         +int n_chars
@@ -955,12 +964,13 @@ classDiagram
 |---|---|
 | `index` | 0-based position. The Markdown marker uses `index + 1`. |
 | `method` | How the text was produced (table below). |
-| `n_chars` | Length of the emitted text for this record (after cleaning for text-layer pages). This differs from `probe.n_chars`, which counts the non-whitespace characters of the raw embedded text. |
+| `n_chars` | Length of the emitted text for this record (after structuring for text-layer pages). This differs from `probe.n_chars`, which counts the non-whitespace characters of the raw embedded text. |
 | `seconds` | Time for this record. For converted kinds it is the conversion time divided by the number of kept segments. |
 | `engine` | The adapter that produced the text: the PDF reader's fingerprint for text-layer pages, the OCR fingerprint for OCR pages, and `Conversion.engine` (for example `pandoc <version>` or `pylatexenc <version>`) for converted kinds. |
 | `title` | Section or segment title from a converter. |
 | `probe` | PDF pages only: the measured `PageSignals` plus `needs_ocr` and the human-readable `reasons`. |
 | `model`, `model_revision`, `gen_tokens`, `finish_reason` | OCR pages only: the pinned model, tokens generated by the kept attempt, and why generation stopped (`"length"` means it hit `max_tokens`). |
+| `removed_lines` | Text-layer pages only: the running headers, running footers and page numbers taken out of the page text. |
 
 | `PageMethod` value | Produced by |
 |---|---|

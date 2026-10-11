@@ -8,7 +8,7 @@ docingest is a document normalization layer for a research agent. It takes a res
 - arXiv papers are fetched as LaTeX source, so math, tables and section structure arrive intact instead of being recovered from a rendered PDF.
 - Everything is pinned and content-addressed: `uv.lock`, model commits, input checksums, and output directories named after the input's sha256.
 
-Package: `docingest` 0.3.1, Python 3.12, managed with [uv](https://docs.astral.sh/uv/). Source in [`src/docingest/`](src/docingest/README.md).
+Package: `docingest` 0.4.0, Python 3.12, managed with [uv](https://docs.astral.sh/uv/). Source in [`src/docingest/`](src/docingest/README.md).
 
 ## Contents
 
@@ -59,6 +59,7 @@ The codebase uses a hexagonal (ports and adapters) architecture, so the OCR mode
 - **One canonical output for every input type.** `document.md` with `<!-- page N | method=... -->` markers, and `manifest.json` with full provenance ([format](#canonical-output-format)).
 - **Per-page OCR routing for PDFs.** Four rules taken from Marker and olmOCR decide per page between the embedded text layer and OCR, and every matching rule is recorded as a reason; a page with no text and no ink is blank and never reaches OCR ([routing](#per-page-pdf-routing), [ADR 0002](docs/adr/0002-per-page-routing-and-content-addressed-cache.md)).
 - **Local vision-language OCR.** In-process with mlx-vlm on Apple Silicon, or over HTTP to any OpenAI-compatible server. Per-model profiles set the prompt, input size, output clean-up and generation limits from each model's card; one retry handles truncated or invalid outputs, and the output is checked for loops, text no page could hold and text repeated across pages ([OCR](#ocr-models-and-benchmark)).
+- **Structure for text-layer pages.** Running headers, running footers and page numbers are left out of the page text (and listed in the manifest), the lines of a paragraph are joined, and headings are marked with `#` from their font size and weight ([text-layer structure](#text-layer-structure)).
 - **Document-level de-hyphenation.** A line-end hyphen in the text layer is removed only when the joined word occurs elsewhere in the same document.
 - **LaTeX-first arXiv crawler.** Search by arXiv query syntax or by id list, polite rate limiting shared by every request, source-first download with PDF fallback, license lookup through OAI-PMH, and metadata sidecars ([crawl](#arxiv-crawl), [ADR 0003](docs/adr/0003-latex-first-for-arxiv.md)).
 - **Robust LaTeX conversion.** Safe archive extraction, arXiv-style main-file detection, a Python flattener for includes, pandoc in `--sandbox` mode with a timeout and heap cap, and a pylatexenc plain-text fallback ([LaTeX](#latex-conversion)).
@@ -161,8 +162,8 @@ flowchart TD
     OCRT --> CHK{"Output a loop, too long for the page, or a repeat of an earlier page?"}
     CHK -->|"no"| REC1["PageRecord method = vlm_ocr, with probe, model, revision, tokens, finish reason"]
     CHK -->|"yes"| FALL["Text layer if usable, else empty page; PageRecord.warnings says why"]
-    TL --> KEEP["Keep the raw text layer"]
-    KEEP --> DEH["After the last page: clean_text_layer with the whole document's vocabulary"]
+    TL --> KEEP["Keep the raw text layer and the page layout (font size, weight, position of each line)"]
+    KEEP --> DEH["After the last page: structure_pages with the whole document: running lines out, paragraphs, headings, de-hyphenation with its vocabulary"]
     DEH --> REC2["PageRecord method = text_layer, with probe"]
 ```
 
@@ -188,13 +189,24 @@ How the signals are measured (`adapters/pdf/pdfium.py`, `domain/text.py`):
 
 - Ink is measured on the image the engine would be given (`application/ink.py`): the share of pixels darker than the median grey by `blank_ink_contrast` levels after a 3x3 median filter, so paper tint, grey paper, scanner noise and show-through are not ink, and a uniformly dark page counts as all ink. Only pages with at most `blank_max_chars` characters are measured, and the image is reused for OCR when the page turns out not to be blank. The measured values and the reasoning are in [config/README.md](config/README.md#routing). Before this rule the model was asked to transcribe blank pages and invented text for most of them.
 
-When `--ocr-all` is set and no rule matched, the recorded reason is `forced (--ocr-all)`. Text-layer pages are cleaned after the whole document has been read: pdfium turns a line-end hyphen into U+0002, and the two halves are joined only when the joined word appears elsewhere in the document, otherwise the hyphen is kept.
+When `--ocr-all` is set and no rule matched, the recorded reason is `forced (--ocr-all)`. Text-layer pages are structured after the whole document has been read ([below](#text-layer-structure)).
+
+#### Text-layer structure
+
+A PDF text layer is a stream of characters in the order the producer wrote them: a running header and the page number sit in the body text of every page, the lines of a paragraph are separate lines, and a heading looks like any other line. The PDF reader therefore also reports each text-layer page as lines with their font size, weight and position (`PdfPage.layout()`), and `domain.structure.structure_pages` turns the pages of a document into Markdown, all pages at once:
+
+- **Running headers, footers and page numbers** are removed: a line near the top or bottom of the page whose text comes back on other pages (page number and OCR noise aside, so `64 3. Signal Sampling` and `65 3. Signal Sampling` are the same line), or a bare page number (`12`, `iv`, `Page 7 of 40`) alone on the first or last row. They are kept out of the page text and listed in `removed_lines` of the page record in the manifest. A title that is set larger than the running header repeating it stays.
+- **Paragraphs**: the lines of a paragraph are joined with a space and paragraphs are separated by a blank line. Table rows, pieces of formulas and short lines (a title block) keep their line breaks. A footnote that the PDF puts in the middle of the body moves behind it.
+- **Hyphenation**: a hyphen at a line end is dropped when the joined word occurs elsewhere in the document, otherwise it is kept (`2019-` and `2020` stays `2019-2020`).
+- **Headings** are marked `#` to `####` when a line is set larger than the body text (the most common type size of the document), or bold and a little larger, or a section number or title in about the body size. The level follows the size (`#` for a title) and the depth of a section number (`2.1` is `###`).
+
+Everything is conservative: when a rule is not sure the text stays as the text layer wrote it, and nothing changes for math (formulas are left as the text layer has them), OCR pages, images, LaTeX, office and text inputs. A PDF read with `--max-pages 1` has no other page to compare with, so only page numbers are removed. Only pages routed to the text layer are structured: a page that is blank, that keeps a few characters because it has no other ink, or whose layer stands in for rejected OCR output keeps its flat text, cleaned as before. The rules and their thresholds are in [domain/README.md](src/docingest/domain/README.md#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy); they are constants, not configuration. Since the text-layer output changed, the pipeline version is 0.4.0 and every cached result (PDF, LaTeX, office, text, image) is computed again once.
 
 ### Inputs and how each is handled
 
 | Input | Detected by | Port (`[adapters]` key) and adapter | Page or segment method |
 |---|---|---|---|
-| Born-digital PDF | `%PDF-` header | `pdf`: pypdfium2 | `text_layer`, with document-level de-hyphenation |
+| Born-digital PDF | `%PDF-` header | `pdf`: pypdfium2 | `text_layer`, structured (running lines out, paragraphs, headings) with document-level de-hyphenation |
 | Scanned or garbled PDF page | routing rules on the page signals | `ocr`: mlx-vlm or openai-compatible | `vlm_ocr` |
 | Blank PDF page (no text layer, no ink) | routing rules, then the ink measurement | none: never sent to OCR | `blank`, an empty page |
 | Mixed PDF | per page | both of the above | chosen per page, with the reasons recorded |
@@ -374,7 +386,7 @@ Text of page 1 ...
 Markdown transcription of page 2 ...
 ```
 
-`docingest.domain.text.split_pages` parses it back into `{page number: text}`. The title is the metadata title if there is one, else the title found by the PDF reader or converter, else the file name without its suffix.
+The text of a `text_layer` page is Markdown: paragraphs separated by a blank line, headings marked with `#` to `####`, and no running header, running footer or page number (they are in the manifest). `docingest.domain.text.split_pages` parses it back into `{page number: text}`. The title is the metadata title if there is one, else the title found by the PDF reader or converter, else the file name without its suffix.
 
 `manifest.json` is a serialized `DocumentManifest` ([`domain/models.py`](src/docingest/domain/README.md)):
 
@@ -384,7 +396,7 @@ Markdown transcription of page 2 ...
 | `source_path`, `source_name`, `source_kind`, `mime`, `size_bytes` | what was ingested |
 | `n_pages`, `source_pages` | pages or segments processed in this run, and in the source; `n_pages < source_pages` means a partial run |
 | `max_pages`, `ocr_all` | run options, recorded for provenance |
-| `pages` | one `PageRecord` per page or segment: `index`, `method`, `n_chars`, `seconds`, `engine`, `title` (section title), `probe` (routing signals, `needs_ocr`, `reasons`), for OCR pages `model`, `model_revision`, `gen_tokens`, `finish_reason`, and `warnings` (OCR output that was rejected or cut off; empty for an ordinary page) |
+| `pages` | one `PageRecord` per page or segment: `index`, `method`, `n_chars`, `seconds`, `engine`, `title` (section title), `probe` (routing signals, `needs_ocr`, `reasons`), `removed_lines` (text-layer pages: the running headers, footers and page numbers taken out of the text), for OCR pages `model`, `model_revision`, `gen_tokens`, `finish_reason`, and `warnings` (OCR output that was rejected or cut off; empty for an ordinary page) |
 | `pipeline_version`, `config_hash` | cache identity |
 | `ocr_model` | `repo_id` and `revision` of the OCR model, when any page used OCR |
 | `title`, `metadata` | title and `SourceMetadata` (title, authors, year, abstract, doi, arxiv_id, version, url, license, categories) |
@@ -395,7 +407,7 @@ Markdown transcription of page 2 ...
 ### Caching and invalidation
 
 - **Document identity.** `doc_id` is the sha256 of the input's bytes; the canonical directory is its first 16 hex characters.
-- **Cache key.** `config_hash` is the first 12 hex characters of the sha256 of the pipeline version (`0.3.1`), the source kind, the `ocr_all` flag and the fingerprints of the adapters that produce that kind:
+- **Cache key.** `config_hash` is the first 12 hex characters of the sha256 of the pipeline version (`0.4.0`), the source kind, the `ocr_all` flag and the fingerprints of the adapters that produce that kind:
 
   | Kind | Parts of `config_hash` besides version, kind and `ocr_all` |
   |---|---|
@@ -867,7 +879,8 @@ pytest runs with `--strict-markers`; the markers are `model`, `network` and `slo
 
 - **v0.1:** first prototype: PDF text layer plus Qwen3-VL OCR, with PaperQA2 integration.
 - **v0.2:** 26 defects found by adversarial review and fixed (pdfium hyphen markers, cache variants, token windows, pinning, and more).
-- **v0.3:** hexagonal architecture, LaTeX ingestion and the arXiv crawler, the OpenAI-compatible OCR adapter, the benchmark harness, and quality gates. The current version is 0.3.1.
+- **v0.3:** hexagonal architecture, LaTeX ingestion and the arXiv crawler, the OpenAI-compatible OCR adapter, the benchmark harness, and quality gates.
+- **v0.4:** text-layer pages come out as Markdown with running headers and page numbers removed, paragraphs joined and headings marked. The current version is 0.4.0.
 
 ## License
 
