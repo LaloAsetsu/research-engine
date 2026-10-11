@@ -13,6 +13,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 - [models.py](#modelspy)
 - [routing.py](#routingpy)
 - [text.py](#textpy)
+- [Text-layer structure](#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy)
 - [chunking.py](#chunkingpy)
 - [errors.py](#errorspy)
 - [Changing the domain safely](#changing-the-domain-safely)
@@ -25,6 +26,10 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 | `routing.py` | `RoutingPolicy` (thresholds, the `[routing]` config section), `decide()`, and the blank-page rule (`could_be_blank`, `is_blank`, `blank_probe`) | `IngestService` for every PDF page, `config.AppConfig.routing` |
 | `ocr_guards.py` | `OcrGuards` (thresholds), `OutputProblem`, `find_problem`, `is_looping`, `retry_max_tokens`, `duplicate_pages` | the OCR adapters' retry ladder, `IngestService` |
 | `text.py` | `HYPHEN_MARK`, `garbage_ratio`, `alpha_ratio`, `text_vocabulary`, `clean_text_layer`, `render_markdown`, `split_pages` | PDF adapter (signals), `IngestService` (clean-up, rendering), synthetic benchmark suite (clean reference text), PaperQA2 adapter and hook, `eval-ocr` command (splitting) |
+| `layout.py` | `TextLine`, `PageLayout`, `StructuredPage` (what a PDF adapter reports about a page's lines) | `PdfPage.layout()`, `IngestService` |
+| `furniture.py` | `repeated_lines`, `page_numbers` (running headers, running footers, page numbers) | `structure.py` |
+| `headings.py` | `line_style`, `page_styles`, `level`, `is_marker`, `is_caption` | `structure.py` |
+| `structure.py` | `structure_pages` (text-layer pages of a document to Markdown) | `IngestService` for the text-layer pages of a PDF |
 | `chunking.py` | `Chunk`, `chunk_pages`, `CHUNKER_VERSION`, `CHUNK_CHARS`, `OVERLAP` | `ports` (`Chunk` is re-exported there); the chunk index and `AskService` use it through those |
 | `errors.py` | `DocingestError` and its subclasses | adapters raise them, application and entrypoints handle them |
 
@@ -485,7 +490,7 @@ A new `PdfReader` adapter should compute `PageSignals.garbage_ratio` and `alpha_
 
 ### `clean_text_layer(text, vocab=None)`
 
-Applied to every text-layer page, in this order:
+Applied to the text of every text-layer page whose reader gave no layout, and as the last step of `structure_pages` for the ones that did. In this order:
 
 1. Line endings `\r\n` and `\r` become `\n`.
 2. If `vocab` is `None`, the vocabulary of `text` itself is used.
@@ -539,6 +544,28 @@ print(split_pages(md))  # {1: 'hello <!-- page 9 --> world', 2: 'second'}
 ```
 
 `split_pages` is used by the PaperQA2 adapter and hook (to give PaperQA2 page-aware text, so citations point at page ranges) and by the `eval-ocr` command.
+
+## Text-layer structure: `layout.py`, `furniture.py`, `headings.py`, `structure.py`
+
+The text layer of a PDF is a stream of characters; the structure of the page is in how those characters are set. A `PdfReader` adapter reports each text-layer page as a `PageLayout`: its lines in reading order, each a `TextLine` with the text, the dominant font size in points, whether the line is bold, its horizontal extent, its baseline (points from the top of the page) and whether it is upright (rotated margin stamps and vertical labels are not). `structure.structure_pages(layouts, vocab)` looks at all the pages of a document at once and returns, for each page that has lines, a `StructuredPage(text, removed)`. It changes only text-layer pages of PDFs; OCR pages, images, LaTeX, office and text inputs do not go through it. A page with no lines is left out of the result and the caller uses `clean_text_layer` on its flat text, as before.
+
+Every rule is conservative. When it is not sure, the text stays as the text layer wrote it: a line break instead of a joined paragraph, plain text instead of a heading, a line kept instead of removed.
+
+**Running headers, footers and page numbers** (`furniture.py`). Only the margin lines of a page are candidates: the rows between the page edge and the first vertical gap wider than 1.4 line pitches inside the top or bottom 15% of the page (the outermost row only when there is no such gap), so the first and last body lines of a page, where `where`, `Proof.` or `and` can recur, are not. They are compared across the document after lower-casing and replacing every run of digits with `#`, so `64 3. Signal Sampling` and `65 3. Signal Sampling` are the same line. Lines that are at least 85% similar (OCR noise) are the same line. A line that comes back on at least 3 pages is a running line, and in documents of more than 5 pages it must also be on at least 30% of the pages between its first and its last occurrence (a head is on every page or every other page; `Chapter 3` on a chapter opener every 10 pages is not). In documents of up to 5 pages two pages are enough. Of the lines in such a group, only those in the group's usual type size and on its usual row are removed, so a title set larger than the running header that repeats it stays. In documents of more than 5 pages, the first or last row of a page (at least 4 pages, and at least 30% of all pages) also counts as a running header when its first or last word (5 letters or more, not `Figure`, `Table`, ...) at the same size and row starts or ends the outermost line of at least 30% of the pages: that is how `Section 4.1 Lattices 23` and `18 Sampling Basics Chapter 1` are found although the title changes every few pages. A bare page number (`12`, `iv`, `Page 7 of 40`, `- 12 -`, `[ 58 ]`) is removed when it is the only number on a margin row and the rest of that row, if any, is a running line. A Roman numeral (`x`, `i`) also needs the gap that sets the margin off from the body, because a lone `x` is as likely a formula fragment. A document read with `max_pages` of 1 has nothing to compare: only bare page numbers go.
+
+**Paragraphs** (`structure.py`). Per page, the columns (peaks of the left edges), the right edge of each column and the line pitch are measured. Between two consecutive lines the separator is:
+
+| Separator | When |
+|---|---|
+| a space (same paragraph) | next line, same type size, both lines mostly letters, the first line reaches the right edge of its column, no list marker, no new indent |
+| a line break (same block) | the lines are on the same row or a sub/superscript apart, or one of them is mostly digits and symbols (table rows, formulas), or the first line is short (a title, an address) |
+| a blank line (new block) | a gap wider than 1.4 line pitches, a jump up to the next column, another type size, a list marker or reference entry (`•`, `1.`, `(a)`, `[3]`) at the start, a sentence that ends on a short line, or an indent that the previous line does not have (a hanging list indent does not count) |
+
+A footnote (a block in type of 90% of the body size or smaller in the lower 30% of the page, starting with `*`, `†`, a number or a similar mark, and not a caption) that the stream puts before body text is moved behind it. Hyphenation is resolved when the lines are joined: a line that ends with the marker `HYPHEN_MARK` or with a real hyphen after a letter, followed by a lowercase letter, becomes `word<HYPHEN_MARK>word` and `clean_text_layer` decides with the document vocabulary (see above). A hyphen between digits or before a capital (`2019-` and `2020`, `Qwen-2.5-` and `VL`) is kept.
+
+**Headings** (`headings.py`). The body size is the type size most characters of the document are set in (half-point steps). A line is a heading when it is at least 1.2 times the body size, or at least 1.05 times and bold. A line of about the body size (0.85 and up) needs more: if bold, a section number (`2`, `2.1`, `II.`, `A.`) or a standard section title (`Abstract`, `Conclusion`, ...); if regular, a hierarchical or Roman section number, a single number followed by a title in capitals-first words (`8. Conclusions`), a standard title, or capital letters only, and no sentence end. Lines with `=`, formulas, captions, author lines (`Firstname X. Lastname`), a running head with its page number on the outermost row (`64 3. Title`, `Title 65`), body-size lines of more than 12 words, table-of-contents entries (dot leaders, a trailing page number), list items, and lines without a word of four letters are never headings. A style that makes up more than 40% of a page, or a run of more than 3 adjacent lines in one style, is a paragraph, not a list of headings. Consecutive lines of one heading style (up to 3) are one heading. Level: `#` for 1.5 times the body size or more, otherwise `##` for a section and one more `#` per level of its number (`2.1` is `###`, `2.1.3` is `####`); capped at `####`.
+
+The thresholds are module constants (`ZONE`, `SIMILAR`, `MIN_PAGES`, `BIG`, `BOLD`, ... and the ones at the top of `structure.py`); there is no configuration for them. A change to any rule changes the output of text-layer pages, so it needs a `PIPELINE_VERSION` bump.
 
 ## chunking.py
 
@@ -659,7 +686,7 @@ The domain is small and everything depends on it, so changes ripple outward. Che
 | New `PageMethod` | The value must consist of word characters only (letters, digits, underscore): `split_pages` recognizes markers with `method=(\w+)`. |
 | New `DocumentManifest` or `PageRecord` field | Give it a default. Stores load manifests with `model_validate_json`; the filesystem store treats a manifest that fails validation as a cache miss and `corpus()` skips it with a warning, so a required field would make every stored result a miss. |
 | New `RoutingPolicy` field | Give it a default and use it in `decide()`. No cache work is needed: the policy JSON is part of the PDF cache key, so PDFs are re-processed automatically (and only PDFs). Add a key to `[routing]` in `config/pipeline.toml` if it should be tunable there. |
-| Different logic in `decide`, `clean_text_layer` or `render_markdown` | Bump `PIPELINE_VERSION` in `application/ingest.py`. Code changes are not part of any adapter fingerprint, so without the bump cached results produced by the old logic would still be served. |
+| Different logic in `decide`, `clean_text_layer`, `structure_pages` or `render_markdown` | Bump `PIPELINE_VERSION` in `application/ingest.py`. Code changes are not part of any adapter fingerprint, so without the bump cached results produced by the old logic would still be served. |
 | New error type | Subclass the closest existing error so that existing handlers keep working. Put adapter-specific errors in the adapter module, as `OcrServerError` does. |
 
 Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_chunking.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).

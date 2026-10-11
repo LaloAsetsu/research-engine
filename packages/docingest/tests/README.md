@@ -111,6 +111,7 @@ flowchart LR
 | `test_services.py` | `AskService` (plain path) and `CrawlService` with fakes |
 | `test_stats.py` | `application.stats`: paired bootstrap, `quantile`, `bootstrap_ci` |
 | `test_text.py` | `domain.text`: garbled-text detection, de-hyphenation, page splitting |
+| `test_structure.py` | `domain.structure`, `furniture` and `headings` on synthetic lines: running headers and page numbers, paragraphs, hyphenation, headings, footnotes |
 
 ### contract/
 
