@@ -29,3 +29,15 @@ def cfg(tmp_path):
     from docingest.config import AppConfig
 
     return AppConfig(output_dir=str(tmp_path / "out"), raw_dir=str(tmp_path / "raw"))
+
+
+@pytest.fixture
+def src(tmp_path):
+    """Makes an input file in ``tmp_path``: ``src("a.pdf", b"bytes")`` (contents are the key)."""
+
+    def _make(name: str, content: bytes = b"x") -> Path:
+        p = tmp_path / name
+        p.write_bytes(content)
+        return p
+
+    return _make

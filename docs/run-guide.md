@@ -268,6 +268,10 @@ Several people may use one GPU machine. These rules keep your work and theirs ap
 - **A traceback of thousands of lines from `ask`; its last lines say `AllModelsExhaustedError` and `Connection error`.** The answering model's server (`qwen-local`, port 8001) is unreachable. Check `serve.sh llm status` and `[qa] llm_base`. During `ingest`, a scanned page fails in a different way: the file lands in the `Failed inputs` table with `OCR server http://127.0.0.1:8001/v1/... unreachable after N attempt(s)`. Check `[ocr] base_url` for that one.
 - **`... answered HTTP 401 (check api_key_env)`, or 403.** The server wants a key: set the variable named in `api_key_env` of that table.
 
+### Ingestion
+
+- **`blank page: 0 embedded chars (<=10), 0.00000 of the pixels inked (<0.0005)` in the log, `method=blank` in `document.md`.** The page has no text and no ink, so it was not sent to OCR and is empty on purpose (OCR used to invent a page of text for it). A scanned page that you think is blank but is not reported as such has a dark border, a shadow along the spine or stains: the rule leaves it to OCR. The thresholds are the `blank_*` keys of `[routing]` ([reference](../packages/docingest/config/README.md#routing)).
+
 ### The index
 
 - **`error: the index is empty`.** The index was never built, or the settings now select another index folder. The folder depends on `output_dir`, the `[embedder]` `model` and `revision`, `[qa]` `chunk_chars` and `overlap`, and the chunker version, so a docingest update that changes the chunker also counts. A change to any of them starts an empty index beside the old one. Run `docingest index build`, or restore the old settings.

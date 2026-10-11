@@ -1,49 +1,21 @@
 """IngestService with in-memory fakes for every port: no files parsed, no model loaded."""
 
-from pathlib import Path
-
 import pytest
 from fakes import (
     FakeConverter,
-    FakeDetector,
     FakeImages,
     FakeOcr,
-    FakePdfReader,
-    InMemoryStore,
     digital,
+    make_service,
     scanned,
 )
 
-from docingest.application.ingest import IngestOptions, IngestService
+from docingest.application.ingest import IngestOptions
 from docingest.domain.errors import DocumentOpenError, UnsupportedInputError
 from docingest.domain.models import PageMethod, SourceKind, SourceMetadata
-from docingest.domain.routing import RoutingPolicy
 from docingest.ports import Segment
 
 TEXT = "Attention is all you need. " * 10
-
-
-def make_service(docs=None, converters=None, ocr=None, images=None):
-    return IngestService(
-        detector=FakeDetector(),
-        pdf=FakePdfReader(docs or {}),
-        ocr=ocr or FakeOcr(),
-        images=images or FakeImages(),
-        converters=converters or {},
-        store=InMemoryStore(),
-        policy=RoutingPolicy(),
-        log=lambda _: None,
-    )
-
-
-@pytest.fixture
-def src(tmp_path) -> Path:
-    def _make(name: str, content: bytes = b"x") -> Path:
-        p = tmp_path / name
-        p.write_bytes(content)
-        return p
-
-    return _make
 
 
 def test_mixed_pdf_routes_each_page(src):

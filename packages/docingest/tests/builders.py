@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -58,7 +58,10 @@ def text_pdf(path: Path, *lines: str) -> Path:
 
 def image_pdf(path: Path) -> Path:
     img = Image.new("RGB", (1275, 1650), "white")
-    ImageDraw.Draw(img).text((100, 100), "Scanned words live only in pixels", fill="black")
+    font = ImageFont.load_default(size=28)  # 10 pt on a 150 dpi scan; the bitmap font is 5 pt
+    ImageDraw.Draw(img).text(
+        (100, 100), "Scanned words live only in pixels", font=font, fill="black"
+    )
     img.save(path, "PDF", resolution=150)
     return path
 

@@ -32,6 +32,13 @@ image_coverage = 0.6            # image objects covering >60% of the page...
 image_coverage_max_chars = 400  # ...with little text -> OCR
 max_garbage_ratio = 0.10        # >10% broken glyphs (bad font encoding) -> OCR
 min_alpha_ratio = 0.5           # olmOCR heuristic: <50% letters -> suspicious text layer
+# A page that would go to OCR but has almost no text AND almost no ink is blank: an empty
+# page (method "blank"), never sent to OCR, where the model would invent a page. See
+# config/README.md for the measured values.
+blank_max_chars = 10            # a blank page may carry a page number, up to this many chars
+blank_max_ink = 0.0005          # ...and fewer than 0.05% inked pixels (0 turns the rule off)
+blank_ink_contrast = 32         # ink = a pixel this many grey levels darker than the paper (after a 3x3 median)
+blank_dark_page = 128           # a page with a median grey below this is not paper: all ink
 
 [ocr]
 # Vision-language model used for scanned pages and images (MLX, runs on Apple Silicon).

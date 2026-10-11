@@ -57,7 +57,7 @@ The codebase uses a hexagonal (ports and adapters) architecture, so the OCR mode
 ## Features
 
 - **One canonical output for every input type.** `document.md` with `<!-- page N | method=... -->` markers, and `manifest.json` with full provenance ([format](#canonical-output-format)).
-- **Per-page OCR routing for PDFs.** Four rules taken from Marker and olmOCR decide per page between the embedded text layer and OCR, and every matching rule is recorded as a reason ([routing](#per-page-pdf-routing), [ADR 0002](docs/adr/0002-per-page-routing-and-content-addressed-cache.md)).
+- **Per-page OCR routing for PDFs.** Four rules taken from Marker and olmOCR decide per page between the embedded text layer and OCR, and every matching rule is recorded as a reason; a page with no text and no ink is blank and never reaches OCR ([routing](#per-page-pdf-routing), [ADR 0002](docs/adr/0002-per-page-routing-and-content-addressed-cache.md)).
 - **Local vision-language OCR.** In-process with mlx-vlm on Apple Silicon, or over HTTP to any OpenAI-compatible server. Per-model profiles set the prompt, input size, output clean-up and generation limits from each model's card, and a retry ladder handles truncated or invalid outputs ([OCR](#ocr-models-and-benchmark)).
 - **Document-level de-hyphenation.** A line-end hyphen in the text layer is removed only when the joined word occurs elsewhere in the same document.
 - **LaTeX-first arXiv crawler.** Search by arXiv query syntax or by id list, polite rate limiting shared by every request, source-first download with PDF fallback, license lookup through OAI-PMH, and metadata sidecars ([crawl](#arxiv-crawl), [ADR 0003](docs/adr/0003-latex-first-for-arxiv.md)).
@@ -135,7 +135,7 @@ Step by step:
 
 ### Per-page PDF routing
 
-Each PDF page is measured by `PdfPage.signals()` (pypdfium2) and judged by the pure function `domain.routing.decide`. The diagram shows the decision for one page. All four rules are evaluated, every rule that matches is recorded in the manifest as a reason, and the page goes to OCR when at least one matches or when `--ocr-all` is set.
+Each PDF page is measured by `PdfPage.signals()` (pypdfium2) and judged by the pure function `domain.routing.decide`. The diagram shows the decision for one page. All four rules are evaluated, every rule that matches is recorded in the manifest as a reason, and the page goes to OCR when at least one matches or when `--ocr-all` is set. A page that goes to OCR for lack of text is first checked for ink in the image that was rendered for OCR: with no text layer to speak of and no ink it is a blank page, recorded with `method = blank` and not transcribed.
 
 ```mermaid
 flowchart TD
@@ -155,7 +155,9 @@ flowchart TD
     FORCED -->|"no"| TL["Text layer is good"]
     OCR --> RENDER["PdfPage.render at OcrEngine.dpi"]
     FR --> RENDER
-    RENDER --> OCRT["OcrEngine.transcribe"]
+    RENDER --> BLANK{"At most blank_max_chars chars and ink below blank_max_ink?"}
+    BLANK -->|"yes"| REC0["PageRecord method = blank, empty text, never OCR"]
+    BLANK -->|"no"| OCRT["OcrEngine.transcribe"]
     OCRT --> REC1["PageRecord method = vlm_ocr, with probe, model, revision, tokens, finish reason"]
     TL --> KEEP["Keep the raw text layer"]
     KEEP --> DEH["After the last page: clean_text_layer with the whole document's vocabulary"]
@@ -171,12 +173,18 @@ The thresholds live in `[routing]` of [`config/pipeline.toml`](config/README.md)
 | `image_coverage_max_chars` | `400` | ...and it has fewer than 400 characters | Marker |
 | `max_garbage_ratio` | `0.10` | more than 10% of its characters are broken glyphs | Marker `detect_bad_ocr` |
 | `min_alpha_ratio` | `0.5` | it has at least `min_chars` characters but fewer than 50% of them are letters | olmOCR filter |
+| `blank_max_chars` | `10` | (the blank rule, below) it has at most 10 characters... | measured on the reference corpus |
+| `blank_max_ink` | `0.0005` | ...and fewer than 0.05% of its pixels are ink: it is then **not** OCR input but an empty page | measured on the reference corpus |
+| `blank_ink_contrast` | `32` | (a pixel is ink when it is this many grey levels darker than the page background, after a 3x3 median filter) | measured on synthetic pages and the reference sample, see config/README.md |
+| `blank_dark_page` | `128` | (a page with a median grey below this is not paper: all ink) | the constant of the first version, not measured separately |
 
 How the signals are measured (`adapters/pdf/pdfium.py`, `domain/text.py`):
 
 - `image_coverage` is the area of image objects, measured in page space (including nested Form XObjects and rotated or offset page boxes) and clipped to the visible page box, divided by the page area.
 - `garbage_ratio` counts U+FFFD replacement characters, control characters, private-use characters and `(cid:N)` sequences among the non-space characters. pdfium's soft-hyphen marker (U+0002) is not counted.
 - `alpha_ratio` is the share of letters among the non-space characters.
+
+- Ink is measured on the image the engine would be given (`application/ink.py`): the share of pixels darker than the median grey by `blank_ink_contrast` levels after a 3x3 median filter, so paper tint, grey paper, scanner noise and show-through are not ink, and a uniformly dark page counts as all ink. Only pages with at most `blank_max_chars` characters are measured, and the image is reused for OCR when the page turns out not to be blank. The measured values and the reasoning are in [config/README.md](config/README.md#routing). Before this rule the model was asked to transcribe blank pages and invented text for most of them.
 
 When `--ocr-all` is set and no rule matched, the recorded reason is `forced (--ocr-all)`. Text-layer pages are cleaned after the whole document has been read: pdfium turns a line-end hyphen into U+0002, and the two halves are joined only when the joined word appears elsewhere in the document, otherwise the hyphen is kept.
 
@@ -186,6 +194,7 @@ When `--ocr-all` is set and no rule matched, the recorded reason is `forced (--o
 |---|---|---|---|
 | Born-digital PDF | `%PDF-` header | `pdf`: pypdfium2 | `text_layer`, with document-level de-hyphenation |
 | Scanned or garbled PDF page | routing rules on the page signals | `ocr`: mlx-vlm or openai-compatible | `vlm_ocr` |
+| Blank PDF page (no text layer, no ink) | routing rules, then the ink measurement | none: never sent to OCR | `blank`, an empty page |
 | Mixed PDF | per page | both of the above | chosen per page, with the reasons recorded |
 | PNG, JPEG, TIFF, GIF, WebP, BMP | magic bytes | `images`: Pillow, then `ocr` | `vlm_ocr`, one page per frame (multi-page TIFF gives several) |
 | LaTeX `.tex` / `.ltx`, arXiv `.tar.gz`, plain `.tar`, single gzipped `.tex` | suffix, gzip and tar header sniffing | `latex`: pandoc | `latex` (one segment per section), or `latex_plaintext` fallback |

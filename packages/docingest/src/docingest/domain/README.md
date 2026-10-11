@@ -22,7 +22,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 | Module | Contains | Used by |
 |---|---|---|
 | `models.py` | `SourceKind`, `PageMethod`, `PageSignals`, `PageProbe`, `ModelRef`, `SourceMetadata`, `PageRecord`, `DocumentManifest` (pydantic models and `StrEnum`s) | every layer |
-| `routing.py` | `RoutingPolicy` (thresholds, the `[routing]` config section) and `decide()` | `IngestService` for every PDF page, `config.AppConfig.routing` |
+| `routing.py` | `RoutingPolicy` (thresholds, the `[routing]` config section), `decide()`, and the blank-page rule (`could_be_blank`, `is_blank`, `blank_probe`) | `IngestService` for every PDF page, `config.AppConfig.routing` |
 | `text.py` | `HYPHEN_MARK`, `garbage_ratio`, `alpha_ratio`, `text_vocabulary`, `clean_text_layer`, `render_markdown`, `split_pages` | PDF adapter (signals), `IngestService` (clean-up, rendering), synthetic benchmark suite (clean reference text), PaperQA2 adapter and hook, `eval-ocr` command (splitting) |
 | `chunking.py` | `Chunk`, `chunk_pages`, `CHUNKER_VERSION`, `CHUNK_CHARS`, `OVERLAP` | `ports` (`Chunk` is re-exported there); the chunk index and `AskService` use it through those |
 | `errors.py` | `DocingestError` and its subclasses | adapters raise them, application and entrypoints handle them |
@@ -155,6 +155,7 @@ A `StrEnum` naming how the text of one page or segment was produced. It is store
 | Member | Value | Produced by | Input kinds |
 |---|---|---|---|
 | `TEXT_LAYER` | `"text_layer"` | `IngestService`, when `decide()` finds the embedded text usable; the text is the cleaned text layer | PDF |
+| `BLANK` | `"blank"` | `IngestService`, for a page that would go to OCR for lack of text but has at most `blank_max_chars` characters and fewer than `blank_max_ink` inked pixels; the text is empty and OCR is not called | PDF |
 | `VLM_OCR` | `"vlm_ocr"` | `IngestService` through `OcrEngine.transcribe()` | PDF pages that need OCR, every image frame |
 | `DOCLING` | `"docling"` | `DoclingConverter` | OFFICE |
 | `LATEX` | `"latex"` | `PandocLatexConverter`, when pandoc succeeds (one segment per section) | LATEX |
@@ -383,8 +384,16 @@ A pydantic model; its values come from the `[routing]` section of `config/pipeli
 | `image_coverage_max_chars` | `int` | `400` | "Little text" for that rule: fewer characters than this. |
 | `max_garbage_ratio` | `float` | `0.10` | Above this share of broken glyphs the text layer is considered garbled. |
 | `min_alpha_ratio` | `float` | `0.5` | Below this share of letters the text layer is considered suspicious (olmOCR heuristic). |
+| `blank_max_chars` | `int` | `10` | A page that would go to OCR is blank only if it has at most this many characters. |
+| `blank_max_ink` | `float` | `0.0005` | ...and fewer than this share of its pixels are ink. `0` turns the blank rule off. |
+| `blank_ink_contrast` | `int` | `32` | Grey levels under the page background that make a pixel ink, after a 3x3 median filter (`application/ink.py` does the measuring; the domain holds only the thresholds). |
+| `blank_dark_page` | `int` | `128` | A page with a median grey below this counts as all ink. |
 
 `RoutingPolicy` forbids unknown fields (`extra="forbid"`), like the other config sections: a misspelled key in `[routing]` is a validation error, never a silently ignored threshold.
+
+### Blank pages: `could_be_blank`, `is_blank`, `blank_probe`
+
+`could_be_blank(signals, policy)` says whether the text alone allows the rule (`blank_max_ink > 0` and `n_chars <= blank_max_chars`), so the caller measures the ink only for those pages. `is_blank(signals, ink, policy)` adds `ink < blank_max_ink`, where `ink` is the share of inked pixels measured by `application/ink.py`. `blank_probe(probe, ink, policy)` is the probe stored for a blank page: `needs_ocr` false, one reason holding the measurements. The domain stays free of image libraries; the measuring is in the application layer.
 
 ### `decide(signals, policy, *, force_ocr=False) -> PageProbe`
 

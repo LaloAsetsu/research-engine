@@ -1,6 +1,6 @@
 """Real detector / pdfium / pillow / filesystem adapters wired by the container; fake OCR."""
 
-from builders import LONG, blank_pdf, image_pdf, text_pdf
+from builders import LONG, blank_pdf, image_pdf, pdf, text_pdf
 from fakes import FakeOcr
 from PIL import Image
 
@@ -42,3 +42,16 @@ def test_partial_run_never_replaces_complete_result(cfg, tmp_path):
     part = svc.ingest(src, IngestOptions(max_pages=1, force=True))
     assert full.canonical and not part.canonical and "_variants" in part.location
     assert svc.ingest(src, IngestOptions(max_pages=2)).location == full.location
+
+
+def test_blank_and_page_number_pdfs_never_reach_ocr(cfg, tmp_path):
+    # Real pdfium rendering and measurement: an untouched page, and one with only "42" at
+    # the foot. Old: both went to OCR, which wrote a page of text for each.
+    ocr = FakeOcr("# invented page")
+    svc = Container(cfg, log=lambda _: None, overrides={"ocr": ocr}).ingest
+    empty = svc.ingest(blank_pdf(tmp_path / "blank.pdf", 2))
+    numbered = svc.ingest(pdf(tmp_path / "number.pdf", b"BT /F1 11 Tf 300 40 Td (42) Tj ET"))
+    assert [p.method for p in empty.manifest.pages] == [PageMethod.BLANK] * 2
+    assert [p.method for p in numbered.manifest.pages] == [PageMethod.BLANK]
+    assert ocr.calls == 0 and "invented" not in svc.store.markdown(numbered)
+    assert numbered.manifest.pages[0].probe.n_chars == 2

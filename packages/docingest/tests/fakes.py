@@ -14,8 +14,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
+from docingest.application.ingest import IngestService
 from docingest.domain.errors import DocumentOpenError, UnsupportedInputError
 from docingest.domain.models import (
     DocumentManifest,
@@ -26,6 +27,7 @@ from docingest.domain.models import (
     SourceKind,
     SourceMetadata,
 )
+from docingest.domain.routing import RoutingPolicy
 from docingest.domain.text import render_markdown
 from docingest.ports import (
     Chunk,
@@ -58,16 +60,32 @@ class FakeOcr:
         return OcrResult(text=self.text, seconds=0.01, gen_tokens=3, finish_reason="stop")
 
 
+def inked(size: tuple[int, int] = (850, 1100), lines: int = 12) -> Image.Image:
+    """A page image with a block of text on it: what a scan has and a blank page lacks."""
+    img = Image.new("RGB", size, "white")
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.load_default(size=24)
+    for n in range(lines):
+        draw.text(
+            (80, 80 + 40 * n),
+            "Scanned words live only in the pixels of a page",
+            font=font,
+            fill="black",
+        )
+    return img
+
+
 @dataclass
 class FakePage:
     signals_: PageSignals
     text: str
+    image: Image.Image | None = None  # what render() returns; default: white
 
     def signals(self) -> tuple[PageSignals, str]:
         return self.signals_, self.text
 
     def render(self, dpi: int) -> Image.Image:
-        return Image.new("RGB", (10, 10), "white")
+        return self.image if self.image is not None else Image.new("RGB", (850, 1100), "white")
 
 
 @dataclass
@@ -91,8 +109,14 @@ def digital(text: str) -> FakePage:
     return FakePage(PageSignals(n_chars=n, alpha_ratio=0.9), text)
 
 
-def scanned() -> FakePage:
-    return FakePage(PageSignals(n_chars=0, n_images=1, image_coverage=1.0), "")
+def scanned(image: Image.Image | None = None) -> FakePage:
+    """A scan without a text layer: it has ink, so it is not blank."""
+    return FakePage(PageSignals(n_chars=0, n_images=1, image_coverage=1.0), "", image or inked())
+
+
+def blank() -> FakePage:
+    """No text layer and nothing on the page."""
+    return FakePage(PageSignals(n_chars=0), "")
 
 
 class FakePdfReader:
@@ -383,3 +407,18 @@ class FakeReranker:
     def rerank(self, question: str, chunks: Sequence[Chunk]) -> list[float]:
         wanted = set(words(question))
         return [len(wanted & set(words(c.text))) / len(wanted) if wanted else 0.0 for c in chunks]
+
+
+def make_service(docs=None, converters=None, ocr=None, images=None, **kw) -> IngestService:
+    """An ``IngestService`` on in-memory fakes only; ``kw`` goes to its constructor."""
+    return IngestService(
+        detector=FakeDetector(),
+        pdf=FakePdfReader(docs or {}),
+        ocr=ocr or FakeOcr(),
+        images=images or FakeImages(),
+        converters=converters or {},
+        store=InMemoryStore(),
+        policy=kw.pop("policy", RoutingPolicy()),
+        log=kw.pop("log", lambda _: None),
+        **kw,
+    )

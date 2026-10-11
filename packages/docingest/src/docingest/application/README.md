@@ -332,8 +332,12 @@ For each page index `i` below `min(len(doc), max_pages)`:
    image coverage, garbage ratio, alphabetic ratio) and the raw embedded text.
 2. `domain.routing.decide(signals, policy, force_ocr=options.ocr_all)` returns a
    `PageProbe` with `needs_ocr` and the human-readable `reasons`.
-3. If `needs_ocr`, the page is rendered at `ocr.dpi` and sent to `ocr.transcribe()`. The
-   page record gets `method=vlm_ocr`, the OCR engine's fingerprint, model repo and
+3. If `needs_ocr`, the page is rendered at `ocr.dpi`. When the text alone allows it
+   (`could_be_blank`: at most `blank_max_chars` characters), `application/ink.py` measures
+   the share of inked pixels on that image; with `is_blank` true the record gets
+   `method=blank`, an empty text, the pdf engine's fingerprint and a probe that holds the
+   measurements, and OCR is never called. Otherwise the image goes to `ocr.transcribe()`
+   and the record gets `method=vlm_ocr`, the OCR engine's fingerprint, model repo and
    revision, generated tokens and finish reason.
 4. Otherwise the raw text layer is kept aside and the record gets `method=text_layer`
    and `engine=pdf.fingerprint`.

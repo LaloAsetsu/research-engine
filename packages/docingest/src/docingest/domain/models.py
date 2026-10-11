@@ -28,6 +28,7 @@ class SourceKind(StrEnum):
 
 class PageMethod(StrEnum):
     TEXT_LAYER = "text_layer"  # embedded PDF text, no OCR needed
+    BLANK = "blank"  # no text and no ink: an empty page, never sent to OCR
     VLM_OCR = "vlm_ocr"  # rasterized page -> vision-language model
     DOCLING = "docling"  # office/html converter
     LATEX = "latex"  # LaTeX source -> Markdown (one segment per section)

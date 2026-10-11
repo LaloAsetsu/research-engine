@@ -18,7 +18,14 @@ from ..domain.models import (
     SourceKind,
     SourceMetadata,
 )
-from ..domain.routing import RoutingPolicy, decide
+from ..domain.routing import (
+    RoutingPolicy,
+    blank_probe,
+    could_be_blank,
+    decide,
+    is_blank,
+    is_page_number,
+)
 from ..domain.text import clean_text_layer, render_markdown, text_vocabulary
 from ..ports import (
     DocumentConverter,
@@ -29,6 +36,7 @@ from ..ports import (
     StoredDocument,
     TypeDetector,
 )
+from .ink import ink_ratio
 
 PIPELINE_VERSION = "0.3.1"
 SIDECAR_SUFFIX = ".meta.json"  # optional SourceMetadata next to an input file
@@ -229,8 +237,53 @@ class IngestService:
                 signals, raw = page.signals()
                 probe = decide(signals, self.policy, force_ocr=options.ocr_all)
                 if probe.needs_ocr:
+                    image = page.render(self.ocr.dpi)
+                    if could_be_blank(probe, self.policy):
+                        ink = ink_ratio(
+                            image, self.policy.blank_ink_contrast, self.policy.blank_dark_page
+                        )
+                        if is_blank(probe, ink, self.policy):
+                            if any(c.isalpha() for c in raw) and not is_page_number(raw):
+                                # "Index", "Part I": nothing is printed beyond the few
+                                # characters of the layer, so the layer is the page.
+                                self.log(f"  p{i + 1}/{n}: short text layer, no other ink")
+                                raw_layers[i] = raw
+                                records.append(
+                                    PageRecord(
+                                        index=i,
+                                        method=PageMethod.TEXT_LAYER,
+                                        n_chars=0,  # set after cleaning
+                                        seconds=round(time.perf_counter() - t0, 3),
+                                        engine=self.pdf.fingerprint,
+                                        probe=probe.model_copy(
+                                            update={
+                                                "needs_ocr": False,
+                                                "reasons": [
+                                                    f"{probe.n_chars} embedded chars and no other"
+                                                    " ink: the text layer is the page"
+                                                ],
+                                            }
+                                        ),
+                                    )
+                                )
+                                texts.append("")
+                                continue
+                            blank = blank_probe(probe, ink, self.policy)
+                            self.log(f"  p{i + 1}/{n}: {blank.reasons[0]}")
+                            records.append(
+                                PageRecord(
+                                    index=i,
+                                    method=PageMethod.BLANK,
+                                    n_chars=0,
+                                    seconds=round(time.perf_counter() - t0, 3),
+                                    engine=self.pdf.fingerprint,
+                                    probe=blank,
+                                )
+                            )
+                            texts.append("")
+                            continue
                     self.log(f"  p{i + 1}/{n}: OCR ({'; '.join(probe.reasons)})")
-                    record, text = self._ocr_record(i, page.render(self.ocr.dpi), probe)
+                    record, text = self._ocr_record(i, image, probe)
                 else:
                     self.log(f"  p{i + 1}/{n}: text layer ({probe.n_chars} chars)")
                     raw_layers[i] = raw

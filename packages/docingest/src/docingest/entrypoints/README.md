@@ -184,7 +184,7 @@ Detect type, route each page (text layer / OCR / converter); write Markdown + ma
 | `<output_dir>/_degraded/<sha256[:16]>-<config_hash>-p<N or all>/` | A converter fell back after a timeout or crash. Never used as a cache hit, so the next run retries. |
 | `<output_dir>/index.json` | Catalog of canonical documents, updated on every canonical save. |
 
-`document.md` starts with `# <title>` and has one `<!-- page N | method=... -->` marker per page or segment. The methods are `text_layer`, `vlm_ocr`, `docling`, `latex`, `latex_plaintext` and `passthrough`.
+`document.md` starts with `# <title>` and has one `<!-- page N | method=... -->` marker per page or segment. The methods are `text_layer`, `blank` (a PDF page with no text and no ink, left empty and not sent to OCR), `vlm_ocr`, `docling`, `latex`, `latex_plaintext` and `passthrough`.
 
 **Exit behaviour.** 0 when every input succeeded (also when there were no inputs). 1 when at least one input failed; the summary of the successful ones is still printed. 2 for usage errors such as `--max-pages 0` or a missing `--config` file.
 

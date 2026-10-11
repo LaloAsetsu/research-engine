@@ -97,6 +97,7 @@ flowchart LR
 | `test_domain_models.py` | `SourceMetadata` citation formatting |
 | `test_index_config.py` | `index_config`: `candidates` and `contexts` read without the index adapter, other keys ignored, bad values named |
 | `test_index_service.py` | `IndexService`: incremental `build`, `update` of given documents, pruning, `status`, `remove`, the mismatch refusal, and `close()` on every path including a failing embedder |
+| `test_blank_pages.py` | The blank-page rule: ink measurement (white, tinted and speckled paper, a page number, a title page, a dark page), `is_blank` and its thresholds, the `[routing]` keys, and `IngestService` leaving such pages empty without calling OCR |
 | `test_ingest_service.py` | `IngestService` with fakes for every port: per-page routing, the cache and its invalidation, partial and forced-OCR variants, images, converters, metadata sidecars, degraded conversions, domain errors |
 | `test_latex_fixes.py` | Regressions of the LaTeX adapter (`latex_source`, `pandoc_latex`) |
 | `test_latex_source.py` | Pure LaTeX-source helpers and the pandoc adapter's Markdown helpers |
@@ -167,9 +168,11 @@ The module docstring states the rule: the fakes are real implementations of the 
 | `FakeOcr(text="ocr text", model="fake/ocr")` | `OcrEngine` | Returns `OcrResult(text, seconds=0.01, gen_tokens=3, finish_reason="stop")` for any image | `calls`; `model` is `ModelRef(repo_id=model, revision="0" * 40)`; `dpi = 72`; `fingerprint` includes `model` and `text`, so two fakes with different settings produce different cache keys |
 | `FakePdfReader(docs)` | `PdfReader` | `docs` maps a file **name** to a list of pages; `open(path)` looks up `path.name` and raises `DocumentOpenError` for unknown names | `opened` lists the documents it returned; `fingerprint = "fake-pdf 1"` |
 | `FakePdfDocument(pages, title=None)` | `PdfDocument` | `len()`, `page(i)`, `close()` | `closed` |
-| `FakePage(signals_, text)` | `PdfPage` | `signals()` returns the given `PageSignals` and text; `render()` returns a 10x10 white image | |
+| `FakePage(signals_, text, image=None)` | `PdfPage` | `signals()` returns the given `PageSignals` and text; `render()` returns `image`, by default a white 850x1100 page | |
 | `digital(text)` | helper | A `FakePage` whose `n_chars` is the number of non-whitespace characters of `text` and `alpha_ratio=0.9`. It routes to the text layer only when `text` has at least 50 such characters (the default `RoutingPolicy.min_chars`) | |
-| `scanned()` | helper | A `FakePage` with no text and one full-page image (`n_chars=0`, `n_images=1`, `image_coverage=1.0`); always routes to OCR | |
+| `scanned(image=None)` | helper | A `FakePage` with no text and one full-page image (`n_chars=0`, `n_images=1`, `image_coverage=1.0`) whose rendering has a block of text on it (`inked()`); routes to OCR and is not blank | |
+| `blank()` | helper | A `FakePage` with no text and a white rendering: the blank-page rule leaves it empty | |
+| `make_service(docs, converters, ocr, images, **kw)` | `IngestService` | A service on `FakeDetector`, `FakePdfReader(docs)`, `InMemoryStore` and the given fakes; `kw` goes to the constructor (`policy`, `guards`) | |
 | `FakeDetector()` | `TypeDetector` | Kind from the suffix only: `.pdf`, `.png`, `.docx`, `.tex`, `.md`; anything else raises `UnsupportedInputError` | `KINDS` |
 | `FakeImages(n_frames=1, fingerprint="fake-images 1")` | `ImageSource` | Returns `n_frames` white 10x10 images for any path | `fingerprint` (part of the image cache key) |
 | `FakeConverter(segments, method=PageMethod.LATEX, **kw)` | `DocumentConverter` | Returns `Conversion(segments=segments, method=method, engine="fake", **kw)`; pass `title`, `metadata`, `warnings` or `degraded` through `kw` | `calls`; `fingerprint` includes the method |

@@ -128,6 +128,7 @@ print(remote.adapters.ocr, remote.ocr.repo_id, remote.ocr.revision)
 |---|---|
 | TOML syntax error | Error (`tomllib.TOMLDecodeError`). |
 | Unknown key inside `[adapters]`, `[routing]`, `[ocr]`, `[qa]`, `[latex]` or `[arxiv]` | Error (`extra_forbidden`). |
+| `[routing] blank_max_chars` below 0, `blank_max_ink` outside 0 to 1, `blank_ink_contrast` outside 1 to 255, `blank_dark_page` outside 1 to 255 | Error. |
 | Unknown top-level table or key | Kept in `AppConfig.model_extra` for plugins; no error. |
 | Value that cannot be converted to the declared type (for example `dpi = "high"`) | Error. |
 | `[ocr] repo_id` other than the default without `revision` | Error: `[ocr] revision is required for '<repo>': pin a commit sha of that repo`. |
@@ -178,8 +179,27 @@ Thresholds of the pure routing policy `domain.routing.RoutingPolicy`, applied to
 | `image_coverage_max_chars` | int | `400` | ...and the page has fewer embedded characters than this. |
 | `max_garbage_ratio` | float (fraction) | `0.10` | OCR when more than this share of the non-space characters are replacement, control, private-use or `(cid:N)` glyphs (broken font encoding). |
 | `min_alpha_ratio` | float (fraction) | `0.5` | OCR when the page has at least `min_chars` characters but less than this share of its non-space characters are letters (olmOCR heuristic for a bad text layer). |
+| `blank_max_chars` | int | `10` | A page that matched an OCR rule above is **blank** when it has at most this many embedded characters (a page number, a roman numeral)... |
+| `blank_max_ink` | float (fraction) | `0.0005` | ...and fewer than this share of its pixels are ink. A blank page is not sent to OCR: it becomes an empty page with method `blank`. `0` turns the rule off. |
+| `blank_ink_contrast` | int (grey levels) | `32` | A pixel is ink when, after a 3x3 median filter, it is this many grey levels darker than the page's background (the median grey of the page). Paper tint, grey paper, scanner noise and show-through inside this margin are not ink; the faint text of a faded copy (35 to 45 levels darker) is. |
+| `blank_dark_page` | int (grey level) | `128` | A page whose median grey is below this is not paper (a black cover, a full-bleed picture) and counts as all ink. |
 
-Unknown keys in this table are ignored without an error (see [Validation](#validation)).
+Unknown keys in this table are an error (see [Validation](#validation)).
+
+**Blank pages.** Before this rule, a page with fewer than `min_chars` characters went to OCR even when nothing was printed on it, and the model wrote a page that is not there (on the reference corpus, 67 of 79 blank pages came back with 3,500 to 12,200 characters of invented text, 308 thousand characters in 7 books). The rule looks at the image docingest renders for OCR anyway, so it adds no rendering, and only pages with at most `blank_max_chars` characters are measured, so text-layer pages are never rendered. The ink share is the fraction of pixels darker than the page background by `blank_ink_contrast` levels, with the background taken as the median grey. A page whose median grey is below `blank_dark_page` (a black cover, a full-bleed picture) counts as all ink. The image is smoothed with a 3x3 median filter first (about 25 ms for a page, only for pages with at most `blank_max_chars` characters), which removes single-pixel noise but keeps strokes. The contrast is a compromise measured on synthetic blank pages and on the reference sample: at 48 a full page of text 45 levels darker than its paper (a faded copy) had no ink at all and was emptied; at 16 without the filter, Gaussian noise of sigma 5, paper grain and 40-level show-through, and a grey-paper scan (median grey 213) all measured 0.0007 to 0.06 and were sent back to OCR. With the filter and 32: Gaussian noise up to sigma 12 on white or grey paper, grain, blurred 40-level show-through and a grey-paper scan (median 213) measure 0.0, and the paper of a heavy texture (sigma 10, blurred) 0.0006 in a review probe, just over the threshold; faint text 35 and 45 levels darker measures 0.003 and 0.007 with the thin bitmap font of the tests (0.004 and 0.018 with a text-like font), 7 to 37 times the threshold. The record of a blank page has `method = "blank"`, `n_chars = 0`, no model fields, and a probe with `needs_ocr = false` whose reason holds the measurements (`blank page: 0 embedded chars (<=10), 0.00000 of the pixels inked (<0.0005)`). The page-number text of a blank page is dropped. A page that is blank by ink but whose text layer holds a letter outside a page number (a digit, a dash, a roman numeral; a layer of only punctuation, such as scanner specks, does not count) keeps that text: a born-digital `Index` or `Part I` page has under 0.0005 ink and 5 characters, and is recorded as `text_layer` (reason `N embedded chars and no other ink: the text layer is the page`), not emptied.
+
+Values measured with the defaults on pages rendered at 150 dpi:
+
+| Page | Embedded chars | Ink share |
+|---|---|---|
+| 3 blank pages of the reference sample | 0 | 0.000000 |
+| 7 scanned pages without a text layer (the sparsest) | 0 | 0.093 to 0.135 |
+| a part-title page with 16 characters (smallest non-blank page of the sample) | 16 | 0.0036 |
+| page number only, 11 pt, synthetic (`42`, `xiv`, `- 123 -`) | 2 to 5 | 0.00009 to 0.00016 |
+| two words in 24 pt, synthetic (`Part IV`) | 6 | 0.00088 |
+| 60 characters in 11 pt, one line, synthetic | 60 | 0.0022 |
+
+`blank_max_ink = 0.0005` is about 3 times the ink of the largest page number measured (0.00016), and a "Part IV" title in 24 pt measures 0.00088, 1.8 times the threshold (0.00066 to 0.0011 with other fonts): the margins are 3x below and under 2x above, not more. Single short words up to about 18 pt ("Index", "Part I", "Notes": 0.0002 to 0.0003) fall below the threshold: with a text layer their text is kept, but a scan of such a page without a text layer is emptied. `blank_max_chars = 10` allows a page number and little else. A scan with a dark border or a shadow along the spine is not blank (the rule errs towards OCR).
 
 ### `[ocr]`
 
@@ -400,7 +420,7 @@ flowchart LR
 
 | Setting | Changes the cache key of |
 |---|---|
-| `[routing]` (any key) | PDFs |
+| `[routing]` (any key, the `blank_*` ones included) | PDFs |
 | `[ocr] repo_id`, `revision`, `profile`, `prompt`, `max_side`, `dpi`, `max_tokens`, `temperature`, `repetition_penalty` (after profile defaults are applied), and the profile's own settings (including its `code_version`); with `mlx-vlm`, also the installed mlx-vlm version | PDFs (even pages that end up on the text layer) and images |
 | `[ocr] base_url`, `served_model` (with `openai-compatible`) | PDFs and images |
 | `[ocr] timeout_s`, `retries`, `api_key_env` | nothing (transport only) |
