@@ -28,9 +28,11 @@ from PIL import Image
 
 from ...domain.errors import OcrError
 from ...domain.models import ModelRef
+from ...domain.ocr_guards import OcrGuards, image_area_sq_in
 from ...ports import OcrResult
+from .ladder import Attempt, Generation, LimitRefused, run_ladder
 from .mlx_vlm import fit_image
-from .profiles import OcrProfile, acceptable, attempts
+from .profiles import OcrProfile
 
 if TYPE_CHECKING:
     from ...config import OcrConfig
@@ -120,11 +122,13 @@ class OpenAICompatibleOcr:
         timeout_s: float = DEFAULT_TIMEOUT_S,
         retries: int = DEFAULT_RETRIES,
         backoff_s: float = 1.0,
+        guards: OcrGuards | None = None,
     ):
         if not base_url.startswith(("http://", "https://")):
             raise ValueError(f"[ocr] base_url must be an http(s) URL, got {base_url!r}")
         self.model = model
         self.profile = profile
+        self.guards = guards or OcrGuards()
         self.dpi = dpi
         self.base_url = base_url.rstrip("/")
         self.served_model = served_model or model.repo_id
@@ -151,6 +155,7 @@ class OpenAICompatibleOcr:
                 "chat_kwargs": profile.chat_kwargs,
                 "prompt_first": profile.prompt_first,
                 "ladder": profile.ladder,
+                "guards": self.guards.model_dump(),
                 "validated": profile.valid is not None,
                 "dpi": dpi,
                 "max_tokens": self.max_tokens,
@@ -182,27 +187,30 @@ class OpenAICompatibleOcr:
     def transcribe(self, image: Image.Image) -> OcrResult:
         data_url = _png_data_url(fit_image(image, self.profile.max_side))
         t0 = time.perf_counter()
-        choice: dict[str, Any] = {}
-        usage: dict[str, Any] = {}
-        finishes: list[str | None] = []
-        total_tokens = 0
-        best: tuple[dict[str, Any], dict[str, Any]] | None = None
-        for temperature, penalty in attempts(
-            self.profile, self.temperature, self.repetition_penalty
-        ):
-            reply = self._post(self._body(data_url, temperature, penalty))
-            choice = _first_choice(reply)
-            usage = reply.get("usage") or {}
-            finishes.append(choice.get("finish_reason"))
-            total_tokens += int(usage.get("completion_tokens") or 0)
-            raw = _content_text(choice)
-            if any(c.isalnum() for c in self.profile.postprocess(raw)):
-                best = (choice, usage)  # latest attempt with text, in case none is valid
-            if acceptable(self.profile, raw, choice.get("finish_reason")):
-                best = (choice, usage)
-                break
-        if best is not None:
-            choice, usage = best
+
+        def ask(attempt: Attempt, n: int) -> tuple[dict[str, Any], dict[str, Any]]:
+            body = self._body(data_url, attempt.temperature, attempt.penalty, attempt.max_tokens)
+            try:
+                reply = self._post(body)
+            except OcrServerError as e:
+                if e.status == 400 and attempt.max_tokens > self.max_tokens:
+                    # The context does not hold prompt plus the larger limit: keep the
+                    # truncated page we have rather than failing the document.
+                    raise LimitRefused(str(e)) from e
+                raise
+            return _first_choice(reply), reply.get("usage") or {}
+
+        replies, k = run_ladder(
+            self.profile,
+            self.guards,
+            temperature=self.temperature,
+            penalty=self.repetition_penalty,
+            max_tokens=self.max_tokens,
+            area_sq_in=image_area_sq_in(image.width, image.height, image.info.get("dpi")),
+            generate=ask,
+            read=lambda r: Generation(_content_text(r[0]), r[0].get("finish_reason")),
+        )
+        choice, usage = replies[k]
         return OcrResult(
             text=self.profile.postprocess(_content_text(choice)),
             seconds=time.perf_counter() - t0,
@@ -210,9 +218,9 @@ class OpenAICompatibleOcr:
             finish_reason=choice.get("finish_reason"),
             # The whole ladder, so a benchmark sees a loop that a retry fixed. Decode time
             # is not observable over HTTP: gen_seconds stays None.
-            attempts=len(finishes),
-            first_finish_reason=finishes[0] if finishes else None,
-            total_gen_tokens=total_tokens,
+            attempts=len(replies),
+            first_finish_reason=replies[0][0].get("finish_reason"),
+            total_gen_tokens=sum(int(u.get("completion_tokens") or 0) for _, u in replies),
             raw_text=_content_text(choice),
         )
 
@@ -222,7 +230,9 @@ class OpenAICompatibleOcr:
         # Same order the model was trained with (olmOCR: text first); default image first.
         return [text, image] if self.profile.prompt_first else [image, text]
 
-    def _body(self, data_url: str, temperature: float, penalty: float | None) -> dict[str, Any]:
+    def _body(
+        self, data_url: str, temperature: float, penalty: float | None, max_tokens: int
+    ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.served_model,
             "messages": [
@@ -232,7 +242,7 @@ class OpenAICompatibleOcr:
                 }
             ],
             "temperature": temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens,
             "stream": False,
         }
         # Not in the OpenAI spec; vLLM, mlx_vlm.server, LM Studio honour it and most

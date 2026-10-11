@@ -96,6 +96,9 @@ class PageRecord(BaseModel):
     model_revision: str | None = None
     gen_tokens: int | None = None
     finish_reason: str | None = None
+    # What the pipeline did about this page beyond the plain route: OCR output that was
+    # rejected, or cut at the token limit. Empty for an ordinary page.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class DocumentManifest(BaseModel):

@@ -417,7 +417,7 @@ Seven ports carry a `fingerprint`: `PdfReader`, `OcrEngine`, `ImageSource`, `Doc
 |---|---|
 | `PdfiumReader` | `"pypdfium2 "` plus the installed pypdfium2 version |
 | `PillowImageSource` | `"pillow "` plus the installed Pillow version |
-| `MlxVlmOcr` | `"mlx-vlm "` plus sorted JSON of: mlx-vlm version, model (`repo_id`, `revision`), profile name and `code_version`, prompt, `max_side`, `chat_kwargs`, `prompt_first`, retry ladder, whether the profile validates output, `dpi`, `max_tokens`, `temperature`, `repetition_penalty` |
+| `MlxVlmOcr` | `"mlx-vlm "` plus sorted JSON of: mlx-vlm version, model (`repo_id`, `revision`), profile name and `code_version`, prompt, `max_side`, `chat_kwargs`, `prompt_first`, retry ladder, the output-check thresholds (`guards`), whether the profile validates output, `dpi`, `max_tokens`, `temperature`, `repetition_penalty` |
 | `OpenAICompatibleOcr` | `"openai-compatible "` plus sorted JSON of: `base_url`, `served_model`, `repo_id@revision`, and the same profile and generation settings as above. Transport settings (`timeout_s`, `retries`, the API key) are excluded because they cannot change the text. |
 | `PandocLatexConverter` | adapter revision (`REVISION`), pandoc version, the pandoc arguments, `split_level`, and the pylatexenc version or `no fallback` |
 | `DoclingConverter` | `"docling "` plus the installed docling version, or `docling missing` |

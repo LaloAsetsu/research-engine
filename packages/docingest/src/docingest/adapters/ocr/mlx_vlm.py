@@ -11,9 +11,11 @@ from typing import Any
 from PIL import Image, ImageOps
 
 from ...domain.models import ModelRef
+from ...domain.ocr_guards import OcrGuards, image_area_sq_in
 from ...ports import OcrResult
 from ..models.huggingface import resolve
-from .profiles import OcrProfile, acceptable, attempts
+from .ladder import Attempt, Generation, run_ladder
+from .profiles import OcrProfile
 
 
 def fit_image(img: Image.Image, max_side: int) -> Image.Image:
@@ -58,9 +60,11 @@ class MlxVlmOcr:
         max_tokens: int | None = None,
         temperature: float = 0.0,
         repetition_penalty: float | None = None,
+        guards: OcrGuards | None = None,
     ):
         self.model = model
         self.profile = profile
+        self.guards = guards or OcrGuards()
         self.dpi = dpi
         # None -> the profile's model-card defaults
         self.max_tokens = max_tokens or profile.max_tokens
@@ -79,6 +83,7 @@ class MlxVlmOcr:
                 "chat_kwargs": profile.chat_kwargs,
                 "prompt_first": profile.prompt_first,
                 "ladder": profile.ladder,
+                "guards": self.guards.model_dump(),
                 "validated": profile.valid is not None,
                 "dpi": dpi,
                 "max_tokens": self.max_tokens,
@@ -150,44 +155,42 @@ class MlxVlmOcr:
         # reproduces a retried page's text instead of drawing a new one.
         seed = zlib.crc32(img.tobytes())
         t0 = time.perf_counter()
-        res = best = None
-        first_finish = None
-        n, total_tokens = 0, 0
-        decode_s: float | None = 0.0
-        ladder = attempts(self.profile, self.temperature, self.repetition_penalty)
-        for temperature, penalty in ladder:
-            kwargs: dict = {"max_tokens": self.max_tokens, "temperature": temperature}
-            if penalty:
-                kwargs["repetition_penalty"] = penalty
-            if temperature > 0:
+
+        def generate_once(attempt: Attempt, n: int) -> Any:
+            kwargs: dict = {"max_tokens": attempt.max_tokens, "temperature": attempt.temperature}
+            if attempt.penalty:
+                kwargs["repetition_penalty"] = attempt.penalty
+            if attempt.temperature > 0:
                 mx.random.seed(seed + n)
             images: Any = [img]  # mlx-vlm accepts PIL images; its hint says paths only
-            res = generate(
+            return generate(
                 self._model, self._processor, prompt, image=images, verbose=False, **kwargs
             )
-            # Every attempt counts: a max_tokens loop that a retry fixed is still a
-            # truncation, and its tokens and time are real work.
-            n += 1
-            first_finish = res.finish_reason if first_finish is None else first_finish
-            total_tokens += res.generation_tokens
-            step = _decode_seconds(res)
-            decode_s = None if decode_s is None or step is None else decode_s + step
-            if any(c.isalnum() for c in self.profile.postprocess(res.text)):
-                best = res  # keep the latest attempt that has text, in case none is valid
-            if acceptable(self.profile, res.text, res.finish_reason):
-                best = res
-                break
-        chosen = best or res
-        assert chosen is not None
+
+        replies, k = run_ladder(
+            self.profile,
+            self.guards,
+            temperature=self.temperature,
+            penalty=self.repetition_penalty,
+            max_tokens=self.max_tokens,
+            area_sq_in=image_area_sq_in(image.width, image.height, image.info.get("dpi")),
+            generate=generate_once,
+            read=lambda r: Generation(r.text, r.finish_reason),
+        )
+        # Every attempt counts: a max_tokens loop that a retry fixed is still a
+        # truncation, and its tokens and time are real work.
+        steps = [_decode_seconds(r) for r in replies]
+        decode_s = None if None in steps else sum(s for s in steps if s is not None)
+        chosen = replies[k]
         return OcrResult(
             text=self.profile.postprocess(chosen.text),
             seconds=time.perf_counter() - t0,
             gen_tokens=chosen.generation_tokens,
             finish_reason=chosen.finish_reason,
             peak_memory_gb=getattr(chosen, "peak_memory", None),
-            attempts=n,
-            first_finish_reason=first_finish,
-            total_gen_tokens=total_tokens,
+            attempts=len(replies),
+            first_finish_reason=replies[0].finish_reason,
+            total_gen_tokens=sum(r.generation_tokens for r in replies),
             gen_seconds=decode_s,
             raw_text=chosen.text,
         )

@@ -58,7 +58,7 @@ def iter_inputs(paths: list[Path]) -> list[Path]:
 
 def _summary(stored: list[StoredDocument]) -> None:
     table = Table(title="Ingestion summary")
-    for col in ("document", "kind", "pages", "page methods", "seconds", "doc_id"):
+    for col in ("document", "kind", "pages", "page methods", "warnings", "seconds", "doc_id"):
         table.add_column(col)
     for d in stored:
         m = d.manifest
@@ -69,6 +69,7 @@ def _summary(stored: list[StoredDocument]) -> None:
             m.source_kind.value,
             pages,
             ", ".join(f"{k}×{v}" for k, v in methods.most_common()),
+            str(sum(bool(p.warnings) for p in m.pages) or ""),  # pages OCR output was rejected on
             f"{m.total_seconds:.1f}",
             m.doc_id[:12],
         )

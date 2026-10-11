@@ -75,6 +75,23 @@ def inked(size: tuple[int, int] = (850, 1100), lines: int = 12) -> Image.Image:
     return img
 
 
+class ScriptedOcr(FakeOcr):
+    """Answers call n with ``texts[n]`` (the last one repeats); ``finish`` is the reason of all."""
+
+    def __init__(self, *texts: str, finish: str = "stop", model: str = "fake/ocr"):
+        super().__init__(texts[0], model)
+        self.texts = texts
+        self.finish = finish
+        self.fingerprint = f"scripted-ocr {model} {texts!r} {finish}"
+
+    def transcribe(self, image: Image.Image) -> OcrResult:
+        text = self.texts[min(self.calls, len(self.texts) - 1)]
+        self.calls += 1
+        return OcrResult(
+            text=text, seconds=0.01, gen_tokens=len(text) // 4, finish_reason=self.finish
+        )
+
+
 @dataclass
 class FakePage:
     signals_: PageSignals
@@ -153,12 +170,18 @@ class FakeDetector:
 
 
 class FakeImages:
-    def __init__(self, n_frames: int = 1, fingerprint: str = "fake-images 1"):
+    def __init__(
+        self,
+        n_frames: int = 1,
+        fingerprint: str = "fake-images 1",
+        size: tuple[int, int] = (10, 10),
+    ):
         self.n_frames = n_frames
         self.fingerprint = fingerprint
+        self.size = size
 
     def frames(self, path: Path) -> list[Image.Image]:
-        return [Image.new("RGB", (10, 10), "white") for _ in range(self.n_frames)]
+        return [Image.new("RGB", self.size, "white") for _ in range(self.n_frames)]
 
 
 class FakeConverter:

@@ -23,6 +23,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 |---|---|---|
 | `models.py` | `SourceKind`, `PageMethod`, `PageSignals`, `PageProbe`, `ModelRef`, `SourceMetadata`, `PageRecord`, `DocumentManifest` (pydantic models and `StrEnum`s) | every layer |
 | `routing.py` | `RoutingPolicy` (thresholds, the `[routing]` config section), `decide()`, and the blank-page rule (`could_be_blank`, `is_blank`, `blank_probe`) | `IngestService` for every PDF page, `config.AppConfig.routing` |
+| `ocr_guards.py` | `OcrGuards` (thresholds), `OutputProblem`, `find_problem`, `is_looping`, `retry_max_tokens`, `duplicate_pages` | the OCR adapters' retry ladder, `IngestService` |
 | `text.py` | `HYPHEN_MARK`, `garbage_ratio`, `alpha_ratio`, `text_vocabulary`, `clean_text_layer`, `render_markdown`, `split_pages` | PDF adapter (signals), `IngestService` (clean-up, rendering), synthetic benchmark suite (clean reference text), PaperQA2 adapter and hook, `eval-ocr` command (splitting) |
 | `chunking.py` | `Chunk`, `chunk_pages`, `CHUNKER_VERSION`, `CHUNK_CHARS`, `OVERLAP` | `ports` (`Chunk` is re-exported there); the chunk index and `AskService` use it through those |
 | `errors.py` | `DocingestError` and its subclasses | adapters raise them, application and entrypoints handle them |
@@ -109,6 +110,7 @@ classDiagram
         +str model_revision
         +int gen_tokens
         +str finish_reason
+        +List~str~ warnings
     }
     class DocumentManifest {
         +str doc_id
@@ -156,7 +158,7 @@ A `StrEnum` naming how the text of one page or segment was produced. It is store
 |---|---|---|---|
 | `TEXT_LAYER` | `"text_layer"` | `IngestService`, when `decide()` finds the embedded text usable; the text is the cleaned text layer | PDF |
 | `BLANK` | `"blank"` | `IngestService`, for a page that would go to OCR for lack of text but has at most `blank_max_chars` characters and fewer than `blank_max_ink` inked pixels; the text is empty and OCR is not called | PDF |
-| `VLM_OCR` | `"vlm_ocr"` | `IngestService` through `OcrEngine.transcribe()` | PDF pages that need OCR, every image frame |
+| `VLM_OCR` | `"vlm_ocr"` | `IngestService` through `OcrEngine.transcribe()` (an empty page whose OCR output was rejected also has this method) | PDF pages that need OCR, every image frame |
 | `DOCLING` | `"docling"` | `DoclingConverter` | OFFICE |
 | `LATEX` | `"latex"` | `PandocLatexConverter`, when pandoc succeeds (one segment per section) | LATEX |
 | `LATEX_PLAINTEXT` | `"latex_plaintext"` | `PandocLatexConverter`, when it falls back to pylatexenc plain text | LATEX |
@@ -239,6 +241,7 @@ Provenance of one page (PDF), frame (image) or segment (converter).
 | `model_revision` | `str \| None` | `None` | OCR pages | `OcrEngine.model.revision`. |
 | `gen_tokens` | `int \| None` | `None` | OCR pages | Tokens generated for the attempt whose text was kept. |
 | `finish_reason` | `str \| None` | `None` | OCR pages | Why generation stopped, for example `"stop"` or `"length"` (a truncation). |
+| `warnings` | `list[str]` | `[]` | OCR pages | What the pipeline did about the page beyond the plain route: the OCR output was rejected (`OCR output rejected (<why>); the text layer was used` or `...; the page was left empty`) or cut off at the token limit. Empty for an ordinary page; manifests written before the field existed load with `[]`. |
 
 ### `DocumentManifest`
 
@@ -281,12 +284,12 @@ Derived members:
 2. `len(pages) == n_pages` and `pages[i].index == i`.
 3. `n_pages <= source_pages`. A result is complete exactly when they are equal.
 4. `config_hash` is the first 12 hex characters of the SHA-256 of a JSON list `[PIPELINE_VERSION, source_kind value, ocr_all, *parts]`, where `parts` depends on the kind:
-   - PDF: the routing policy as JSON, `PdfReader.fingerprint`, `OcrEngine.fingerprint`;
-   - IMAGE: `ImageSource.fingerprint`, `OcrEngine.fingerprint`;
+   - PDF: the routing policy as JSON, the OCR output-check thresholds (`OcrGuards`) as JSON, `PdfReader.fingerprint`, `OcrEngine.fingerprint`;
+   - IMAGE: the `OcrGuards` JSON, `ImageSource.fingerprint`, `OcrEngine.fingerprint`;
    - OFFICE, LATEX, TEXT: the fingerprint of that kind's converter.
 
    It is computed by `IngestService.config_hash()`; the domain only stores it.
-5. `ocr_model` is set if and only if some page has `method == VLM_OCR`.
+5. `ocr_model` is set if and only if some page has `method == VLM_OCR`. A page whose OCR output was rejected and replaced by its text layer has `method == TEXT_LAYER`, and `PageRecord.warnings` says why.
 6. `title` is always set by `IngestService`: `metadata.title`, else the document's own title (PDF `Title` info or the converter's title), else the file name without its last suffix (`Path.stem`).
 7. A store treats a result as canonical only when it is complete and `ocr_all` is `False` (and it was not produced by a degraded fallback). Everything else is a variant that never replaces a canonical result.
 8. After creation a manifest changes only in one way: when a cached result is served with new metadata, `IngestService` replaces `metadata` and `title` (with `model_copy`) and saves it again in place.

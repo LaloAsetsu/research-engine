@@ -296,11 +296,92 @@ def test_length_finish_climbs_the_retry_ladder(serve):
 
 
 def test_ladder_stops_after_three_attempts(serve):
-    server = serve(*[completion("loop", "length", 4096)] * 4)
+    # The third rung (0.5, 1.25) rescued 3 of the 6 corpus pages that reached it.
+    server = serve(*[completion("loop " * 100, "length", 4096)] * 4)
     res = engine(server.base_url).transcribe(page())
-    assert res.finish_reason == "length" and res.gen_tokens == 4096
+    assert res.finish_reason == "length" and res.gen_tokens == 4096 and res.attempts == 3
     sent = [(r.body["temperature"], r.body["repetition_penalty"]) for r in server.seen]
     assert sent == [(0.0, 1.05), (0.2, 1.15), (0.5, 1.25)]
+    assert len(server.replies) == 1  # the fourth scripted reply was never requested
+
+
+def test_a_dense_page_that_ran_out_of_tokens_is_asked_again_with_more_room(serve):
+    table = "".join(f"| {i} | {i * 3} |\n" for i in range(400))
+    server = serve(completion(table, "length", 4096), completion(table + "| end |", "stop", 5000))
+    res = engine(server.base_url).transcribe(page())
+    assert res.text.endswith("| end |") and res.finish_reason == "stop"
+    assert [r.body["max_tokens"] for r in server.seen] == [4096, 8192]
+    assert {(r.body["temperature"], r.body["repetition_penalty"]) for r in server.seen} == {
+        (0.0, 1.05)
+    }  # the same setting: the text was fine, it just did not fit
+    assert (res.attempts, res.first_finish_reason, res.total_gen_tokens) == (2, "length", 9096)
+
+
+def test_a_loop_keeps_the_token_budget(serve):
+    server = serve(completion("loop " * 100, "length", 4096), completion("# Done", "stop", 20))
+    engine(server.base_url).transcribe(page())
+    assert [r.body["max_tokens"] for r in server.seen] == [4096, 4096]
+
+
+def test_a_page_still_cut_off_with_the_larger_limit_ends_the_ladder_with_the_longer_answer(serve):
+    # A stricter sampling at half the room cannot finish a table that did not fit in 8192;
+    # a third request would cost another 115 s and answer with less.
+    short = "".join(f"| {i} | {i * 3} |\n" for i in range(400))
+    long = "".join(f"| {i} | {i * 3} |\n" for i in range(800))
+    server = serve(
+        completion(short, "length", 4096), completion(long, "length", 8192), completion("x", "stop")
+    )
+    res = engine(server.base_url).transcribe(page())
+    assert res.text.strip() == long.strip() and res.attempts == 2
+    assert [r.body["max_tokens"] for r in server.seen] == [4096, 8192]
+    assert len(server.replies) == 1  # the third reply was never requested
+
+
+def test_a_server_that_cannot_hold_the_raised_limit_keeps_the_truncated_page(serve):
+    # Old risk: HTTP 400 on max_tokens 8192 failed the whole document; before the raise the
+    # page was kept, truncated.
+    table = "".join(f"| {i} | {i * 3} |\n" for i in range(400))
+    server = serve(
+        completion(table, "length", 4096), error(400, "context length is 4096, you asked for 9000")
+    )
+    res = engine(server.base_url).transcribe(page())
+    assert res.text.startswith("| 0 | 0 |") and res.finish_reason == "length"
+    assert res.attempts == 1 and [r.body["max_tokens"] for r in server.seen] == [4096, 8192]
+
+
+def test_a_400_at_the_configured_limit_is_still_an_error(serve):
+    server = serve(error(400, "bad request"))
+    with pytest.raises(OcrServerError, match="HTTP 400"):
+        engine(server.base_url).transcribe(page())
+
+
+def test_a_profile_near_the_ceiling_keeps_its_stricter_retry(serve):
+    # Nanonets runs at 8000 tokens: a raise to 8192 would gain 2% and spend the only retry.
+    cut = "".join(f"| {i} | {i * 3} |\n" for i in range(400))
+    profile = profile_for("nanonets", max_side=MAX_SIDE)
+    server = serve(
+        completion(cut, "length", 8000), completion("# Done", "stop", 20), profile=profile
+    )
+    engine(server.base_url, profile).transcribe(page())
+    assert [(r.body["max_tokens"], r.body["temperature"]) for r in server.seen] == [
+        (8000, 0.0),
+        (8000, 0.2),
+    ]
+
+
+def test_an_image_without_a_size_has_no_length_bound(serve):
+    long = " ".join(f"word{i}" for i in range(2000))
+    server = serve(completion(long, "stop", 3000))
+    res = engine(server.base_url).transcribe(page((300, 100)))
+    assert res.attempts == 1 and res.text.endswith("word1999")
+
+
+def test_text_too_long_for_a_small_image_is_retried(serve):
+    server = serve(completion("word " * 400, "stop", 500), completion("# Done", "stop", 20))
+    small = page((300, 100))
+    small.info["dpi"] = (150, 150)  # 2 x 0.7 inch
+    res = engine(server.base_url).transcribe(small)
+    assert res.text == "# Done" and res.attempts == 2
 
 
 @pytest.mark.parametrize("body", [{"object": "error"}, {"choices": []}, "not an object"])

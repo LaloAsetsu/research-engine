@@ -58,7 +58,7 @@ The codebase uses a hexagonal (ports and adapters) architecture, so the OCR mode
 
 - **One canonical output for every input type.** `document.md` with `<!-- page N | method=... -->` markers, and `manifest.json` with full provenance ([format](#canonical-output-format)).
 - **Per-page OCR routing for PDFs.** Four rules taken from Marker and olmOCR decide per page between the embedded text layer and OCR, and every matching rule is recorded as a reason; a page with no text and no ink is blank and never reaches OCR ([routing](#per-page-pdf-routing), [ADR 0002](docs/adr/0002-per-page-routing-and-content-addressed-cache.md)).
-- **Local vision-language OCR.** In-process with mlx-vlm on Apple Silicon, or over HTTP to any OpenAI-compatible server. Per-model profiles set the prompt, input size, output clean-up and generation limits from each model's card, and a retry ladder handles truncated or invalid outputs ([OCR](#ocr-models-and-benchmark)).
+- **Local vision-language OCR.** In-process with mlx-vlm on Apple Silicon, or over HTTP to any OpenAI-compatible server. Per-model profiles set the prompt, input size, output clean-up and generation limits from each model's card; one retry handles truncated or invalid outputs, and the output is checked for loops, text no page could hold and text repeated across pages ([OCR](#ocr-models-and-benchmark)).
 - **Document-level de-hyphenation.** A line-end hyphen in the text layer is removed only when the joined word occurs elsewhere in the same document.
 - **LaTeX-first arXiv crawler.** Search by arXiv query syntax or by id list, polite rate limiting shared by every request, source-first download with PDF fallback, license lookup through OAI-PMH, and metadata sidecars ([crawl](#arxiv-crawl), [ADR 0003](docs/adr/0003-latex-first-for-arxiv.md)).
 - **Robust LaTeX conversion.** Safe archive extraction, arXiv-style main-file detection, a Python flattener for includes, pandoc in `--sandbox` mode with a timeout and heap cap, and a pylatexenc plain-text fallback ([LaTeX](#latex-conversion)).
@@ -157,8 +157,10 @@ flowchart TD
     FR --> RENDER
     RENDER --> BLANK{"At most blank_max_chars chars and ink below blank_max_ink?"}
     BLANK -->|"yes"| REC0["PageRecord method = blank, empty text, never OCR"]
-    BLANK -->|"no"| OCRT["OcrEngine.transcribe"]
-    OCRT --> REC1["PageRecord method = vlm_ocr, with probe, model, revision, tokens, finish reason"]
+    BLANK -->|"no"| OCRT["OcrEngine.transcribe, up to three attempts"]
+    OCRT --> CHK{"Output a loop, too long for the page, or a repeat of an earlier page?"}
+    CHK -->|"no"| REC1["PageRecord method = vlm_ocr, with probe, model, revision, tokens, finish reason"]
+    CHK -->|"yes"| FALL["Text layer if usable, else empty page; PageRecord.warnings says why"]
     TL --> KEEP["Keep the raw text layer"]
     KEEP --> DEH["After the last page: clean_text_layer with the whole document's vocabulary"]
     DEH --> REC2["PageRecord method = text_layer, with probe"]
@@ -382,7 +384,7 @@ Markdown transcription of page 2 ...
 | `source_path`, `source_name`, `source_kind`, `mime`, `size_bytes` | what was ingested |
 | `n_pages`, `source_pages` | pages or segments processed in this run, and in the source; `n_pages < source_pages` means a partial run |
 | `max_pages`, `ocr_all` | run options, recorded for provenance |
-| `pages` | one `PageRecord` per page or segment: `index`, `method`, `n_chars`, `seconds`, `engine`, `title` (section title), `probe` (routing signals, `needs_ocr`, `reasons`), and for OCR pages `model`, `model_revision`, `gen_tokens`, `finish_reason` |
+| `pages` | one `PageRecord` per page or segment: `index`, `method`, `n_chars`, `seconds`, `engine`, `title` (section title), `probe` (routing signals, `needs_ocr`, `reasons`), for OCR pages `model`, `model_revision`, `gen_tokens`, `finish_reason`, and `warnings` (OCR output that was rejected or cut off; empty for an ordinary page) |
 | `pipeline_version`, `config_hash` | cache identity |
 | `ocr_model` | `repo_id` and `revision` of the OCR model, when any page used OCR |
 | `title`, `metadata` | title and `SourceMetadata` (title, authors, year, abstract, doi, arxiv_id, version, url, license, categories) |
@@ -678,7 +680,11 @@ The OCR model is configuration. `[ocr]` names a Hugging Face `repo_id`, an exact
 | `glm-ocr` | `Text Recognition:` | 1600 | 8192 | thinking-enabled chat template, repetition penalty 1.1 |
 | `paddleocr-vl` | `OCR:` | 1600 | 4096 | the model's own processor caps the input at about one megapixel |
 
-A page is retried when the output hits `max_tokens` (usually a repetition loop), has no letter or digit left after clean-up, or is invalid for the profile. Unless the profile defines its own ladder, the attempts are the configured `[ocr].temperature` (0.0, greedy, by default), then temperature 0.2 and 0.5 with a stronger repetition penalty (at least 1.15, then at least 1.25). If no attempt is acceptable, the last attempt that produced text is kept. With mlx-vlm, sampled retries are seeded from the page image, so a rerun reproduces them. `[ocr]` keys `prompt`, `max_side`, `max_tokens` and `repetition_penalty` override the profile.
+A page is retried when the output hits `max_tokens`, is a loop, holds more text than the page could, has no letter or digit left after clean-up, or is invalid for the profile. Unless the profile defines its own ladder there are up to three attempts: the first uses the configured `[ocr].temperature` (0.0, greedy, by default), the second temperature 0.2 and a stronger repetition penalty (at least 1.15), the third temperature 0.5 and at least 1.25 (in the corpus run the third rescued 3 of the 6 pages that reached it). A page that only ran out of tokens (a long table, not a loop) is retried instead with the same settings and twice the limit, up to 8192, and kept truncated if the server cannot take that limit. If no attempt is acceptable, the least bad one is kept. With mlx-vlm, sampled retries are seeded from the page image, so a rerun reproduces them. `[ocr]` keys `prompt`, `max_side`, `max_tokens` and `repetition_penalty` override the profile.
+
+**Checks on the output.** After the retries `IngestService` rejects output that is a loop, holds more than about 150 content characters per square inch of page (images without a resolution have no such bound), or repeats the text of an earlier page of the same document. A rejected page falls back to its text layer when it has a usable one, and is otherwise an empty page; its `warnings` in the manifest say why. A page that is still cut off at the token limit keeps its text and a warning. The tests and their measured basis are in [config/README.md](config/README.md#checks-on-the-ocr-output).
+
+**Comparability.** The numbers of the benchmark in [docs/benchmark.md](docs/benchmark.md) were measured before the OCR output checks (loops, text longer than a page can hold, a larger `max_tokens` for a dense page that ran out of tokens, a refused larger limit keeping the truncated page). Their thresholds are part of both OCR engines' fingerprints, so every cached benchmark result is recomputed on the next run, and a new run is not comparable with these numbers: the retry ladder now reacts to different problems and a truncated page may be retried with a larger limit. The thresholds are the fields of `OcrGuards` in `domain/ocr_guards.py`.
 
 Candidates configured in [`config/benchmark.toml`](config/benchmark.toml), each pinned to a commit:
 

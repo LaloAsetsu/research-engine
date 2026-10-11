@@ -10,6 +10,8 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
+from ...domain.ocr_guards import OcrGuards
+
 # Models wrap output in a code fence, often without closing it (truncated or just
 # sloppy), and sometimes label it yaml when it opens with front matter: strip the
 # opening and closing fence lines independently.
@@ -155,24 +157,12 @@ def profile_for(
 
 
 def attempts(
-    profile: OcrProfile, temperature: float, penalty: float | None
+    profile: OcrProfile, temperature: float, penalty: float | None, guards: OcrGuards | None = None
 ) -> list[tuple[float, float | None]]:
-    """The retry ladder: the profile's own, else greedy first, then a little sampling
-    and a stronger repetition penalty (a max_tokens hit usually means a loop)."""
+    """The retry ladder: the profile's own, else greedy first and then ONE stricter retry
+    (a little sampling and a stronger repetition penalty: a max_tokens hit usually means a
+    loop). More attempts only repeat the same loop at the cost of a full token budget."""
     if profile.ladder:
         return list(profile.ladder)
-    return [
-        (temperature, penalty),
-        (0.2, max(penalty or 1.0, 1.15)),
-        (0.5, max(penalty or 1.0, 1.25)),
-    ]
-
-
-def acceptable(profile: OcrProfile, raw: str, finish_reason: str | None) -> bool:
-    """Stop retrying: not truncated, some text left after clean-up, and valid for the
-    profile (e.g. olmOCR front matter present)."""
-    if finish_reason == "length":
-        return False
-    if not any(c.isalnum() for c in profile.postprocess(raw)):
-        return False
-    return profile.valid is None or profile.valid(raw)
+    stricter = [(0.2, max(penalty or 1.0, 1.15)), (0.5, max(penalty or 1.0, 1.25))]
+    return [(temperature, penalty), *stricter][: (guards or OcrGuards()).max_attempts]

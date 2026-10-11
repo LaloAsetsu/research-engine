@@ -2,6 +2,8 @@
 
 This benchmark compares local vision-language models for transcribing scanned research pages. It covers accuracy (overall and per document type), speed, memory, and failure modes such as truncation, repetition loops and empty output. It **presents comparisons only and does not choose a model**. The right choice depends on the corpus mix, the latency budget and the hardware, and it is left to the reader. Every number here comes from runs on one Apple M4 Pro with 24 GB. The runs are reproducible with `docingest bench` (see the end of this document).
 
+**Comparability.** The numbers on this page were measured before the OCR output checks (loops, text longer than a page can hold, a larger `max_tokens` for a dense page that ran out of tokens, a refused larger limit keeping the truncated page). Their thresholds are part of both OCR engines' fingerprints, so every cached benchmark result is recomputed on the next run, and a new run is not comparable with these numbers: the retry ladder now reacts to different problems and a truncated page may be retried with a larger limit. The thresholds are the fields of `OcrGuards` in `domain/ocr_guards.py`.
+
 <!-- RESULTS -->
 
 ## Results

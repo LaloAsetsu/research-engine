@@ -666,7 +666,7 @@ PROFILES: dict[str, OcrProfile] = {
 How the retries work:
 
 - `attempts()` returns the profile's `ladder` if it has one. Otherwise it returns three attempts: the configured temperature and penalty, then `0.2` with a penalty of at least `1.15`, then `0.5` with at least `1.25`.
-- `acceptable()` stops the retries once the finish reason is not `"length"`, the cleaned text has at least one alphanumeric character, and `valid(raw)` (when set) is true.
+- `run_ladder()` (in `adapters/ocr/ladder.py`) stops the retries once the output has no problem (not a loop, not more text than the page can hold, finish reason not `"length"`, some alphanumeric text after clean-up) and `valid(raw)` (when set) is true. A page that only ran out of tokens is retried with the same settings and a larger limit.
 
 Steps:
 

@@ -9,14 +9,24 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from PIL.Image import Image
+
 from ..domain.errors import UnsupportedInputError
 from ..domain.models import (
     DocumentManifest,
     ModelRef,
     PageMethod,
+    PageProbe,
     PageRecord,
     SourceKind,
     SourceMetadata,
+)
+from ..domain.ocr_guards import (
+    OcrGuards,
+    OutputProblem,
+    duplicate_pages,
+    find_problem,
+    image_area_sq_in,
 )
 from ..domain.routing import (
     RoutingPolicy,
@@ -83,6 +93,10 @@ def retitle_markdown(markdown: str, old: str | None, new: str | None) -> str | N
     return "\n".join([f"# {new}\n" if new else "", body]).strip() + "\n"
 
 
+# What a rejected OCR page falls back to: its routing probe and its raw text layer.
+Layer = tuple[PageProbe, str]
+
+
 class IngestService:
     def __init__(
         self,
@@ -95,6 +109,7 @@ class IngestService:
         store: DocumentStore,
         policy: RoutingPolicy,
         log: Log = print,
+        guards: OcrGuards | None = None,
     ):
         self.detector = detector
         self.pdf = pdf
@@ -104,15 +119,25 @@ class IngestService:
         self.store = store
         self.policy = policy
         self.log = log
+        self.guards = guards or OcrGuards()
 
     # ----------------------------------------------------------------- public
     def config_hash(self, kind: SourceKind, *, ocr_all: bool = False) -> str:
         """Cache key: everything that can change this kind's output, nothing else."""
         match kind:
             case SourceKind.PDF:
-                parts = [self.policy.model_dump_json(), self.pdf.fingerprint, self.ocr.fingerprint]
+                parts = [
+                    self.policy.model_dump_json(),
+                    self.guards.model_dump_json(),
+                    self.pdf.fingerprint,
+                    self.ocr.fingerprint,
+                ]
             case SourceKind.IMAGE:
-                parts = [self.images.fingerprint, self.ocr.fingerprint]
+                parts = [
+                    self.guards.model_dump_json(),
+                    self.images.fingerprint,
+                    self.ocr.fingerprint,
+                ]
             case _:
                 parts = [self._converter(kind).fingerprint]
         key = json.dumps([PIPELINE_VERSION, kind.value, ocr_all, *parts])
@@ -231,6 +256,7 @@ class IngestService:
             records: list[PageRecord] = []
             texts: list[str] = []
             raw_layers: dict[int, str] = {}
+            ocr_context: dict[int, Layer] = {}
             for i in range(n):
                 page = doc.page(i)
                 t0 = time.perf_counter()
@@ -238,6 +264,7 @@ class IngestService:
                 probe = decide(signals, self.policy, force_ocr=options.ocr_all)
                 if probe.needs_ocr:
                     image = page.render(self.ocr.dpi)
+                    image.info["dpi"] = (self.ocr.dpi, self.ocr.dpi)  # a page has a physical size
                     if could_be_blank(probe, self.policy):
                         ink = ink_ratio(
                             image, self.policy.blank_ink_contrast, self.policy.blank_dark_page
@@ -283,7 +310,10 @@ class IngestService:
                             texts.append("")
                             continue
                     self.log(f"  p{i + 1}/{n}: OCR ({'; '.join(probe.reasons)})")
-                    record, text = self._ocr_record(i, image, probe)
+                    record, text, rejected = self._ocr_record(i, image, probe)
+                    ocr_context[i] = (probe, raw)
+                    if rejected is not None:
+                        record, text = self._rejected(record, rejected, raw_layers, (probe, raw))
                 else:
                     self.log(f"  p{i + 1}/{n}: text layer ({probe.n_chars} chars)")
                     raw_layers[i] = raw
@@ -301,6 +331,7 @@ class IngestService:
         finally:
             doc.close()
 
+        self._drop_repeats(records, texts, raw_layers, ocr_context)
         # De-hyphenate with the whole document's vocabulary, not just one page's.
         vocab = text_vocabulary(*raw_layers.values(), *texts)
         for i, raw in raw_layers.items():
@@ -316,9 +347,12 @@ class IngestService:
         records, texts = [], []
         for i, frame in enumerate(frames):
             self.log(f"  frame {i + 1}/{len(frames)}: OCR (image input)")
-            record, text = self._ocr_record(i, frame, None)
+            record, text, rejected = self._ocr_record(i, frame, None)
+            if rejected is not None:
+                record, text = self._rejected(record, rejected, {}, None)
             records.append(record)
             texts.append(text)
+        self._drop_repeats(records, texts, {}, {})
         return records, texts, total
 
     def _convert(
@@ -348,12 +382,28 @@ class IngestService:
         texts = [s.text for s in segments]
         return records, texts, conv.title, total, conv.metadata, conv.degraded
 
-    def _ocr_record(self, i: int, image, probe) -> tuple[PageRecord, str]:
+    def _ocr_record(
+        self, i: int, image: Image, probe: PageProbe | None
+    ) -> tuple[PageRecord, str, str | None]:
+        """Transcribe one page. The last item is why the output cannot be used, if it cannot."""
         res = self.ocr.transcribe(image)
         self.log(
             f"    -> {len(res.text)} chars, {res.gen_tokens} tok in {res.seconds:.1f}s"
             f" ({res.finish_reason})"
         )
+        area = image_area_sq_in(image.width, image.height, image.info.get("dpi"))
+        problem = find_problem(res.text, res.finish_reason, area, self.guards)
+        warnings: list[str] = []
+        rejected = None
+        if problem is OutputProblem.TOO_LONG:
+            rejected = "more text than the page can hold"
+        elif problem is OutputProblem.LOOP:
+            rejected = "repeating text"
+        elif problem is OutputProblem.TRUNCATED:
+            warnings.append(
+                f"OCR stopped at the token limit ({res.gen_tokens} tokens): the page may be cut off"
+            )
+            self.log(f"    warning: {warnings[0]}")
         ref: ModelRef = self.ocr.model
         return (
             PageRecord(
@@ -367,6 +417,64 @@ class IngestService:
                 model_revision=ref.revision,
                 gen_tokens=res.gen_tokens,
                 finish_reason=res.finish_reason,
+                warnings=warnings,
             ),
             res.text,
+            rejected,
         )
+
+    def _rejected(
+        self,
+        record: PageRecord,
+        why: str,
+        raw_layers: dict[int, str],
+        layer: Layer | None,
+    ) -> tuple[PageRecord, str]:
+        """Replace OCR output that cannot be trusted: the text layer if the page has a
+        usable one (its text comes back through ``raw_layers``), else an empty page.
+
+        A layer is usable when it has text and is not garbled; a page that went to OCR
+        because its layer was scanned-in noise gets the empty page, not the noise.
+        """
+        if (
+            layer
+            and layer[0].n_chars > 0
+            and layer[0].garbage_ratio <= self.policy.max_garbage_ratio
+        ):
+            probe, raw = layer
+            warning = f"OCR output rejected ({why}); the text layer was used"
+            raw_layers[record.index] = raw
+            record = PageRecord(
+                index=record.index,
+                method=PageMethod.TEXT_LAYER,
+                n_chars=0,  # set after cleaning
+                seconds=record.seconds,
+                engine=self.pdf.fingerprint,
+                probe=probe,
+                warnings=[warning],
+            )
+        else:
+            warning = f"OCR output rejected ({why}); the page was left empty"
+            record = record.model_copy(update={"n_chars": 0, "warnings": [warning]})
+        self.log(f"    warning: {warning}")
+        return record, ""
+
+    def _drop_repeats(
+        self,
+        records: list[PageRecord],
+        texts: list[str],
+        raw_layers: dict[int, str],
+        context: Mapping[int, Layer],
+    ) -> None:
+        """Pages of this document whose OCR text repeats an earlier page's (see
+        :func:`~docingest.domain.ocr_guards.duplicate_pages`) are replaced like any other
+        rejected output; the first page of each group is kept."""
+        ocr = {
+            i: text
+            for i, (rec, text) in enumerate(zip(records, texts, strict=True))
+            if rec.method == PageMethod.VLM_OCR
+        }
+        for i, first in sorted(duplicate_pages(ocr, self.guards).items()):
+            records[i], texts[i] = self._rejected(
+                records[i], f"same text as page {first + 1}", raw_layers, context.get(i)
+            )

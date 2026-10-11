@@ -336,11 +336,17 @@ For each page index `i` below `min(len(doc), max_pages)`:
    (`could_be_blank`: at most `blank_max_chars` characters), `application/ink.py` measures
    the share of inked pixels on that image; with `is_blank` true the record gets
    `method=blank`, an empty text, the pdf engine's fingerprint and a probe that holds the
-   measurements, and OCR is never called. Otherwise the image goes to `ocr.transcribe()`
-   and the record gets `method=vlm_ocr`, the OCR engine's fingerprint, model repo and
-   revision, generated tokens and finish reason.
-4. Otherwise the raw text layer is kept aside and the record gets `method=text_layer`
-   and `engine=pdf.fingerprint`.
+   measurements, and OCR is never called. Otherwise the image goes to `ocr.transcribe()` and the record gets `method=vlm_ocr`, the
+   OCR engine's fingerprint, model repo and revision, generated tokens and finish reason.
+4. The returned text is checked again (`find_problem`, with the area of the rendered
+   image at `ocr.dpi`): a loop or text that cannot fit the page is rejected, and the page
+   becomes its own text layer if it has a usable one (`n_chars > 0`, `garbage_ratio` at
+   most `max_garbage_ratio`; `method=text_layer`) or an empty `vlm_ocr` page. Either
+   way `PageRecord.warnings` holds the reason. A page cut off at the token limit keeps
+   its text and gets a warning. After the loop, pages whose OCR text repeats an earlier
+   page's (`duplicate_pages`) are replaced the same way; the first page of a group stays.
+5. Otherwise (no OCR) the raw text layer is kept aside and the record gets
+   `method=text_layer` and `engine=pdf.fingerprint`.
 
 The PDF is closed in a `finally` block. After the loop, the text-layer pages are cleaned
 with `domain.text.clean_text_layer`, using one vocabulary built from every raw text
@@ -402,7 +408,7 @@ sequenceDiagram
 
 `images.frames(path)` returns every frame; `source_pages` is the frame count and only the
 first `max_pages` frames are transcribed. Every frame goes to OCR (`method=vlm_ocr`,
-`probe=None`). There is no text layer and no routing decision.
+`probe=None`). There is no text layer and no routing decision, so no blank-page rule and no text layer to fall back to: a looping or overlong output, or one that repeats an earlier frame, becomes an empty page with a warning.
 
 ### Office, LaTeX and text: converters
 

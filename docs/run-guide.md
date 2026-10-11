@@ -271,6 +271,8 @@ Several people may use one GPU machine. These rules keep your work and theirs ap
 ### Ingestion
 
 - **`blank page: 0 embedded chars (<=10), 0.00000 of the pixels inked (<0.0005)` in the log, `method=blank` in `document.md`.** The page has no text and no ink, so it was not sent to OCR and is empty on purpose (OCR used to invent a page of text for it). A scanned page that you think is blank but is not reported as such has a dark border, a shadow along the spine or stains: the rule leaves it to OCR. The thresholds are the `blank_*` keys of `[routing]` ([reference](../packages/docingest/config/README.md#routing)).
+- **`warning: OCR output rejected (repeating text); the text layer was used`**, or `... the page was left empty`; `(more text than the page can hold)`; `(same text as page N)`. The model looped, wrote far more than a page holds, or wrote the same text for two pages, and docingest threw that output away. The manifest keeps the reason in the page's `warnings`. If the page has a usable text layer it is used, otherwise the page is empty; `docingest ingest --force` runs it again.
+- **`warning: OCR stopped at the token limit (N tokens): the page may be cut off`.** A dense page (a large table) did not fit even in the larger try, which allows twice `[ocr] max_tokens` (up to 8192), or the server refused that limit (HTTP 400: its context cannot hold prompt plus 8192). Raise `[ocr] max_tokens` (and the server's context length) if you need such pages whole.
 
 ### The index
 

@@ -4,7 +4,8 @@ This package holds the implementations of the `OcrEngine` port: the code that tu
 
 | File | Contents | Adapter name in `[adapters] ocr` |
 | --- | --- | --- |
-| [`profiles.py`](profiles.py) | `OcrProfile`, the built-in `PROFILES`, `profile_for()`, the retry ladder `attempts()` and the acceptance test `acceptable()` | (shared, not an adapter) |
+| [`profiles.py`](profiles.py) | `OcrProfile`, the built-in `PROFILES`, `profile_for()` and the list of attempts `attempts()` | (shared, not an adapter) |
+| [`ladder.py`](ladder.py) | `run_ladder()`: the retry loop both engines share, with `Attempt` and `Generation` | (shared, not an adapter) |
 | [`mlx_vlm.py`](mlx_vlm.py) | `MlxVlmOcr`: runs the model in-process on Apple Silicon through mlx-vlm. Also `fit_image()`, used by both engines | `mlx-vlm` (default) |
 | [`openai_compat.py`](openai_compat.py) | `OpenAICompatibleOcr`: sends each page to any OpenAI-compatible `/chat/completions` endpoint over plain HTTP (the standard library's `urllib`) | `openai-compatible` |
 
@@ -229,18 +230,20 @@ assert PROFILES["markdown"].postprocess("<think>hmm</think>```markdown\n# A\n```
 
 ## The retry ladder and acceptance
 
-A VLM sometimes loops until it hits `max_tokens`, returns nothing readable, or (olmOCR) answers with its front matter only. Both engines therefore run each page through a short ladder of generation settings and stop at the first attempt that is acceptable.
+A VLM sometimes loops until it hits `max_tokens`, writes far more than a page holds, returns nothing readable, or (olmOCR) answers with its front matter only. Both engines therefore run each page through a short ladder of generation settings (`run_ladder()` in [`ladder.py`](ladder.py)) and stop at the first attempt that is acceptable.
 
-### `attempts(profile, temperature, penalty)`
+### `attempts(profile, temperature, penalty, guards)`
 
 Returns the list of `(temperature, repetition_penalty)` pairs to try, in order:
 
 - If the profile has a `ladder`, that ladder is used as is. The configured `temperature` and `repetition_penalty` are then not used for generation (they are still part of the fingerprint).
-- Otherwise the default ladder is: greedy first, then a little sampling with a stronger repetition penalty (a `max_tokens` hit usually means a repetition loop):
+- Otherwise the default ladder is: greedy first, then two stricter retries, a little sampling with a stronger repetition penalty (a `max_tokens` hit usually means a repetition loop):
 
   1. `(temperature, penalty)` from the engine settings
   2. `(0.2, max(penalty or 1.0, 1.15))`
   3. `(0.5, max(penalty or 1.0, 1.25))`
+
+  `OcrGuards.max_attempts` (3) cuts the list. The third rung is kept on evidence: in the reference corpus run 13 pages hit 4096 tokens on the first attempt (about 115 s each); 7 were rescued by the second attempt, 3 by the third and 3 failed all three. A page that fails all three costs about 345 s; the price of the third rung is the 115 s a hopeless page spends on it.
 
 Resulting ladders with default settings (`temperature = 0.0`):
 
@@ -252,17 +255,16 @@ Resulting ladders with default settings (`temperature = 0.0`):
 
 A penalty of `None` or `0` is not sent to mlx-vlm. The HTTP engine also omits a penalty of exactly `1.0`, which means "off", so strict APIs that do not know the field are not sent it.
 
-### `acceptable(profile, raw, finish_reason)`
+### What is asked after a rejected attempt
 
-An attempt is accepted, and the ladder stops, when all three hold:
+After each attempt `assess()` runs the output checks of `domain/ocr_guards.py` (`find_problem`) on the cleaned text and the profile's own `valid` test. An attempt is accepted, and the ladder stops, when there is no problem and `profile.valid` is `None` or true. A problem is one of, in this order: `too_long` (more content characters, without HTML tags, table pipes and rules, than the page can hold: 150 per square inch of the image's own resolution, `image.info["dpi"]`, at least 300; an image without a resolution has no length bound), `loop` (a group of words repeated back to back that fills at least half of the words, or such a run that goes on to the end of the text when the reply stopped at the token limit), `truncated` (`finish_reason` is `"length"`) and `empty` (no letter or digit after clean-up). The next attempt depends on the problem:
 
-1. `finish_reason` is not `"length"` (the output was not truncated at `max_tokens`).
-2. `profile.postprocess(raw)` still contains at least one letter or digit.
-3. `profile.valid` is `None`, or `profile.valid(raw)` is true.
+- `truncated`: the page may simply be dense (a long table), so the next attempt uses the same temperature and penalty with a larger limit, `min(2 x max_tokens, max(8192, max_tokens))`, but only when that is at least 1.5 times `max_tokens` (a profile at 8000 would gain 2% and lose its stricter retry). A page still cut off with the larger limit ends the ladder (a stricter sampling with half the room cannot finish it), and among cut-off answers the longer one is kept. If the server answers HTTP 400 to the larger limit (a context too small for prompt plus 8192), the adapter raises `LimitRefused`, the ladder stops and the truncated page is kept.
+- anything else: the next rung of the ladder, at the configured limit, never at a raised one: a loop costs one budget, not two.
 
 ### Best-text fallback
 
-While walking the ladder, each engine remembers the latest attempt whose cleaned text contains a letter or digit. If an attempt is acceptable, it becomes the chosen attempt. If no attempt is acceptable, the chosen attempt is that latest attempt with text, or the very last attempt when none had any. The returned text is `profile.postprocess()` of the chosen attempt's raw output, and `gen_tokens`, `finish_reason` and `raw_text` describe the chosen attempt. The ladder as a whole is reported in the telemetry fields described below.
+If no attempt is accepted, the chosen attempt is the least bad one: an output that only the profile finds invalid, then a truncated one, then an empty one, then a loop or an overlong one; among equals the latest. The returned text is `profile.postprocess()` of the chosen attempt's raw output, and `gen_tokens`, `finish_reason` and `raw_text` describe the chosen attempt. The ladder as a whole is reported in the telemetry fields described below. What to do with a chosen attempt that still has a problem (use the text layer, leave the page empty) is `IngestService`'s decision, not the engine's: it runs `find_problem` again on the returned text.
 
 ### Seeded sampling
 
@@ -276,21 +278,20 @@ The flowchart follows one call to `transcribe()` in either engine.
 flowchart TD
     A["transcribe(image)"] --> B["fit_image to profile.max_side"]
     B --> C["build the request: prompt text and image, text first if prompt_first"]
-    C --> D["ladder = attempts(profile, temperature, repetition_penalty)"]
-    D --> E["take the next rung: temperature t, penalty p"]
+    C --> D["ladder = attempts(profile, temperature, repetition_penalty, guards)"]
+    D --> E["take the next rung: temperature t, penalty p, limit n"]
     E --> F{"MLX engine and t greater than 0?"}
     F -->|"yes"| G["mx.random.seed(crc32 of image bytes + attempts so far)"]
     F -->|"no"| H["generate or POST one request"]
     G --> H
     H --> I["count the attempt, add its tokens, keep the first finish_reason"]
-    I --> J{"cleaned text has a letter or digit?"}
-    J -->|"yes"| K["remember as best text so far"]
-    J -->|"no"| L{"acceptable: not length, has text, valid?"}
-    K --> L
+    I --> L{"assess: no problem (too long, loop, length, empty) and valid?"}
     L -->|"yes"| M["chosen = this attempt, stop"]
     L -->|"no"| N{"rungs left?"}
-    N -->|"yes"| E
-    N -->|"no"| O["chosen = best text so far, else the last attempt"]
+    N -->|"yes, after truncated"| E2["same t and p, larger limit"]
+    N -->|"yes, otherwise"| E
+    E2 --> F
+    N -->|"no"| O["chosen = least bad attempt"]
     M --> P["OcrResult: postprocess(chosen raw text) plus ladder telemetry"]
     O --> P
 ```
@@ -394,7 +395,7 @@ sequenceDiagram
         else HTTP 200 with JSON
             Server-->>Engine: choices[0].message, finish_reason, usage
         end
-        Engine->>Engine: acceptable(profile, raw, finish_reason)
+        Engine->>Engine: assess(profile, raw, finish_reason): loop, too long, truncated, empty, valid
     end
     Engine-->>Ingest: OcrResult
 ```
@@ -522,7 +523,7 @@ No code change is needed.
 ### A new engine (another runtime)
 
 1. Create a module in this package, for example `src/docingest/adapters/ocr/my_runtime.py`. Import only from `docingest.ports`, `docingest.domain`, `docingest.config` and this package: the import-linter contracts in `pyproject.toml` keep adapter packages independent of each other (`adapters.models` is the shared exception).
-2. Implement the port and reuse the shared pieces (`fit_image`, `attempts`, `acceptable`, the profile's `postprocess`) so that the new runtime behaves like the other two. This skeleton satisfies the port; replace `_generate` with the real call:
+2. Implement the port and reuse the shared pieces (`fit_image`, `run_ladder`, the profile's `postprocess`) so that the new runtime behaves like the other two. This skeleton satisfies the port; replace `_generate` with the real call:
 
    ```python
    from __future__ import annotations
@@ -533,8 +534,10 @@ No code change is needed.
    from PIL import Image
 
    from docingest.adapters.ocr.mlx_vlm import fit_image
-   from docingest.adapters.ocr.profiles import OcrProfile, acceptable, attempts
+   from docingest.adapters.ocr.ladder import Attempt, Generation, run_ladder
+   from docingest.adapters.ocr.profiles import OcrProfile
    from docingest.domain.models import ModelRef
+   from docingest.domain.ocr_guards import OcrGuards, image_area_sq_in
    from docingest.ports import OcrResult
 
 
@@ -547,9 +550,11 @@ No code change is needed.
            dpi: int = 150,
            temperature: float = 0.0,
            repetition_penalty: float | None = None,
+           guards: OcrGuards | None = None,
        ):
            self.model = model
            self.profile = profile
+           self.guards = guards or OcrGuards()
            self.dpi = dpi
            self.temperature = temperature
            self.repetition_penalty = (
@@ -567,6 +572,7 @@ No code change is needed.
                    "chat_kwargs": profile.chat_kwargs,
                    "prompt_first": profile.prompt_first,
                    "ladder": profile.ladder,
+                   "guards": self.guards.model_dump(),
                    "validated": profile.valid is not None,
                    "dpi": dpi,
                    "temperature": temperature,
@@ -575,36 +581,32 @@ No code change is needed.
                sort_keys=True,
            )
 
-       def _generate(self, img: Image.Image, temperature: float, penalty: float | None):
+       def _generate(self, img: Image.Image, attempt: Attempt):
            """Call the runtime; return (raw text, finish_reason, generated tokens)."""
            raise NotImplementedError
 
        def transcribe(self, image: Image.Image) -> OcrResult:
            img = fit_image(image, self.profile.max_side)
            t0 = time.perf_counter()
-           finishes: list[str | None] = []
-           total = 0
-           best = last = None
-           for temperature, penalty in attempts(
-               self.profile, self.temperature, self.repetition_penalty
-           ):
-               raw, finish, tokens = last = self._generate(img, temperature, penalty)
-               finishes.append(finish)
-               total += tokens
-               if any(c.isalnum() for c in self.profile.postprocess(raw)):
-                   best = last
-               if acceptable(self.profile, raw, finish):
-                   best = last
-                   break
-           raw, finish, tokens = best or last
+           replies, chosen = run_ladder(
+               self.profile,
+               self.guards,
+               temperature=self.temperature,
+               penalty=self.repetition_penalty,
+               max_tokens=self.profile.max_tokens,
+               area_sq_in=image_area_sq_in(image.width, image.height, image.info.get("dpi")),
+               generate=lambda attempt, n: self._generate(img, attempt),
+               read=lambda reply: Generation(text=reply[0], finish_reason=reply[1]),
+           )
+           raw, finish, tokens = replies[chosen]
            return OcrResult(
                text=self.profile.postprocess(raw),
                seconds=time.perf_counter() - t0,
                gen_tokens=tokens,
                finish_reason=finish,
-               attempts=len(finishes),
-               first_finish_reason=finishes[0],
-               total_gen_tokens=total,
+               attempts=len(replies),
+               first_finish_reason=replies[0][1],
+               total_gen_tokens=sum(reply[2] for reply in replies),
                raw_text=raw,
            )
    ```
@@ -649,6 +651,7 @@ No code change is needed.
 | `tests/contract/test_ocr_contract.py` | The port contract, run against `FakeOcr`, `OpenAICompatibleOcr` (against a local stub server) and `MlxVlmOcr` (opt in with `DOCINGEST_MODEL_TESTS=1`, loads a small pinned model) |
 | `tests/integration/test_openai_ocr.py` | The HTTP engine against a scripted local server: request shape, image size, `chat_kwargs`, retries and backoff, auth, the ladder, malformed replies, timeouts, redirects, fingerprint stability, swapping engines by configuration |
 | `tests/unit/test_bench_fixes.py` | Ladder telemetry of both engines, seeded sampling, olmOCR text-first prompt and header-only retries, best-text fallback, olmOCR front matter clean-up |
+| `tests/unit/test_ocr_ladder.py`, `tests/unit/test_ocr_guards.py` | `run_ladder()` with scripted replies (stricter retries, more room for a dense page, a refused larger limit, the least bad attempt, olmOCR's own ladder) and the output checks (loops, capacity, repeated pages) |
 | `tests/integration/test_synthetic_and_images.py` | `fit_image()` and the profile clean-up functions |
 
 ```bash

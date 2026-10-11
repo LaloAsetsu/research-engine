@@ -134,7 +134,7 @@ Built-in fingerprints, for orientation:
 |---|---|
 | `PdfiumReader` | `pypdfium2 <version>` |
 | `PillowImageSource` | `pillow <version>` |
-| `MlxVlmOcr` | `mlx-vlm ` followed by sorted JSON of the mlx-vlm version, model, profile name and `code_version`, prompt, max_side, chat kwargs, prompt order, retry ladder, validation flag, dpi, max_tokens, temperature, repetition_penalty |
+| `MlxVlmOcr` | `mlx-vlm ` followed by sorted JSON of the mlx-vlm version, model, profile name and `code_version`, prompt, max_side, chat kwargs, prompt order, retry ladder, output-check thresholds, validation flag, dpi, max_tokens, temperature, repetition_penalty |
 | `OpenAICompatibleOcr` | `openai-compatible ` followed by sorted JSON of base_url, served_model, model and revision, the same profile fields, dpi and generation settings |
 | `DoclingConverter` | `docling <version>` (or `docling missing`) |
 | `PandocLatexConverter` | `pandoc-latex r<REVISION> \| pandoc <version> \| <pandoc arguments> \| split_level=<n> \| pylatexenc <version>` (the last part is `no fallback` when the fallback is disabled) |
@@ -306,6 +306,7 @@ Further obligations that the application relies on:
 - Raise `OcrError` (or a subclass) when a page cannot be transcribed. `OpenAICompatibleOcr` raises `OcrServerError`.
 - An engine that retries reports the whole ladder in `attempts`, `first_finish_reason`, `total_gen_tokens` and `gen_seconds`. Otherwise a benchmark would hide truncations that a retry fixed.
 - `model` is recorded in every OCR page (`PageRecord.model`, `model_revision`) and in `DocumentManifest.ocr_model`. `dpi` is the resolution at which `IngestService` renders PDF pages for this engine.
+- The application checks the returned text again (loops, text more than the page can hold, repeats of earlier pages; `domain/ocr_guards.py`) and decides what to do with a page that fails: see [application/README.md](../application/README.md). An engine does not need to do that itself.
 - Optional: an `unload()` method. `BenchmarkRunner` calls it, when present, after each candidate to free model weights before the next one loads. `MlxVlmOcr` implements it.
 
 Implementations: `adapters/ocr/mlx_vlm.py` `MlxVlmOcr` (in-process on Apple Silicon, `mlx` extra) and `adapters/ocr/openai_compat.py` `OpenAICompatibleOcr` (any OpenAI-compatible `chat/completions` endpoint over HTTP). Both take an `OcrProfile` (prompt, image size, clean-up, retry ladder) from `adapters/ocr/profiles.py`; see [adapters/ocr/README.md](../adapters/ocr/README.md). Test fake: `FakeOcr`.

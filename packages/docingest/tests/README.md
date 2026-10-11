@@ -102,7 +102,10 @@ flowchart LR
 | `test_latex_fixes.py` | Regressions of the LaTeX adapter (`latex_source`, `pandoc_latex`) |
 | `test_latex_source.py` | Pure LaTeX-source helpers and the pandoc adapter's Markdown helpers |
 | `test_metrics.py` | `application.metrics`: normalisation (Markdown, hyphenation), capping of runaway output, `char3_f1`, `bootstrap_ci` |
+| `test_ocr_guards.py` | The OCR output checks of `domain/ocr_guards.py`: loops (and the tables, matrices, contents pages and reference lists that must not count as one), the capacity of a page, the verdict order, the `max_tokens` raise, repeated pages |
+| `test_ocr_ladder.py` | `run_ladder` with scripted replies: stricter retries, more room (same settings) for a dense page, a refused larger limit, the least bad attempt, olmOCR's own ladder |
 | `test_ocr_profiles.py` | OCR profile clean-up code pinned against each profile's `code_version` (an edit fails until it is re-pinned, with a bump if results can change), and `code_version` in both engine fingerprints |
+| `test_ocr_rejection.py` | What `IngestService` does with OCR output it cannot trust: the text layer if there is a usable one, else an empty page, a warning in the manifest, pages that repeat an earlier page, truncation, images |
 | `test_routing_policy.py` | `domain.routing.decide`, configurable `RoutingPolicy` thresholds, unknown `[routing]` keys rejected |
 | `test_services.py` | `AskService` (plain path) and `CrawlService` with fakes |
 | `test_stats.py` | `application.stats`: paired bootstrap, `quantile`, `bootstrap_ci` |
@@ -129,7 +132,7 @@ flowchart LR
 | `test_index_cli.py` | `docingest index build`, `status` and `remove` with fake plugins |
 | `test_index_on_ingest.py` | `ingest --index` and `crawl --index`: off by default, only the papers of the run, checked before any work, a failing update keeps the papers |
 | `test_magic_detector.py` | `MagicBytesDetector` on real files |
-| `test_openai_ocr.py` | `OpenAICompatibleOcr` against a scripted local OpenAI-compatible server: request shape, retries, the `finish_reason="length"` ladder, authentication |
+| `test_openai_ocr.py` | `OpenAICompatibleOcr` against a scripted local OpenAI-compatible server: request shape, retries, the retry ladder (stricter retries, more room for a dense page, a server that refuses it), authentication |
 | `test_pandoc_latex.py` | `PandocLatexConverter` with the real pandoc (pypandoc-binary) and pylatexenc on `tests/fixtures/latex`; optional real arXiv sources (`slow`) |
 | `test_paperqa_adapter.py` | PaperQA2 token windows (needs the embedder in the local Hugging Face cache); answering from given `contexts` (only those chunks, an empty list refused, the temperature on every request) and from the corpus, with litellm's mock reply and PaperQA2's keyword embedder, so no server or download. Skipped when `paperqa` is not installed |
 | `test_pdfium_reader.py` | `PdfiumReader` page signals and routing on generated PDFs, corrupt PDFs |
@@ -166,6 +169,7 @@ The module docstring states the rule: the fakes are real implementations of the 
 | Fake | Port | Behaviour | Knobs and inspection |
 |---|---|---|---|
 | `FakeOcr(text="ocr text", model="fake/ocr")` | `OcrEngine` | Returns `OcrResult(text, seconds=0.01, gen_tokens=3, finish_reason="stop")` for any image | `calls`; `model` is `ModelRef(repo_id=model, revision="0" * 40)`; `dpi = 72`; `fingerprint` includes `model` and `text`, so two fakes with different settings produce different cache keys |
+| `ScriptedOcr(*texts, finish="stop")` | `OcrEngine` | A `FakeOcr` that answers call n with `texts[n]` (the last one repeats) and the given finish reason | `calls` |
 | `FakePdfReader(docs)` | `PdfReader` | `docs` maps a file **name** to a list of pages; `open(path)` looks up `path.name` and raises `DocumentOpenError` for unknown names | `opened` lists the documents it returned; `fingerprint = "fake-pdf 1"` |
 | `FakePdfDocument(pages, title=None)` | `PdfDocument` | `len()`, `page(i)`, `close()` | `closed` |
 | `FakePage(signals_, text, image=None)` | `PdfPage` | `signals()` returns the given `PageSignals` and text; `render()` returns `image`, by default a white 850x1100 page | |
@@ -174,7 +178,7 @@ The module docstring states the rule: the fakes are real implementations of the 
 | `blank()` | helper | A `FakePage` with no text and a white rendering: the blank-page rule leaves it empty | |
 | `make_service(docs, converters, ocr, images, **kw)` | `IngestService` | A service on `FakeDetector`, `FakePdfReader(docs)`, `InMemoryStore` and the given fakes; `kw` goes to the constructor (`policy`, `guards`) | |
 | `FakeDetector()` | `TypeDetector` | Kind from the suffix only: `.pdf`, `.png`, `.docx`, `.tex`, `.md`; anything else raises `UnsupportedInputError` | `KINDS` |
-| `FakeImages(n_frames=1, fingerprint="fake-images 1")` | `ImageSource` | Returns `n_frames` white 10x10 images for any path | `fingerprint` (part of the image cache key) |
+| `FakeImages(n_frames=1, fingerprint="fake-images 1", size=(10, 10))` | `ImageSource` | Returns `n_frames` white images of `size` for any path | `fingerprint` (part of the image cache key) |
 | `FakeConverter(segments, method=PageMethod.LATEX, **kw)` | `DocumentConverter` | Returns `Conversion(segments=segments, method=method, engine="fake", **kw)`; pass `title`, `metadata`, `warnings` or `degraded` through `kw` | `calls`; `fingerprint` includes the method |
 | `InMemoryStore()` | `DocumentStore` | Reference implementation of the store contract: canonical results, variants (partial or forced-OCR runs) and degraded fallbacks kept apart; locations are `mem://...` strings | `canonical`, `variants`, `degraded` dictionaries |
 | `FakeCrawler(records, payload=..., fail_keys=set())` | `SourceCrawler` | `search()` returns the first `limit` records; `fetch()` writes `<key>.tex` with `payload` into `dest_dir` and returns format `"latex"`; keys in `fail_keys` raise `DocumentOpenError` | |
