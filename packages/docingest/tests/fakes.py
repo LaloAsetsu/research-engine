@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from docingest.application.ingest import IngestService
 from docingest.domain.errors import DocumentOpenError, UnsupportedInputError
+from docingest.domain.layout import PageLayout
 from docingest.domain.models import (
     DocumentManifest,
     ModelRef,
@@ -111,9 +112,13 @@ class FakePage:
     signals_: PageSignals
     text: str
     image: Image.Image | None = None  # what render() returns; default: white
+    layout_: PageLayout = field(default_factory=PageLayout)  # no lines: the flat text is used
 
     def signals(self) -> tuple[PageSignals, str]:
         return self.signals_, self.text
+
+    def layout(self) -> PageLayout:
+        return self.layout_
 
     def render(self, dpi: int) -> Image.Image:
         return self.image if self.image is not None else Image.new("RGB", (850, 1100), "white")

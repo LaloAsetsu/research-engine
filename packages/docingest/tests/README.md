@@ -205,6 +205,7 @@ Dependency-light builders for real input files. Every builder writes to the path
 | `text_pdf(path, *lines)` | A born-digital one-page PDF with the given text lines (routes to the text layer when the text is long enough) |
 | `image_pdf(path)` | A one-page PDF whose only content is a 1275x1650 image with text drawn in pixels, saved at 150 dpi (routes to OCR) |
 | `blank_pdf(path, pages)` | A PDF with `pages` empty pages, made with pypdfium2 |
+| `layout_pdf(path, pages)`, `paragraph(text, x=, top=, size=, width=)` | A multi-page PDF where every text run is placed by hand as `(x, y, size, bold, text)` (Helvetica or Helvetica-Bold); `paragraph` wraps a text into the runs of its lines |
 
 ## Markers and opt-in environment variables
 

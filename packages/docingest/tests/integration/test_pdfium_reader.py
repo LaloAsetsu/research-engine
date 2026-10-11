@@ -1,11 +1,11 @@
 import pypdfium2 as pdfium
 import pytest
-from builders import LONG, image_pdf, pdf, text_pdf
+from builders import LONG, image_pdf, layout_pdf, paragraph, pdf, text_pdf
 
-from docingest.adapters.pdf.pdfium import PdfiumReader
+from docingest.adapters.pdf.pdfium import PdfiumReader, _Glyph, split_lines
 from docingest.domain.errors import DocumentOpenError
 from docingest.domain.routing import RoutingPolicy, decide
-from docingest.domain.text import clean_text_layer
+from docingest.domain.text import HYPHEN_MARK, clean_text_layer
 
 reader = PdfiumReader()
 
@@ -89,3 +89,99 @@ def test_corrupt_pdf_is_a_document_open_error(tmp_path):
     bad.write_bytes(b"%PDF-1.4\n1 0 obj\n<<")
     with pytest.raises(DocumentOpenError):
         reader.open(bad)
+
+
+JOURNAL = "Journal of Synthetic Results"
+
+
+def test_pdfium_reports_size_weight_and_position_of_each_line(tmp_path):
+    doc = PdfiumReader().open(
+        layout_pdf(
+            tmp_path / "paper.pdf",
+            [
+                [
+                    (72, 750, 9, False, f"{JOURNAL} 1"),
+                    (72, 700, 20, True, "Filters and Noise"),
+                    *paragraph(
+                        "The transduction models described here were trained on long sequences.",
+                        top=650,
+                    ),
+                ]
+            ],
+        )
+    )
+    lines = list(doc.page(0).layout().lines)
+    title = next(ln for ln in lines if ln.text == "Filters and Noise")
+    assert (title.size, title.bold, title.upright) == (20.0, True, True)
+    body = next(ln for ln in lines if ln.text.startswith("The transduction"))
+    assert (body.size, body.bold) == (10.0, False)
+    header = next(ln for ln in lines if ln.text.startswith(JOURNAL))
+    assert header.baseline < title.baseline < body.baseline  # counted from the top
+    assert doc.page(0).layout().height == 792
+
+
+def test_a_line_that_pdfium_hyphenates_ends_with_the_marker(tmp_path):
+    runs = [(72, 700, 10, False, "the sequence transduc-"), (72, 688, 10, False, "tion works")]
+    lines = PdfiumReader().open(layout_pdf(tmp_path / "h.pdf", [runs])).page(0).layout().lines
+    assert [ln.text for ln in lines] == ["the sequence transduc\x02", "tion works"]
+
+
+def test_rotated_pages_have_no_layout(tmp_path):
+    path = layout_pdf(tmp_path / "r.pdf", [paragraph(LONG)])
+    doc = pdfium.PdfDocument(path)
+    doc[0].set_rotation(90)
+    doc.save(path)
+    assert not PdfiumReader().open(path).page(0).layout().lines
+
+
+def test_a_font_set_at_size_one_and_scaled_by_the_text_matrix_has_its_real_size(tmp_path):
+    content = b"BT /F1 1 Tf 14 0 0 14 72 700 Tm (Scaled heading words) Tj ET"
+    line = PdfiumReader().open(pdf(tmp_path / "m.pdf", content)).page(0).layout().lines[0]
+    assert round(line.size, 1) == 14.0
+
+
+def test_rotated_text_is_not_upright(tmp_path):
+    content = b"BT /F1 10 Tf 0 1 -1 0 40 300 Tm (arXiv margin stamp text) Tj ET"
+    line = PdfiumReader().open(pdf(tmp_path / "v.pdf", content)).page(0).layout().lines[0]
+    assert not line.upright
+
+
+def test_a_horizontal_scale_does_not_inflate_the_font_size(tmp_path):
+    content = b"BT /F1 10 Tf 200 Tz 72 700 Td (Wide words here) Tj ET"
+    line = PdfiumReader().open(pdf(tmp_path / "z.pdf", content)).page(0).layout().lines[0]
+    assert line.size == 10.0
+
+
+def test_a_font_name_longer_than_the_buffer_still_tells_bold(tmp_path):
+    name = b"ABCDEF+AVeryLongFontFamilyNameThatGoesOnForWellOverSixtyFourBytesInTotal-Bold"
+    font = b"<< /Type /Font /Subtype /Type1 /BaseFont /" + name + b" >>"
+    content = b"BT /F2 12 Tf 72 700 Td (Long name bold) Tj ET"
+    path = pdf(tmp_path / "n.pdf", content, b"", [font])
+    path.write_bytes(path.read_bytes().replace(b"/F1 4 0 R", b"/F1 4 0 R /F2 6 0 R"))
+    assert PdfiumReader().open(path).page(0).layout().lines[0].bold
+
+
+def glyph(x):
+    return _Glyph(10.0, x, x + 5, 700.0, False, True)
+
+
+def stream(text):
+    return [
+        (c, None if c.isspace() or c == HYPHEN_MARK else glyph(72 + 5 * k))
+        for k, c in enumerate(text)
+    ]
+
+
+def test_a_marker_at_the_end_of_a_row_ends_the_line_and_keeps_the_marker():
+    lines = split_lines(stream("the transduc\x02tion model"), 0.0, 792.0)
+    assert [ln.text for ln in lines] == ["the transduc\x02", "tion model"]
+
+
+def test_a_marker_followed_by_a_space_is_a_hyphen_in_the_middle_of_a_row():
+    lines = split_lines(stream("set |a\x02 to |b\x02 con\x02tinues"), 0.0, 792.0)
+    assert [ln.text for ln in lines] == ["set |a- to |b- con\x02", "tinues"]
+
+
+def test_line_breaks_split_the_stream_and_empty_lines_are_dropped():
+    lines = split_lines(stream("first\r\n \r\nsecond"), 0.0, 792.0)
+    assert [ln.text for ln in lines] == ["first", "second"]

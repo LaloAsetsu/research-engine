@@ -246,9 +246,12 @@ Contract:
   - `n_images` and `image_coverage`: image objects and the fraction of the page they cover, from 0 to 1.
   - `garbage_ratio` and `alpha_ratio`: compute them with `docingest.domain.text.garbage_ratio` and `alpha_ratio`, so the routing thresholds keep their meaning.
   - Return the text uncleaned: `IngestService` cleans it with the whole document's vocabulary. A line-end hyphen may be marked with `domain.text.HYPHEN_MARK` (U+0002), as pdfium does.
+- `PdfPage.layout()` is called once for every page that keeps its text layer, after `signals()`. It returns a `domain.layout.PageLayout`: the page's width and height in points and its lines in reading order, each a `TextLine` (`text`, dominant `size` in points, `bold`, `x0`, `x1`, `baseline` counted from the top of the page, `upright`). `IngestService` uses it to take out running headers and page numbers, join the lines of a paragraph and mark headings (see [Text-layer structure](../domain/README.md#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy)).
+  - The lines must be the ones of `signals()`' text, in the same order, and a line that ends in a hyphen that the library joined must keep `HYPHEN_MARK` at its end.
+  - An adapter that cannot tell returns `PageLayout()` (no lines): the page then keeps its flat text, cleaned as before. The built-in returns it for rotated pages.
 - `PdfPage.render(dpi)` rasterizes the page at `dpi` dots per inch and returns a PIL image. It is called only for pages routed to OCR, with `OcrEngine.dpi`.
 
-Implementations: `adapters/pdf/pdfium.py` `PdfiumReader`, `PdfiumDocument`, `PdfiumPage`. Test fakes: `FakePdfReader`, `FakePdfDocument`, `FakePage` (plus the `digital()` and `scanned()` page builders).
+Implementations: `adapters/pdf/pdfium.py` `PdfiumReader`, `PdfiumDocument`, `PdfiumPage`. Test fakes: `FakePdfReader`, `FakePdfDocument`, `FakePage` (plus the `digital()` and `scanned()` page builders; a `FakePage` has no layout unless it is given one).
 
 ### OcrEngine
 

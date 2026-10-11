@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import textwrap
+from collections.abc import Sequence
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -74,3 +76,58 @@ def blank_pdf(path: Path, pages: int) -> Path:
         doc.new_page(612, 792)
     doc.save(path)
     return path
+
+
+Run = tuple[float, float, float, bool, str]  # x, y (from the page bottom), font size, bold, text
+
+
+def paragraph(
+    text: str, *, x: float = 72, top: float = 700, size: float = 10, width: int = 62
+) -> list[Run]:
+    """The lines of one wrapped paragraph, one text run each, 1.2 line heights apart."""
+    return [
+        (x, top - i * 1.2 * size, size, False, line)
+        for i, line in enumerate(textwrap.wrap(text, width))
+    ]
+
+
+def layout_pdf(path: Path, pages: Sequence[Sequence[Run]]) -> Path:
+    """A multi-page PDF with every text run placed by hand (Helvetica, or bold)."""
+    objs: list[bytes] = [b"", b""]  # catalog and page tree, filled in below
+    kids = []
+    fonts = b"/Font << /F1 3 0 R /F2 4 0 R >>"
+    objs += [
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    ]
+    for runs in pages:
+        ops = b"".join(
+            b"BT /F%d %g Tf %g %g Td (%s) Tj ET\n" % (2 if bold else 1, size, x, y, _escape(text))
+            for x, y, size, bold, text in runs
+        )
+        stream = len(objs) + 2
+        kids.append(b"%d 0 R" % (len(objs) + 1))
+        objs.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << "
+            + fonts
+            + b" >> /Contents %d 0 R >>" % stream
+        )
+        objs.append(b"<< /Length %d >>\nstream\n" % len(ops) + ops + b"endstream")
+    objs[0] = b"<< /Type /Catalog /Pages 2 0 R >>"
+    objs[1] = b"<< /Type /Pages /Kids [" + b" ".join(kids) + b"] /Count %d >>" % len(kids)
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % i + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    path.write_bytes(bytes(out))
+    return path
+
+
+def _escape(text: str) -> bytes:
+    return (
+        text.encode("latin-1").replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
+    )
