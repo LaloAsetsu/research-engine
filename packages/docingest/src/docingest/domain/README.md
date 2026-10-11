@@ -180,7 +180,7 @@ Raw measurements of one PDF page, produced by a `PdfReader` adapter (`PdfPage.si
 |---|---|---|---|
 | `n_chars` | `int` | `0` | Number of non-whitespace characters in the embedded text layer. |
 | `n_images` | `int` | `0` | Number of image objects on the page. |
-| `image_coverage` | `float` | `0.0` | Fraction of the page area covered by image objects, from 0 to 1. |
+| `image_coverage` | `float` | `0.0` | Fraction of the page area covered by image objects (the union of their rectangles: overlaps count once), from 0 to 1. |
 | `garbage_ratio` | `float` | `0.0` | Share of characters that indicate a broken text layer, computed with `text.garbage_ratio`. |
 | `alpha_ratio` | `float` | `0.0` | Share of letters among non-space characters, computed with `text.alpha_ratio`. |
 
@@ -242,7 +242,7 @@ Provenance of one page (PDF), frame (image) or segment (converter).
 | `method` | `PageMethod` | required | all | How the text was produced. |
 | `n_chars` | `int` | required | all | Length of the page text as written to `document.md`. For text-layer pages this is measured after clean-up. |
 | `seconds` | `float` | required | all | Time spent on this page. For text-layer pages, the time to read the page's signals (rounded to 3 decimals; clean-up runs later for the whole document). For OCR pages, `OcrResult.seconds` rounded to 2 decimals. For converter segments, the conversion time divided equally over the kept segments. |
-| `engine` | `str \| None` | `None` | all | What produced the text: `PdfReader.fingerprint` for text-layer pages (for example `"pypdfium2 5.13.0"`), `OcrEngine.fingerprint` for OCR pages, `Conversion.engine` for segments (for example `"pandoc 3.8"`). |
+| `engine` | `str \| None` | `None` | all | What produced the text: `PdfReader.fingerprint` for text-layer pages (for example `"pypdfium2 5.13.0 signals 2"`; the second part is the version of the reader's measurements), `OcrEngine.fingerprint` for OCR pages, `Conversion.engine` for segments (for example `"pandoc 3.8"`). |
 | `title` | `str \| None` | `None` | converter segments | Section or segment title (`Segment.title`). |
 | `probe` | `PageProbe \| None` | `None` | PDF pages | Signals and routing decision. `None` for image frames and converter segments. |
 | `model` | `str \| None` | `None` | OCR pages | `OcrEngine.model.repo_id`. |
@@ -325,7 +325,7 @@ A two-page PDF whose first page has a usable text layer and whose second page is
       "method": "text_layer",
       "n_chars": 2688,
       "seconds": 0.012,
-      "engine": "pypdfium2 5.13.0",
+      "engine": "pypdfium2 5.13.0 signals 2",
       "title": null,
       "probe": {
         "n_chars": 2710,
@@ -402,6 +402,8 @@ A pydantic model; its values come from the `[routing]` section of `config/pipeli
 | `blank_max_ink` | `float` | `0.0005` | ...and fewer than this share of its pixels are ink. `0` turns the blank rule off. |
 | `blank_ink_contrast` | `int` | `32` | Grey levels under the page background that make a pixel ink, after a 3x3 median filter (`application/ink.py` does the measuring; the domain holds only the thresholds). |
 | `blank_dark_page` | `int` | `128` | A page with a median grey below this counts as all ink. |
+| `scan_layer_to_ocr` | `bool` | `True` | A page that is a scan (images cover at least `scan_image_cover`) and has at least `min_chars` characters of text layer needs OCR. `False` keeps the layer. |
+| `scan_image_cover` | `float` | `0.8` | Image coverage from which a page counts as a scan for that rule; above 0, at most 1. |
 
 `RoutingPolicy` forbids unknown fields (`extra="forbid"`), like the other config sections: a misspelled key in `[routing]` is a validation error, never a silently ignored threshold.
 
@@ -419,7 +421,8 @@ Every rule is evaluated; each one that fires adds a reason. `needs_ocr` is `True
 | 2 | `image_coverage >= policy.image_coverage` and `n_chars < image_coverage_max_chars` | `image covers <coverage as %> of page with little text` |
 | 3 | `garbage_ratio > max_garbage_ratio` | `garbled text layer (<garbage_ratio as %> bad glyphs)` |
 | 4 | `n_chars >= min_chars` and `alpha_ratio < min_alpha_ratio` | `low alphabetic ratio (<alpha_ratio as %>)` |
-| 5 | `force_ocr` is `True` and no other rule fired | `forced (--ocr-all)` |
+| 5 | `scan_layer_to_ocr` and `n_chars >= min_chars` and `image_coverage >= scan_image_cover` | `scanned page with a text layer: images cover <coverage as %> of the page, <n_chars> embedded chars` |
+| 6 | `force_ocr` is `True` and no other rule fired | `forced (--ocr-all)` |
 
 The diagram shows the order in which `decide` evaluates the rules for one page. No rule short-circuits the others: each one that fires appends its reason, and the forced reason is added only when the list is still empty.
 
@@ -436,17 +439,21 @@ flowchart TD
     R3 -->|no| R4{"n_chars at least min_chars and alpha_ratio below min_alpha_ratio?"}
     A3 --> R4
     R4 -->|yes| A4["add: low alphabetic ratio"]
-    R4 -->|no| F{"force_ocr and no reasons yet?"}
-    A4 --> F
-    F -->|yes| A5["add the forced reason"]
+    R4 -->|no| R5{"scan_layer_to_ocr, n_chars at least min_chars and image_coverage at least scan_image_cover?"}
+    A4 --> R5
+    R5 -->|yes| A5["add: scanned page with a text layer"]
+    R5 -->|no| F{"force_ocr and no reasons yet?"}
+    A5 --> F
+    F -->|yes| A6["add the forced reason"]
     F -->|no| OUT["PageProbe: needs_ocr is true when reasons is not empty"]
-    A5 --> OUT
+    A6 --> OUT
 ```
 
 Properties to rely on:
 
 - Reasons accumulate: a blank scanned page typically records both rule 1 and rule 2.
-- Rule 4 applies only when rule 1 does not, so a nearly empty page is never also flagged for its letter ratio.
+- Rule 4 applies only when rule 1 does not, so a nearly empty page is never also flagged for its letter ratio. Rule 5 likewise leaves pages under `min_chars` to rule 1.
+- Rule 5 is the only one that sends a page to OCR for having a long, clean text layer. A scan whose layer is shorter than `image_coverage_max_chars` records rule 2 as well, and keeps going to OCR with `scan_layer_to_ocr = False`.
 - With `force_ocr=True` the page always needs OCR. The `forced (--ocr-all)` reason is added only when no rule fired, so a page that would have gone to OCR anyway keeps its real reasons.
 - `decide` is deterministic and has no side effects. It returns a new `PageProbe` with the signals copied in.
 - The policy is part of the cache key of PDF inputs only (its JSON is in `config_hash`). Changing a threshold re-processes PDFs on the next run and leaves images and converter inputs cached.
@@ -457,8 +464,9 @@ Examples (these are the cases in `tests/unit/test_routing_policy.py`, run with t
 |---|---|---|
 | `n_chars=3000, alpha_ratio=0.8` | `False` | none |
 | `n_chars=0, n_images=1, image_coverage=1.0` | `True` | `only 0 embedded chars (<50)`, `image covers 100% of page with little text` |
-| `n_chars=120, image_coverage=0.9, alpha_ratio=0.8` | `True` | `image covers 90% of page with little text` |
-| `n_chars=2000, image_coverage=0.9, alpha_ratio=0.8` | `False` | none (enough text despite the image) |
+| `n_chars=120, image_coverage=0.9, alpha_ratio=0.8` | `True` | `image covers 90% of page with little text`, `scanned page with a text layer: images cover 90% of the page, 120 embedded chars` |
+| `n_chars=2000, image_coverage=0.9, alpha_ratio=0.8` | `True` | `scanned page with a text layer: images cover 90% of the page, 2000 embedded chars` |
+| `n_chars=2000, image_coverage=0.5, alpha_ratio=0.8` | `False` | none (a figure on a page of text) |
 | `n_chars=900, garbage_ratio=0.4, alpha_ratio=0.8` | `True` | `garbled text layer (40% bad glyphs)` |
 | `n_chars=900, alpha_ratio=0.2` | `True` | `low alphabetic ratio (20%)` |
 

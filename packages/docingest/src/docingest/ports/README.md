@@ -132,7 +132,7 @@ Built-in fingerprints, for orientation:
 
 | Adapter | Fingerprint |
 |---|---|
-| `PdfiumReader` | `pypdfium2 <version>` |
+| `PdfiumReader` | `pypdfium2 <version> signals <n>` |
 | `PillowImageSource` | `pillow <version>` |
 | `MlxVlmOcr` | `mlx-vlm ` followed by sorted JSON of the mlx-vlm version, model, profile name and `code_version`, prompt, max_side, chat kwargs, prompt order, retry ladder, output-check thresholds, validation flag, dpi, max_tokens, temperature, repetition_penalty |
 | `OpenAICompatibleOcr` | `openai-compatible ` followed by sorted JSON of base_url, served_model, model and revision, the same profile fields, dpi and generation settings |
@@ -237,7 +237,7 @@ sequenceDiagram
 Contract:
 
 - `PdfReader.open(path)` returns an open document or raises `DocumentOpenError` for corrupt, encrypted or truncated files.
-- `PdfReader.fingerprint` identifies the reader and its version (`pypdfium2 5.13.0` for the built-in with that library version). It is part of the PDF cache key and is recorded as `PageRecord.engine` for text-layer pages.
+- `PdfReader.fingerprint` identifies the reader and its version (`pypdfium2 5.13.0 signals 2` for the built-in with that library version; the second part is the version of its measurements). It is part of the PDF cache key and is recorded as `PageRecord.engine` for text-layer pages.
 - `PdfDocument.title` is the document's own title or `None`. It becomes the manifest title when no metadata title is available. The built-in reads `Title` from the document information and maps an empty value to `None`.
 - `len(document)` is the number of pages. It becomes `DocumentManifest.source_pages`.
 - `page(index)` takes a 0-based index. `IngestService` asks for pages `0` to `min(len(document), max_pages) - 1` in order.

@@ -57,7 +57,7 @@ The codebase uses a hexagonal (ports and adapters) architecture, so the OCR mode
 ## Features
 
 - **One canonical output for every input type.** `document.md` with `<!-- page N | method=... -->` markers, and `manifest.json` with full provenance ([format](#canonical-output-format)).
-- **Per-page OCR routing for PDFs.** Four rules taken from Marker and olmOCR decide per page between the embedded text layer and OCR, and every matching rule is recorded as a reason; a page with no text and no ink is blank and never reaches OCR ([routing](#per-page-pdf-routing), [ADR 0002](docs/adr/0002-per-page-routing-and-content-addressed-cache.md)).
+- **Per-page OCR routing for PDFs.** Rules taken from Marker and olmOCR, and one for scans that carry an old OCR layer, decide per page between the embedded text layer and OCR, and every matching rule is recorded as a reason; a page with no text and no ink is blank and never reaches OCR ([routing](#per-page-pdf-routing), [ADR 0002](docs/adr/0002-per-page-routing-and-content-addressed-cache.md)).
 - **Local vision-language OCR.** In-process with mlx-vlm on Apple Silicon, or over HTTP to any OpenAI-compatible server. Per-model profiles set the prompt, input size, output clean-up and generation limits from each model's card; one retry handles truncated or invalid outputs, and the output is checked for loops, text no page could hold and text repeated across pages ([OCR](#ocr-models-and-benchmark)).
 - **Structure for text-layer pages.** Running headers, running footers and page numbers are left out of the page text (and listed in the manifest), the lines of a paragraph are joined, and headings are marked with `#` from their font size and weight ([text-layer structure](#text-layer-structure)).
 - **Document-level de-hyphenation.** A line-end hyphen in the text layer is removed only when the joined word occurs elsewhere in the same document.
@@ -136,20 +136,22 @@ Step by step:
 
 ### Per-page PDF routing
 
-Each PDF page is measured by `PdfPage.signals()` (pypdfium2) and judged by the pure function `domain.routing.decide`. The diagram shows the decision for one page. All four rules are evaluated, every rule that matches is recorded in the manifest as a reason, and the page goes to OCR when at least one matches or when `--ocr-all` is set. A page that goes to OCR for lack of text is first checked for ink in the image that was rendered for OCR: with no text layer to speak of and no ink it is a blank page, recorded with `method = blank` and not transcribed.
+Each PDF page is measured by `PdfPage.signals()` (pypdfium2) and judged by the pure function `domain.routing.decide`. The diagram shows the decision for one page. All five rules are evaluated, every rule that matches is recorded in the manifest as a reason, and the page goes to OCR when at least one matches or when `--ocr-all` is set. A page that goes to OCR for lack of text is first checked for ink in the image that was rendered for OCR: with no text layer to speak of and no ink it is a blank page, recorded with `method = blank` and not transcribed.
 
 ```mermaid
 flowchart TD
     PAGE["PDF page i"] --> SIG["PdfPage.signals: n_chars, n_images, image_coverage, garbage_ratio, alpha_ratio, raw text"]
-    SIG --> DEC["domain.routing.decide evaluates all four rules"]
+    SIG --> DEC["domain.routing.decide evaluates all five rules"]
     DEC --> T1["Rule 1: n_chars below min_chars = 50"]
     DEC --> T2["Rule 2: image_coverage at least 0.6 and n_chars below 400"]
     DEC --> T3["Rule 3: garbage_ratio above 0.10"]
     DEC --> T4["Rule 4: n_chars at least 50 and alpha_ratio below 0.5"]
+    DEC --> T5["Rule 5: n_chars at least 50 and image_coverage at least 0.8 (scan with a text layer)"]
     T1 --> ANY{"Did any rule match?"}
     T2 --> ANY
     T3 --> ANY
     T4 --> ANY
+    T5 --> ANY
     ANY -->|"yes"| OCR["needs_ocr, every matching rule kept as a reason"]
     ANY -->|"no"| FORCED{"ocr_all option set?"}
     FORCED -->|"yes"| FR["needs_ocr, reason: forced"]
@@ -180,14 +182,18 @@ The thresholds live in `[routing]` of [`config/pipeline.toml`](config/README.md)
 | `blank_max_ink` | `0.0005` | ...and fewer than 0.05% of its pixels are ink: it is then **not** OCR input but an empty page | measured on the reference corpus |
 | `blank_ink_contrast` | `32` | (a pixel is ink when it is this many grey levels darker than the page background, after a 3x3 median filter) | measured on synthetic pages and the reference sample, see config/README.md |
 | `blank_dark_page` | `128` | (a page with a median grey below this is not paper: all ink) | the constant of the first version, not measured separately |
+| `scan_layer_to_ocr` | `true` | it is a scan (images cover at least `scan_image_cover` of it) and has at least `min_chars` characters of text layer; `false` keeps the layer | reference corpus: 593 scan pages in 17 documents (the rule fires on 595 pages in 19 documents) |
+| `scan_image_cover` | `0.8` | (the share of the page that images must cover for the rule above) | measured: the scan pages cover 0.88 to 1.0 (coverage is a union of the image rectangles); apart from one cover, no other page of the corpus reaches 0.8 |
 
 How the signals are measured (`adapters/pdf/pdfium.py`, `domain/text.py`):
 
-- `image_coverage` is the area of image objects, measured in page space (including nested Form XObjects and rotated or offset page boxes) and clipped to the visible page box, divided by the page area.
+- `image_coverage` is the share of the page covered by image objects: their rectangles are measured in page space (including nested Form XObjects and rotated or offset page boxes), clipped to the visible page box, and united, so overlapping images count once (exact for one image, on a 200 by 200 grid for several). The PDF reader fingerprint carries a version of this measurement.
 - `garbage_ratio` counts U+FFFD replacement characters, control characters, private-use characters and `(cid:N)` sequences among the non-space characters. pdfium's soft-hyphen marker (U+0002) is not counted.
 - `alpha_ratio` is the share of letters among the non-space characters.
 
 - Ink is measured on the image the engine would be given (`application/ink.py`): the share of pixels darker than the median grey by `blank_ink_contrast` levels after a 3x3 median filter, so paper tint, grey paper, scanner noise and show-through are not ink, and a uniformly dark page counts as all ink. Only pages with at most `blank_max_chars` characters are measured, and the image is reused for OCR when the page turns out not to be blank. The measured values and the reasoning are in [config/README.md](config/README.md#routing). Before this rule the model was asked to transcribe blank pages and invented text for most of them.
+
+**Scans with an OCR text layer (rule 5).** Such a page is one image over the page with, hidden under or over it, the output of an old OCR program. The layer was trusted before unless it was short, garbled or mostly non-letters. On 47 such pages of the reference corpus the model read plain text with a character error rate of 0.011 where the layer had 0.068, and math with 0.03 where the layer had 0.43 (40 pages better, 1 worse). The model needs about 29 seconds per page on the lab GPU server (p90 44 s, up to 70 s), so a large scanned collection takes hours where the layers took seconds ([run guide](../../docs/run-guide.md#5-get-papers-in)). The text layer stays as the fallback if the OCR output is rejected, and `scan_layer_to_ocr = false` keeps the layers. Known limit: a born-digital page drawn over one full-page background image (slide, poster, cover) with a long visible text is read by OCR too. Details and measurements: [config/README.md](config/README.md#routing).
 
 When `--ocr-all` is set and no rule matched, the recorded reason is `forced (--ocr-all)`. Text-layer pages are structured after the whole document has been read ([below](#text-layer-structure)).
 
@@ -207,7 +213,7 @@ Everything is conservative: when a rule is not sure the text stays as the text l
 | Input | Detected by | Port (`[adapters]` key) and adapter | Page or segment method |
 |---|---|---|---|
 | Born-digital PDF | `%PDF-` header | `pdf`: pypdfium2 | `text_layer`, structured (running lines out, paragraphs, headings) with document-level de-hyphenation |
-| Scanned or garbled PDF page | routing rules on the page signals | `ocr`: mlx-vlm or openai-compatible | `vlm_ocr` |
+| Scanned or garbled PDF page, or a scan with an old OCR text layer | routing rules on the page signals | `ocr`: mlx-vlm or openai-compatible | `vlm_ocr` |
 | Blank PDF page (no text layer, no ink) | routing rules, then the ink measurement | none: never sent to OCR | `blank`, an empty page |
 | Mixed PDF | per page | both of the above | chosen per page, with the reasons recorded |
 | PNG, JPEG, TIFF, GIF, WebP, BMP | magic bytes | `images`: Pillow, then `ocr` | `vlm_ocr`, one page per frame (multi-page TIFF gives several) |

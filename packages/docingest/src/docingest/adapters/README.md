@@ -38,7 +38,7 @@ These are the entries of `bootstrap.REGISTRY`. The first column is the key in th
 | `[adapters]` key | Name (default in bold) | Class | Module | Port | Fingerprint | Dependencies |
 |---|---|---|---|---|---|---|
 | `detector` | **`magic`** | `MagicBytesDetector` | [detection/magic.py](detection/magic.py) | `TypeDetector` | none | stdlib |
-| `pdf` | **`pdfium`** | `PdfiumReader` | [pdf/pdfium.py](pdf/pdfium.py) | `PdfReader` | `pypdfium2 <version>` | `pypdfium2` (core) |
+| `pdf` | **`pdfium`** | `PdfiumReader` | [pdf/pdfium.py](pdf/pdfium.py) | `PdfReader` | `pypdfium2 <version> signals <n>` | `pypdfium2` (core) |
 | `ocr` | **`mlx-vlm`** | `MlxVlmOcr` | [ocr/mlx_vlm.py](ocr/mlx_vlm.py) | `OcrEngine` | `mlx-vlm ` + JSON of settings | `mlx` extra (macOS, Apple Silicon only) |
 | `ocr` | `openai-compatible` | `OpenAICompatibleOcr` | [ocr/openai_compat.py](ocr/openai_compat.py) | `OcrEngine` | `openai-compatible ` + JSON of settings | stdlib HTTP, plus a running server |
 | `images` | **`pillow`** | `PillowImageSource` | [images/pillow.py](images/pillow.py) | `ImageSource` | `pillow <version>` | `pillow` (core) |
@@ -214,7 +214,7 @@ Ports whose output ends up in a stored document declare a `fingerprint: str` (`P
 
 | Document kind | Parts hashed into `config_hash` |
 |---|---|
-| `pdf` | `PIPELINE_VERSION`, kind, `ocr_all`, `[routing]` policy, `PdfReader.fingerprint`, `OcrEngine.fingerprint` |
+| `pdf` | `PIPELINE_VERSION`, kind, `ocr_all`, `[routing]` policy, `PdfReader.fingerprint` (`pypdfium2 <version> signals <SIGNALS_VERSION>`; raise `SIGNALS_VERSION` in `adapters/pdf/pdfium.py` when a signal changes meaning, so PDF results are recomputed and images and converted documents are not), `OcrEngine.fingerprint` |
 | `image` | `PIPELINE_VERSION`, kind, `ocr_all`, `ImageSource.fingerprint`, `OcrEngine.fingerprint` |
 | `office`, `latex`, `text` | `PIPELINE_VERSION`, kind, `ocr_all`, the fingerprint of that kind's converter |
 
@@ -274,7 +274,7 @@ Limits:
 | Port | `PdfReader.open(path) -> PdfDocument`; `PdfDocument` (`title`, `len()`, `page(i)`, `close()`); `PdfPage` (`signals()`, `render(dpi)`) |
 | Registry | `[adapters] pdf = "pdfium"` |
 | Config keys | none read by the adapter. `[ocr] dpi` sets the render resolution (through `OcrEngine.dpi`), and `[routing]` sets the thresholds applied to its signals (in [`../domain/routing.py`](../domain/routing.py)). |
-| Fingerprint | `pypdfium2 <installed version>`, for example `pypdfium2 5.13.0`. It is also recorded as the `engine` of every text-layer page. |
+| Fingerprint | `pypdfium2 <installed version> signals <SIGNALS_VERSION>`, for example `pypdfium2 5.13.0 signals 2`. It is also recorded as the `engine` of every text-layer page. |
 | Dependencies | `pypdfium2` (core) |
 
 Behaviour:
@@ -284,7 +284,7 @@ Behaviour:
 - `PdfiumPage.signals()` returns `(PageSignals, raw_text)`:
   - `raw_text` is `get_textpage().get_text_bounded()`, returned unmodified.
   - `n_chars` counts non-whitespace characters of the text layer.
-  - `n_images` and `image_coverage` come from the page's image objects, including images nested inside Form XObjects: their bounds are transformed through each enclosing container's matrix, then clipped to the visible page box (`get_bbox()`, in unrotated user space, not assumed to start at the origin). Areas are summed, capped at 1.0 and rounded to 3 decimals.
+  - `n_images` and `image_coverage` come from the page's image objects, including images nested inside Form XObjects: their bounds are transformed through each enclosing container's matrix, then clipped to the visible page box (`get_bbox()`, in unrotated user space, not assumed to start at the origin). `image_coverage` is the union of the clipped rectangles as a share of the page box, so overlapping images count once: exact for zero or one image, on a 200 by 200 grid of bits for several, each edge rounded to the nearest grid line (within half a cell of each image edge), rounded to 3 decimals. Before `SIGNALS_VERSION = 2` it was the sum of the areas capped at 1.0, which counted a figure made of thousands of tiny overlapping images as a full page.
   - `garbage_ratio` and `alpha_ratio` come from [`../domain/text.py`](../domain/text.py), rounded to 3 decimals.
 - `PdfiumPage.layout()` returns a `PageLayout` built from pdfium's character data (about 5 ms per page):
   - the lines are the ones pdfium puts in `raw_text`: a new line starts after each `\r\n` that pdfium generated, and after a U+0002 that ends the row (the line that ends in it keeps the marker); a U+0002 followed by a space is a hyphen glyph in the middle of a row and is read as `-` without a new line (`split_lines`);
@@ -298,7 +298,7 @@ Behaviour:
 
 Text layer and U+0002. pdfium replaces a line-end hyphen with the control character U+0002 and joins the two lines, both for real hyphenation (`transduc-tion`) and for compounds (`sequence-aligned`). The adapter returns that marker as is. The domain handles it: `garbage_ratio` does not count U+0002 as a broken glyph, and `IngestService` resolves it with the vocabulary of the whole document, in `structure_pages` for pages with a layout and in `clean_text_layer(raw, vocab)` for the others. The two halves are joined only when the joined word occurs elsewhere in the document; otherwise a hyphen is kept, which never loses information. A PDF adapter built on another library must return a raw text layer and lines that these functions handle correctly, or the Markdown output changes.
 
-How the signals are used: `IngestService` passes them to `domain.routing.decide()`, which sends a page to OCR when it has fewer than `min_chars` characters, when images cover at least `image_coverage` of it with fewer than `image_coverage_max_chars` characters, when `garbage_ratio` exceeds `max_garbage_ratio`, when `alpha_ratio` is below `min_alpha_ratio`, or when `--ocr-all` forces it. See [`../domain/README.md`](../domain/README.md) and [`../../../config/README.md`](../../../config/README.md).
+How the signals are used: `IngestService` passes them to `domain.routing.decide()`, which sends a page to OCR when it has fewer than `min_chars` characters, when images cover at least `image_coverage` of it with fewer than `image_coverage_max_chars` characters, when `garbage_ratio` exceeds `max_garbage_ratio`, when `alpha_ratio` is below `min_alpha_ratio`, when the page is a scan with a text layer (`image_coverage` at least `scan_image_cover` and at least `min_chars` characters, unless `scan_layer_to_ocr` is off), or when `--ocr-all` forces it. See [`../domain/README.md`](../domain/README.md) and [`../../../config/README.md`](../../../config/README.md).
 
 ## images: PillowImageSource
 
