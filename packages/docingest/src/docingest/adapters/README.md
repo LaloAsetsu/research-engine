@@ -43,7 +43,7 @@ These are the entries of `bootstrap.REGISTRY`. The first column is the key in th
 | `ocr` | `openai-compatible` | `OpenAICompatibleOcr` | [ocr/openai_compat.py](ocr/openai_compat.py) | `OcrEngine` | `openai-compatible ` + JSON of settings | stdlib HTTP, plus a running server |
 | `images` | **`pillow`** | `PillowImageSource` | [images/pillow.py](images/pillow.py) | `ImageSource` | `pillow <version>` | `pillow` (core) |
 | `office` | **`docling`** | `DoclingConverter` | [converters/docling.py](converters/docling.py) | `DocumentConverter` | `docling <version>` | `office` extra |
-| `latex` | **`pandoc`** | `PandocLatexConverter` | [converters/pandoc_latex.py](converters/pandoc_latex.py) | `DocumentConverter` | `pandoc-latex r2` + pandoc version, arguments, `split_level`, fallback | `pypandoc-binary`, `pylatexenc` (core) |
+| `latex` | **`pandoc`** | `PandocLatexConverter` | [converters/pandoc_latex.py](converters/pandoc_latex.py) | `DocumentConverter` | `pandoc-latex r3` + pandoc version, arguments, `split_level`, fallback | `pypandoc-binary`, `pylatexenc` (core) |
 | `text` | **`passthrough`** | `PassthroughConverter` | [converters/plaintext.py](converters/plaintext.py) | `DocumentConverter` | `passthrough 1` | none |
 | `store` | **`filesystem`** | `FilesystemStore` | [store/filesystem.py](store/filesystem.py) | `DocumentStore` | none | stdlib |
 | `qa` | **`paperqa`** | `PaperQAAnswerer` | [qa/paperqa.py](qa/paperqa.py) | `QuestionAnswerer` | none | `qa` extra (`paper-qa[local]`) |
@@ -62,7 +62,7 @@ These are the entries of `bootstrap.REGISTRY`. The first column is the key in th
 | [datasets/olmocr_bench.py](datasets/olmocr_bench.py) | `OlmOcrBenchSuite`, `prepare_subset`, `ScorerConfig` | `BenchmarkSuite` named `olmocr-bench`, scored by the official scorer | `build_suite` in `bench_cli.py` |
 | [ocr/profiles.py](ocr/profiles.py) | `OcrProfile`, `PROFILES`, `profile_for`, `attempts` | Per-model prompt, image size, output clean-up and retry ladder | Both OCR adapters |
 | [ocr/ladder.py](ocr/ladder.py) | `run_ladder`, `Attempt`, `Generation` | The retry loop: output checks, stricter retries, more room for a dense page | Both OCR adapters |
-| [converters/latex_source.py](converters/latex_source.py) | `unpack`, `find_main`, `flatten`, `prepare_for_pandoc`, `split_sections` | Safe unpacking of LaTeX sources and archives, main-file detection, include inlining (no pandoc, no pylatexenc) | `PandocLatexConverter` |
+| [converters/latex_source.py](converters/latex_source.py) | `unpack`, `find_main`, `flatten`, `prepare_for_pandoc`, `split_sections` | Safe unpacking of LaTeX sources and archives, main-file detection, include inlining, the source rewrites pandoc needs (no pandoc, no pylatexenc) | `PandocLatexConverter` |
 | [sources/http.py](sources/http.py) | `PoliteClient`, `UrllibTransport`, `RateLimiter`, `RawResponse`, `HttpStatusError`, `RetriesExhaustedError`, `LocalWriteError` | Rate-limited, serialized, retrying HTTP GET (stdlib only) | `ArxivCrawler` |
 | [models/huggingface.py](models/huggingface.py) | `resolve(repo_id, revision)` | Pinned Hugging Face snapshot to a local path, offline first | `MlxVlmOcr`, `qa/paperqa.py`, `docingest model-path` |
 
@@ -350,7 +350,7 @@ Full reference: [converters/README.md](converters/README.md). All three implemen
 | `latex` | `latex = "pandoc"` | `PandocLatexConverter` | `[latex]`: `timeout_s` (120), `max_archive_mb` (200), `split_level` (2), `pandoc_path` (none: the pandoc bundled by `pypandoc-binary`), `fallback` (true) | One segment per section at `split_level` (an `Abstract` segment first when the source has one), `PageMethod.LATEX`; `PageMethod.LATEX_PLAINTEXT` for the fallback | Accepts `.tex`, tar and tar.gz archives and single gzipped `.tex` files. Unpacks safely, picks the main file, inlines includes in Python, runs pandoc `--sandbox` with a heap cap and a wall-clock timeout. Falls back to pylatexenc plain text when pandoc fails, times out or keeps too little text, and sets `degraded=True` when the cause was the machine (timeout, crash, missing pandoc) rather than the document. |
 | `text` | `text = "passthrough"` | `PassthroughConverter` | none | One segment, `PageMethod.PASSTHROUGH` | Reads the file as text with `errors="replace"`. |
 
-The pandoc fingerprint has the form `pandoc-latex r2 | pandoc <version> | <pandoc arguments> | split_level=<n> | pylatexenc <version>` (the last part is `no fallback` when `fallback = false`). A `Conversion` with `degraded=True` is stored under `_degraded/` by the filesystem store and is never served from the cache, so the next run retries the real conversion.
+The pandoc fingerprint has the form `pandoc-latex r3 | pandoc <version> | <pandoc arguments> | split_level=<n> | pylatexenc <version>` (the last part is `no fallback` when `fallback = false`). A `Conversion` with `degraded=True` is stored under `_degraded/` by the filesystem store and is never served from the cache, so the next run retries the real conversion.
 
 ## store: FilesystemStore
 

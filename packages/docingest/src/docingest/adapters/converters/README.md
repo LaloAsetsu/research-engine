@@ -5,7 +5,7 @@ This package holds the implementations of the `DocumentConverter` port: the code
 | File | Contents | Port (`[adapters]` key) | Adapter name |
 | --- | --- | --- | --- |
 | [`pandoc_latex.py`](pandoc_latex.py) | `PandocLatexConverter`: LaTeX to Markdown with a sandboxed pandoc, a pylatexenc plain-text fallback, section splitting and metadata extraction | `latex` | `pandoc` |
-| [`latex_source.py`](latex_source.py) | Pure helpers used by `PandocLatexConverter`: safe archive unpacking, main-file detection, decoding, comment stripping, flattening of includes, macro hygiene, brace matching, section splitting. No pandoc and no pylatexenc in this module | (helpers) | (helpers) |
+| [`latex_source.py`](latex_source.py) | Pure helpers used by `PandocLatexConverter`: safe archive unpacking, main-file detection, decoding, comment stripping, flattening of includes, macro hygiene, the source rewrites pandoc needs, brace matching, section splitting. No pandoc and no pylatexenc in this module | (helpers) | (helpers) |
 | [`docling.py`](docling.py) | `DoclingConverter`: DOCX, PPTX, XLSX and HTML through Docling (`office` extra) | `office` | `docling` |
 | [`plaintext.py`](plaintext.py) | `PassthroughConverter`: Markdown and plain text, unchanged | `text` | `passthrough` |
 
@@ -135,7 +135,7 @@ flowchart TD
     FIND --> FLAT["flatten(main, root): decode, strip comments, cut at endinput, inline includes"]
     GUNZIP --> FLAT
     PLAIN --> FLAT
-    FLAT --> PREP["prepare_for_pandoc: drop unsafe macros, rewrite thebibliography, fix author separators, drop today"]
+    FLAT --> PREP["prepare_for_pandoc: drop unsafe macros, rewrite thebibliography, fix author separators, drop today, shim @ macros, clean citation keys, simplify layout"]
     PREP --> PANDOC["pandoc in sandbox mode, stdin only, heap cap, timeout_s"]
     PANDOC --> META["split pandoc output into meta-json and body"]
     META --> SPLIT["split_markdown at headings up to split_level"]
@@ -260,6 +260,12 @@ Local `.sty` packages are loaded without this cut.
 | `rewrite_bibliography()` turns each `thebibliography` environment into `\section*{References}` and an `enumerate` whose items start with `\cite{<key>}` | pandoc prints the widest-label argument as text, drops `\newblock {\em ...}` groups (the venue) and emits no heading. The citation key at the start of each item lets `[@key]` in the text be matched to its reference. Helper macros in natbib's preamble are kept, `\url`, `\doi`, `\href` and `\urlprefix` overrides are not. |
 | `\And` and `\AND` become `\and` | NeurIPS and ICLR styles separate authors with them, pandoc only knows `\and`. |
 | `\today` is removed | A sandboxed pandoc prints 1970-01-01. |
+| `shim_at_macros()` drops definitions of `@`-named macros and replaces the few `@` bodies it can | pandoc 3.9 cannot read `\providecommand \@ifxundefined [1]{...}` (it reads `\@` and stops at `#1`), and the `.bbl` of REVTeX and natbib styles starts with such definitions, which `rewrite_bibliography()` keeps. A macro whose whole body is one internal gets the plain definition (`\bibinfo [0]{\@secondoftwo}` becomes `\providecommand{\bibinfo}[2]{#2}`; also `\@firstoftwo`, `\@gobble`, `\@gobbletwo`, `\@firstofone`). Other bodies that use an `@` stay, because dropping them lost tables and headings. In the preamble of a bibliography only (where `rewrite_bibliography()` calls it with `opaque=True`), a macro built on `\csname`, `\catcode` or `\spacefactor` (`\BibitemShut`) gets an empty body with the same arguments, or just the arguments it prints outside `\csname` and `\typeout` (IEEEtran's `\BIBforeignlanguage[2]` becomes `[2]{#2}`, so the title of an entry stays). Elsewhere in a document such a macro is left alone, because emptying it would delete its visible text. |
+| `rewrite_bibliography()` also repairs REVTeX's reference entries | pandoc 3.9 drops the whole list, without an error, when an entry has `\href {url}` and its text on the next line, `\href@noop {}` (an entry without a URL) or the `\Eprint` helper (`\providecommand \Eprint [0]{\href }`). The arguments of `\href` are joined, `\href@noop {}` is removed and `\Eprint` is defined with its two arguments. These rewrites apply inside the bibliography only. |
+| `sanitize_citation_keys()` cleans the keys of `\cite`-like commands (`\cite`, `\citep`, `\citet`, `\textcite`, `\autocite`, `\footcite`, `\nocite` and the other `\cite...` forms) | pandoc reads a key of letters (any script), digits and `_:.+/-`. An empty key (`\cite{a,,b}`) is dropped, braces are removed and any other character (`$`, a curly quote, a non-breaking hyphen, `\|`, a space) is written as `_x<hex code>_` (`a$b` becomes `a_x24_b`), so keys that differ only in such a character stay different. This holds except for a key that already contains the escape form itself (a literal `a_x24_b` collides with `a$b`). A `%` comment inside the key list is dropped, as TeX does. `\nocite{*}` is left alone. `rewrite_bibliography()` applies the same function to the key of each entry (`clean_citation_keys()`), so a citation and its reference keep matching. A command with no key left disappears. The definition of a citation macro (`\edef\citenum{...}`, `\newcommand\citep`) and a key that is a macro parameter (`\cite{#1}`) are left alone. |
+| `simplify_layout()` | Small forms pandoc stops at or drops a float for: cleveref's `\label[type]{key}` becomes `\label{key}`; LyX's `\global\long\def` (up to four prefixes) becomes `\def`, and so does an `\edef` or `\xdef` with parameters (`\edef\x#1{...}`, which pandoc rejects; `\gdef` and a parameterless `\edef` or `\xdef` are read by pandoc with their meaning, and as `\def` the save-and-redefine idiom `\xdef\saved{\X}\renewcommand{\X}{[\saved]}` loops until the timeout); `\newcolumntype{X}[n]{spec}` is removed; `\raggedright` (in a caption pandoc 3.9 drops the whole table) and `\vskip <glue>` are removed; IEEEtran's `\linebreakand` becomes `\and`. |
+
+The rewrites target the reader of pandoc 3.9, which `uv.lock` pins through `pypandoc-binary`. Which constructs fail can change with another pandoc version, so the rates they were measured with should be checked again after an upgrade. Measured and not adopted: dropping `\makeatletter` blocks, dropping every definition that has an `@` in its body (tables and headings were lost), dropping the whole `.bbl` preamble (natbib entries lose their `\bibinfo` helpers), and pandoc's `+raw_tex` or `-latex_macros`.
 
 `package_macros(sty)`, used when a local `.sty` is inlined, keeps only notation: definitions that are not `\renewcommand`, whose name and text contain no `@`, that are not structural and not self-referential, plus `\newtheorem` declarations. Layout machinery is exactly what hangs pandoc.
 
@@ -385,6 +391,7 @@ arXiv sources are often unbalanced or huge, so every scan in `latex_source.py` i
 | `brace_pairs(text)` | The same matching for every `{` in one linear pass, as a dict from opening index to closing index. Used, with the same 20,000-character limit, to read macro definition bodies (`macro_definitions()`) and section titles (`split_sections()`). Scanning a window per candidate went quadratic on unbalanced sources. |
 | `regions(text, begin, end)` and `sub_regions(...)` | The pairs the lazy regex `begin.*?end` would find, in linear time. Once an end pattern is missing after one begin, later begins with the same end pattern are skipped instead of rescanning the rest of the text. Used for `thebibliography`, `abstract`, `\iffalse ... \fi` and the environments dropped by `approx_text_length()`. |
 | `verbatim_parts(text)` | The verbatim regions in order, as `Verbatim(start, end, body, env)`: verbatim-like environments (an unclosed one runs to the end of the text, as in TeX), `filecontents`, and `\verb`-like arguments, which must close on their own line within 1,000 characters. |
+| `sanitize_citation_keys()` and the `@`-macro and layout rewrites | Read definitions through `brace_pairs()` and bound the optional arguments they match, so an unclosed `\cite[`, `\label[`, `\newcolumntype{a}{` or a run of `\global\long` repeated many times is rewritten in linear time. |
 | `cut_at_endinput()` | Tracks brace depth token by token (skipping escaped characters) to decide which `\endinput` is executed. |
 
 ### Configuration: the latex section
@@ -402,10 +409,10 @@ arXiv sources are often unbalanced or huge, so every scan in `latex_source.py` i
 The fingerprint has the form:
 
 ```text
-pandoc-latex r2 | pandoc <version or unavailable> | <pandoc arguments> | split_level=2 | pylatexenc <version>
+pandoc-latex r3 | pandoc <version or unavailable> | <pandoc arguments> | split_level=2 | pylatexenc <version>
 ```
 
-`<pandoc arguments>` is `PANDOC_ARGS` joined with spaces (without the heap cap and the template option), and the last part is `no fallback` when `fallback = false`. `REVISION = 2` at the top of `pandoc_latex.py` must be bumped whenever this adapter's output changes for the same pandoc and pylatexenc versions, so that cached LaTeX conversions are invalidated. The `engine` recorded per page is `pandoc <version>` (or `pandoc unknown`) for a pandoc result.
+`<pandoc arguments>` is `PANDOC_ARGS` joined with spaces (without the heap cap and the template option), and the last part is `no fallback` when `fallback = false`. `REVISION = 3` at the top of `pandoc_latex.py` must be bumped whenever this adapter's output changes for the same pandoc and pylatexenc versions, so that cached LaTeX conversions are invalidated. The `engine` recorded per page is `pandoc <version>` (or `pandoc unknown`) for a pandoc result.
 
 ### Warnings and errors
 
@@ -571,18 +578,19 @@ A converter alone is not enough when the input type is new. The kind also needs 
 - Keep every scan linear: use `brace_pairs`, `regions`, `sub_regions` and `verbatim_parts` instead of lazy `.*?` regexes over the whole document.
 - Never let pandoc read files: inline in `flatten()` and keep `--sandbox`.
 - Bump `REVISION` in `pandoc_latex.py` when the output changes for the same pandoc and pylatexenc versions.
-- Add a failing case to the tests before fixing it. The fixture paper in `tests/fixtures/latex/paper/` packs the known traps (a latin-1 include, a self-including file, a local `.sty` whose layout macro makes pandoc loop, a natbib `.bbl`, a commented-out include and verbatim code).
+- Add a failing case to the tests before fixing it. Fixtures are invented (made-up authors, titles and macros), never copied from a paper. The fixture paper in `tests/fixtures/latex/paper/` packs the known traps (a latin-1 include, a self-including file, a local `.sty` whose layout macro makes pandoc loop, a natbib `.bbl`, a commented-out include and verbatim code).
 
 ## Tests
 
 | Test file | What it covers |
 | --- | --- |
 | `tests/unit/test_latex_source.py` | Decoding, comments, macro hygiene, bibliography rewrite, flattening (resolution, latin-1, cycles, boundary, depth, verbatim, `\subfile`, `\import`, packages, `.bbl`, size cap), `find_main`, `unpack` (media, gzip, traversal, bombs), `approx_text_length`, `split_sections`, `split_markdown`, `assemble`, author names and metadata |
+| `tests/unit/test_latex_pandoc_rewrites.py` | The source rewrites for pandoc: the `@`-macro shim, REVTeX reference entries (`\href` with a line break, `\href@noop`, `\Eprint`), citation keys (a `\edef\citenum` and `\cite{#1}` untouched, a bibitem key equal to its citation), cleveref, LyX, `\newcolumntype`, `\raggedright`, `\vskip`, `\linebreakand`, IEEEtran titles kept, and linear time on unclosed constructs |
 | `tests/unit/test_latex_fixes.py` | `\endinput` rules, tar header bombs, adjacent inline math, `%` in inline verbatim, `verbatim_parts`, linear-time scanning, fallback text for monospace and verbatim, stray-byte decoding, brace matching |
-| `tests/integration/test_pandoc_latex.py` | The real pandoc and pylatexenc: the fixture paper as `.tex`, tar and tar.gz, a single gzipped `.tex`, no reads outside the source, self-referential macros, timeouts, short output, the degraded flag for each exit code, pylatexenc crashes, malformed LaTeX, a missing pandoc, `split_level = 1`, ingestion through the container. Real arXiv sources run when `DOCINGEST_LATEX_SAMPLES` points at a folder of downloads |
+| `tests/integration/test_pandoc_latex.py` | The real pandoc and pylatexenc: the fixture paper as `.tex`, tar and tar.gz, a single gzipped `.tex`, a REVTeX-style paper (method `latex`, every reference kept, odd citation keys), a Nature-style `.bbl`, IEEEtran-style titles, the small rewrites, the save-and-redefine `\xdef` idiom, no reads outside the source, self-referential macros, timeouts, short output, the degraded flag for each exit code, pylatexenc crashes, malformed LaTeX, a missing pandoc, `split_level = 1`, ingestion through the container. Real arXiv sources run when `DOCINGEST_LATEX_SAMPLES` points at a folder of downloads |
 
 ```bash
-uv run pytest tests/unit/test_latex_source.py tests/unit/test_latex_fixes.py tests/integration/test_pandoc_latex.py
+uv run pytest tests/unit/test_latex_source.py tests/unit/test_latex_fixes.py tests/unit/test_latex_pandoc_rewrites.py tests/integration/test_pandoc_latex.py
 ```
 
 See [../../../../tests/README.md](../../../../tests/README.md) for the test layout and [../../../../CONTRIBUTING.md](../../../../CONTRIBUTING.md) for the full set of quality gates.

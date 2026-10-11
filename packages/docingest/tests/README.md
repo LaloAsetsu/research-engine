@@ -34,7 +34,7 @@ tests/
 └── fixtures/        recorded or hand-made inputs
     ├── arxiv/       trimmed arXiv API (Atom) and OAI-PMH responses
     ├── bench/       an olmOCR-bench subset layout and a recorded scorer output
-    └── latex/       a multi-file LaTeX paper with known traps, and a malformed .tex file
+    └── latex/       a multi-file LaTeX paper with known traps, a REVTeX-style paper, and a malformed .tex file
 ```
 
 A local checkout may also contain an empty `tests/e2e/` directory. Git does not track empty directories, and pytest collects nothing from it.
@@ -101,6 +101,7 @@ flowchart LR
 | `test_blank_pages.py` | The blank-page rule: ink measurement (white, tinted and speckled paper, a page number, a title page, a dark page), `is_blank` and its thresholds, the `[routing]` keys, and `IngestService` leaving such pages empty without calling OCR |
 | `test_ingest_service.py` | `IngestService` with fakes for every port: per-page routing, the cache and its invalidation, partial and forced-OCR variants, images, converters, metadata sidecars, degraded conversions, domain errors |
 | `test_latex_fixes.py` | Regressions of the LaTeX adapter (`latex_source`, `pandoc_latex`) |
+| `test_latex_pandoc_rewrites.py` | The source rewrites that keep pandoc 3.9 from failing: `@`-macro shim, REVTeX reference entries, citation keys, small layout forms |
 | `test_latex_source.py` | Pure LaTeX-source helpers and the pandoc adapter's Markdown helpers |
 | `test_metrics.py` | `application.metrics`: normalisation (Markdown, hyphenation), capping of runaway output, `char3_f1`, `bootstrap_ci` |
 | `test_ocr_guards.py` | The OCR output checks of `domain/ocr_guards.py`: loops (and the tables, matrices, contents pages and reference lists that must not count as one), the capacity of a page, the verdict order, the `max_tokens` raise, repeated pages |
@@ -155,6 +156,7 @@ flowchart LR
 | `bench/olmocr_subset/` | `subset.json` (dataset `repo_id`, `revision`, `categories`, `per_category`, `seed`, and SHA-256 checksums of the JSONL files and of the selected PDFs) and one `.jsonl` test file per category; the PDFs themselves are not included | `test_bench_datasets.py` |
 | `bench/scorer_stdout.txt` | Recorded output of the official olmOCR-bench scorer | `test_bench_datasets.py` (`parse_scorer_stdout`) |
 | `latex/paper/` | A multi-file paper with the traps seen in arXiv sources: a latin-1 include, a file that includes itself, a local `.sty` whose layout macro makes pandoc loop, a natbib `.bbl`, a commented-out include, verbatim code | `test_pandoc_latex.py` |
+| `latex/revtex/` | An invented paper with a REVTeX-style `.bbl`: `@` helper macros, `\href` with a line break, `\href@noop`, `\Eprint`, and citation keys with an empty entry and a `$` | `test_pandoc_latex.py` |
 | `latex/malformed.tex` | Unclosed group and `itemize`, for the fallback path | `test_pandoc_latex.py` |
 
 ## Shared helpers
