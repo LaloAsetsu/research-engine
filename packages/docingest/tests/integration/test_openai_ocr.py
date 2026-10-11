@@ -25,7 +25,7 @@ from PIL import Image, ImageDraw
 from docingest.adapters.ocr.openai_compat import OcrServerError, OpenAICompatibleOcr
 from docingest.adapters.ocr.profiles import OcrProfile, profile_for
 from docingest.bootstrap import Container, build
-from docingest.domain.errors import DocingestError
+from docingest.domain.errors import DocingestError, OcrUnavailableError
 from docingest.domain.models import ModelRef, PageMethod
 
 MODEL = ModelRef(repo_id="org/vl-model", revision="a" * 40)
@@ -473,3 +473,84 @@ def test_config_alone_swaps_the_ocr_engine(cfg, serve, tmp_path):
     assert rec.method == PageMethod.VLM_OCR and rec.engine == ocr.fingerprint
     assert (rec.gen_tokens, rec.finish_reason) == (9, "stop")
     assert "Hello from the server" in svc.store.markdown(doc)
+
+
+# ------------------------------------------------------------------------ check()
+class _Status(BaseHTTPRequestHandler):
+    status = 401
+
+    def log_message(self, format, *args):
+        pass
+
+    def do_GET(self):
+        self.send_response(self.status)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+
+def _status_server(status: int):
+    handler = type("H", (_Status,), {"status": status})
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(
+        target=httpd.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+    ).start()
+    return httpd
+
+
+def test_check_passes_when_the_server_answers_whatever_it_says(serve):
+    server = serve()  # the scripted server only knows POST: GET /models is a 501
+    engine(server.base_url).check()
+    for status in (200, 404):
+        httpd = _status_server(status)
+        try:
+            engine(f"http://127.0.0.1:{httpd.server_address[1]}/v1").check()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
+def test_check_names_the_setting_and_the_way_out_when_nobody_answers():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]  # closed again: nothing listens here
+    with pytest.raises(OcrUnavailableError) as err:
+        engine(f"http://127.0.0.1:{port}/v1").check()
+    message = str(err.value)
+    assert f"127.0.0.1:{port}" in message and "[ocr] base_url" in message
+    assert "-c" in message and "mlx" in message
+
+
+def test_check_reports_a_refused_key_and_an_unset_key_variable(monkeypatch):
+    httpd = _status_server(401)
+    try:
+        ocr = engine(f"http://127.0.0.1:{httpd.server_address[1]}/v1")
+        with pytest.raises(OcrUnavailableError, match="api_key_env"):
+            ocr.check()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    monkeypatch.delenv(KEY_ENV, raising=False)
+    with pytest.raises(OcrUnavailableError, match=KEY_ENV):
+        engine("http://127.0.0.1:9/v1", api_key_env=KEY_ENV).check()
+
+
+def test_check_sends_the_key_and_loads_nothing(serve, monkeypatch):
+    monkeypatch.setenv(KEY_ENV, "sk-test")
+    seen = []
+
+    class Auth(_Status):
+        def do_GET(self):
+            seen.append((self.path, self.headers.get("Authorization")))
+            super().do_GET()
+
+    Auth.status = 200
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Auth)
+    threading.Thread(
+        target=httpd.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True
+    ).start()
+    try:
+        engine(f"http://127.0.0.1:{httpd.server_address[1]}/v1", api_key_env=KEY_ENV).check()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert seen == [("/v1/models", "Bearer sk-test")]

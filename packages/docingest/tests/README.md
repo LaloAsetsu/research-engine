@@ -104,6 +104,7 @@ flowchart LR
 | `test_metrics.py` | `application.metrics`: normalisation (Markdown, hyphenation), capping of runaway output, `char3_f1`, `bootstrap_ci` |
 | `test_ocr_guards.py` | The OCR output checks of `domain/ocr_guards.py`: loops (and the tables, matrices, contents pages and reference lists that must not count as one), the capacity of a page, the verdict order, the `max_tokens` raise, repeated pages |
 | `test_ocr_ladder.py` | `run_ladder` with scripted replies: stricter retries, more room (same settings) for a dense page, a refused larger limit, the least bad attempt, olmOCR's own ladder |
+| `test_ocr_preflight.py` | The start-up check: `check()` of both engines (a missing `mlx_vlm`, an unreachable server, a refused key), the ingest service checking once before the first page that needs OCR and never for text-layer, blank or cached work, `docingest ingest` stopping with one message, the crawl stopping |
 | `test_ocr_profiles.py` | OCR profile clean-up code pinned against each profile's `code_version` (an edit fails until it is re-pinned, with a bump if results can change), and `code_version` in both engine fingerprints |
 | `test_ocr_rejection.py` | What `IngestService` does with OCR output it cannot trust: the text layer if there is a usable one, else an empty page, a warning in the manifest, pages that repeat an earlier page, truncation, images |
 | `test_routing_policy.py` | `domain.routing.decide`, configurable `RoutingPolicy` thresholds, unknown `[routing]` keys rejected |
@@ -169,6 +170,7 @@ The module docstring states the rule: the fakes are real implementations of the 
 | Fake | Port | Behaviour | Knobs and inspection |
 |---|---|---|---|
 | `FakeOcr(text="ocr text", model="fake/ocr")` | `OcrEngine` | Returns `OcrResult(text, seconds=0.01, gen_tokens=3, finish_reason="stop")` for any image | `calls`; `model` is `ModelRef(repo_id=model, revision="0" * 40)`; `dpi = 72`; `fingerprint` includes `model` and `text`, so two fakes with different settings produce different cache keys |
+| `CheckedOcr(error=None)` | `OcrEngine` + `OcrPreflight` | A `FakeOcr` with `check()`, which raises `error` when given | `checks`, `error` (settable) |
 | `ScriptedOcr(*texts, finish="stop")` | `OcrEngine` | A `FakeOcr` that answers call n with `texts[n]` (the last one repeats) and the given finish reason | `calls` |
 | `FakePdfReader(docs)` | `PdfReader` | `docs` maps a file **name** to a list of pages; `open(path)` looks up `path.name` and raises `DocumentOpenError` for unknown names | `opened` lists the documents it returned; `fingerprint = "fake-pdf 1"` |
 | `FakePdfDocument(pages, title=None)` | `PdfDocument` | `len()`, `page(i)`, `close()` | `closed` |

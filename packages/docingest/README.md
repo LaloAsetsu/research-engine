@@ -686,6 +686,8 @@ A page is retried when the output hits `max_tokens`, is a loop, holds more text 
 
 **Comparability.** The numbers of the benchmark in [docs/benchmark.md](docs/benchmark.md) were measured before the OCR output checks (loops, text longer than a page can hold, a larger `max_tokens` for a dense page that ran out of tokens, a refused larger limit keeping the truncated page). Their thresholds are part of both OCR engines' fingerprints, so every cached benchmark result is recomputed on the next run, and a new run is not comparable with these numbers: the retry ladder now reacts to different problems and a truncated page may be retried with a larger limit. The thresholds are the fields of `OcrGuards` in `domain/ocr_guards.py`.
 
+**Start-up check.** The first page of a run that needs OCR triggers a cheap check of the configured OCR adapter (the `mlx_vlm` import, or one `GET /models` to the server). If it fails, `docingest ingest` stops with one message that names the setting and the fix (install the `mlx` extra, or pass `-c` with an OpenAI-compatible OCR config) instead of failing every scanned file; runs that never need OCR are unaffected.
+
 Candidates configured in [`config/benchmark.toml`](config/benchmark.toml), each pinned to a commit:
 
 | Candidate | Hugging Face repo | Profile |

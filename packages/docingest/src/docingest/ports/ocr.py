@@ -44,3 +44,17 @@ class OcrEngine(Protocol):
     dpi: int  # rasterization resolution the engine wants for PDF pages
 
     def transcribe(self, image: Image) -> OcrResult: ...
+
+
+@runtime_checkable
+class OcrPreflight(Protocol):
+    """Optional part of an OCR engine: say now whether it can work at all.
+
+    ``IngestService`` calls ``check()`` once, before the first page that needs OCR. It
+    raises ``OcrUnavailableError`` (message: what is wrong, which setting, how to fix
+    it) when no page could be transcribed: the backend is not installed, the server is
+    not reachable. It must be cheap and must not load a model. Engines without it are
+    used as before.
+    """
+
+    def check(self) -> None: ...

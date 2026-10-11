@@ -17,7 +17,7 @@ from rich.table import Table
 from ..application.ingest import SIDECAR_SUFFIX, IngestOptions
 from ..bootstrap import REGISTRY, Container, available, factory, plugins
 from ..config import load_config
-from ..domain.errors import DocingestError
+from ..domain.errors import DocingestError, OcrUnavailableError
 from ..domain.text import split_pages
 from ..ports import StoredDocument
 from .bench_cli import bench_app
@@ -141,10 +141,18 @@ def ingest(
     service = container.ingest
     options = IngestOptions(force=force, ocr_all=ocr_all, max_pages=max_pages)
     stored, failures = [], []
+    stopped = False
     for path in iter_inputs(paths):
         console.rule(f"[bold]{escape(path.name)}")
         try:
             doc = service.ingest(path, options)
+        except OcrUnavailableError as e:  # every later scanned page would fail the same way
+            console.print(f"[red]error[/]: {escape(str(e))}")
+            console.print(
+                f"stopped at {escape(path.name)}: the remaining inputs were not processed"
+            )
+            stopped = True
+            break
         except Exception as e:  # one bad file must not stop the batch
             failures.append((path.name, f"{type(e).__name__}: {e}"))
             console.print(f"[red]failed[/]: {escape(str(e))}")
@@ -157,6 +165,7 @@ def ingest(
         _index_new(container, stored)
     if failures:
         _failures(failures)
+    if failures or stopped:
         raise typer.Exit(1)
 
 

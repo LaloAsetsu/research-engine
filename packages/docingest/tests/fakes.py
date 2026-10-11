@@ -92,6 +92,20 @@ class ScriptedOcr(FakeOcr):
         )
 
 
+class CheckedOcr(FakeOcr):
+    """An engine that can say up front whether it works (the ``OcrPreflight`` part)."""
+
+    def __init__(self, error: Exception | None = None):
+        super().__init__()
+        self.error = error
+        self.checks = 0
+
+    def check(self) -> None:
+        self.checks += 1
+        if self.error:
+            raise self.error
+
+
 @dataclass
 class FakePage:
     signals_: PageSignals

@@ -336,7 +336,8 @@ For each page index `i` below `min(len(doc), max_pages)`:
    (`could_be_blank`: at most `blank_max_chars` characters), `application/ink.py` measures
    the share of inked pixels on that image; with `is_blank` true the record gets
    `method=blank`, an empty text, the pdf engine's fingerprint and a probe that holds the
-   measurements, and OCR is never called. Otherwise the image goes to `ocr.transcribe()` and the record gets `method=vlm_ocr`, the
+   measurements, and OCR is never called. Otherwise `ocr.check()` runs once per run (see
+   below), the image goes to `ocr.transcribe()` and the record gets `method=vlm_ocr`, the
    OCR engine's fingerprint, model repo and revision, generated tokens and finish reason.
 4. The returned text is checked again (`find_problem`, with the area of the rendered
    image at `ocr.dpi`): a loop or text that cannot fit the page is rejected, and the page
@@ -347,6 +348,13 @@ For each page index `i` below `min(len(doc), max_pages)`:
    page's (`duplicate_pages`) are replaced the same way; the first page of a group stays.
 5. Otherwise (no OCR) the raw text layer is kept aside and the record gets
    `method=text_layer` and `engine=pdf.fingerprint`.
+
+**The start-up check.** `IngestService._require_ocr()` calls `ocr.check()` (the optional
+`OcrPreflight` part of an engine) before the first page of a run that reaches OCR, for
+PDFs and images alike. A text-layer PDF, a blank page, a cached result or a converter
+never calls it. It raises `OcrUnavailableError`; `ingest` lets it through, the `ingest`
+command stops the batch with its message, and `CrawlService` stops the crawl. It is
+checked once per service: a success is remembered, a failure is checked again next time.
 
 The PDF is closed in a `finally` block. After the loop, the text-layer pages are cleaned
 with `domain.text.clean_text_layer`, using one vocabulary built from every raw text

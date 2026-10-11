@@ -42,6 +42,7 @@ from ..ports import (
     DocumentStore,
     ImageSource,
     OcrEngine,
+    OcrPreflight,
     PdfReader,
     StoredDocument,
     TypeDetector,
@@ -120,6 +121,7 @@ class IngestService:
         self.policy = policy
         self.log = log
         self.guards = guards or OcrGuards()
+        self._ocr_checked = False
 
     # ----------------------------------------------------------------- public
     def config_hash(self, kind: SourceKind, *, ocr_all: bool = False) -> str:
@@ -245,6 +247,20 @@ class IngestService:
                 f"no converter configured for {kind.value} inputs"
             ) from None
 
+    def _require_ocr(self) -> None:
+        """Before the first page that needs OCR: stop the run if no page could be read.
+
+        Without this a missing backend fails file after file, deep into a long run.
+        Runs that never reach OCR (text-layer PDFs, blank pages, cached results,
+        converters) never pay for it, and the engine checks only what is cheap (see
+        ``OcrPreflight``).
+        """
+        if self._ocr_checked:
+            return
+        if isinstance(self.ocr, OcrPreflight):
+            self.ocr.check()
+        self._ocr_checked = True
+
     def _pdf(
         self, path: Path, options: IngestOptions
     ) -> tuple[list[PageRecord], list[str], str | None, int]:
@@ -310,6 +326,7 @@ class IngestService:
                             texts.append("")
                             continue
                     self.log(f"  p{i + 1}/{n}: OCR ({'; '.join(probe.reasons)})")
+                    self._require_ocr()
                     record, text, rejected = self._ocr_record(i, image, probe)
                     ocr_context[i] = (probe, raw)
                     if rejected is not None:
@@ -344,6 +361,7 @@ class IngestService:
         total = len(frames)
         if options.max_pages is not None:
             frames = frames[: options.max_pages]
+        self._require_ocr()
         records, texts = [], []
         for i, frame in enumerate(frames):
             self.log(f"  frame {i + 1}/{len(frames)}: OCR (image input)")

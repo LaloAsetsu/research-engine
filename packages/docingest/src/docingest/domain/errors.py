@@ -33,6 +33,12 @@ class OcrError(DocingestError):
     """The OCR engine could not transcribe a page."""
 
 
+class OcrUnavailableError(OcrError):
+    """The configured OCR engine cannot be used at all (backend not installed, server not
+    reachable). Unlike a per-page failure it concerns every page, so an ingest run stops
+    instead of failing file after file; the message names the setting and the way out."""
+
+
 class RateLimitedError(SourceUnavailableError):
     """The source asked for a pause (429 / ``Retry-After``) that a crawler will not sit out.
 

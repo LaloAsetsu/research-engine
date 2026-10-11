@@ -16,7 +16,7 @@ from .detection import TypeDetector
 from .embedding import Embedder, Vector
 from .images import ImageSource
 from .index import ChunkIndex, CommittedState, Hit, IndexStats, KeywordMode
-from .ocr import OcrEngine, OcrResult
+from .ocr import OcrEngine, OcrPreflight, OcrResult
 from .pdf import PdfDocument, PdfPage, PdfReader
 from .qa import QuestionAnswerer
 from .reranking import Reranker
@@ -40,6 +40,7 @@ __all__ = [
     "IndexStats",
     "KeywordMode",
     "OcrEngine",
+    "OcrPreflight",
     "OcrResult",
     "PdfDocument",
     "PdfPage",

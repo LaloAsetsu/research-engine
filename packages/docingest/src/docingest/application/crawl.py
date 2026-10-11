@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..domain.errors import DocingestError, RateLimitedError
+from ..domain.errors import DocingestError, OcrUnavailableError, RateLimitedError
 from ..domain.models import SourceMetadata
 from ..ports import FetchedSource, SourceCrawler, StoredDocument
 from .ingest import SIDECAR_SUFFIX, IngestOptions, IngestService, read_sidecar
@@ -68,6 +68,14 @@ class CrawlService:
                 rest = records[i + 1 :]
                 report.stopped = f"the source asked us to back off: {e}"
                 skipped = "not attempted: the crawl stopped, the source asked us to back off"
+                report.failures += [(r.key, skipped) for r in rest]
+                self.log(f"  stopped at {record.key}: {e}; {len(rest)} record(s) not attempted")
+                break
+            except OcrUnavailableError as e:  # every later PDF would fail the same way
+                report.failures.append((record.key, f"{type(e).__name__}: {e}"))
+                rest = records[i + 1 :]
+                report.stopped = f"the OCR engine cannot be used: {e}"
+                skipped = "not attempted: the crawl stopped, the OCR engine cannot be used"
                 report.failures += [(r.key, skipped) for r in rest]
                 self.log(f"  stopped at {record.key}: {e}; {len(rest)} record(s) not attempted")
                 break

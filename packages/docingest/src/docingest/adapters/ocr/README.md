@@ -611,6 +611,8 @@ No code change is needed.
            )
    ```
 
+   Optionally add `def check(self) -> None` (see `OcrPreflight` in `ports/ocr.py`): `IngestService` calls it once, before the first page that needs OCR, and the engine raises `OcrUnavailableError` there when it cannot work at all. Keep it cheap and do not load the model.
+
 3. Register a factory `(AppConfig) -> engine`. Inside this repository, add a function next to `_mlx_vlm()` in [`bootstrap.py`](../../bootstrap.py) and an entry in `REGISTRY["ocr"]`, importing the module inside the factory so its dependencies load only when selected:
 
    ```python
@@ -652,6 +654,7 @@ No code change is needed.
 | `tests/integration/test_openai_ocr.py` | The HTTP engine against a scripted local server: request shape, image size, `chat_kwargs`, retries and backoff, auth, the ladder, malformed replies, timeouts, redirects, fingerprint stability, swapping engines by configuration |
 | `tests/unit/test_bench_fixes.py` | Ladder telemetry of both engines, seeded sampling, olmOCR text-first prompt and header-only retries, best-text fallback, olmOCR front matter clean-up |
 | `tests/unit/test_ocr_ladder.py`, `tests/unit/test_ocr_guards.py` | `run_ladder()` with scripted replies (stricter retries, more room for a dense page, a refused larger limit, the least bad attempt, olmOCR's own ladder) and the output checks (loops, capacity, repeated pages) |
+| `tests/unit/test_ocr_preflight.py` | `check()` of both engines and the start-up check in the ingest service and the commands |
 | `tests/integration/test_synthetic_and_images.py` | `fit_image()` and the profile clean-up functions |
 
 ```bash

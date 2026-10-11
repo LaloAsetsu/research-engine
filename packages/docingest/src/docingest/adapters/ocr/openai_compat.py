@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, override
 
 from PIL import Image
 
-from ...domain.errors import OcrError
+from ...domain.errors import OcrError, OcrUnavailableError
 from ...domain.models import ModelRef
 from ...domain.ocr_guards import OcrGuards, image_area_sq_in
 from ...ports import OcrResult
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 DEFAULT_TIMEOUT_S = 600.0  # one full page at a few tokens/s on a slow server
 DEFAULT_RETRIES = 3
 MAX_BACKOFF_S = 60.0
+CHECK_TIMEOUT_S = 5.0  # the start-up reachability check: a server that is up answers at once
 
 
 class OcrServerError(OcrError):
@@ -183,6 +184,39 @@ class OpenAICompatibleOcr:
             timeout_s=getattr(cfg, "timeout_s", None) or DEFAULT_TIMEOUT_S,
             retries=getattr(cfg, "retries", DEFAULT_RETRIES),
         )
+
+    def check(self) -> None:
+        """Fail early, with the way out, when the server cannot be reached.
+
+        One cheap ``GET {base_url}/models``. Any answer, even an error status, shows a
+        server is there (not every server lists models); only "nobody answers" and a
+        refused key stop the run, since they would fail every page.
+        """
+        url = f"{self.base_url}/models"
+        try:
+            request = urllib.request.Request(url, headers=self._headers(), method="GET")
+            with self._opener.open(request, timeout=CHECK_TIMEOUT_S):
+                return
+        except OcrServerError as e:  # api_key_env names a variable that is not set
+            raise OcrUnavailableError(str(e)) from e
+        except urllib.error.HTTPError as e:
+            e.close()
+            if e.code in (401, 403):
+                raise OcrUnavailableError(
+                    f"the OCR server {self.base_url} ([ocr] base_url) refused the request"
+                    f" (HTTP {e.code}): set the variable named by [ocr] api_key_env to a key it"
+                    " accepts."
+                ) from e
+            return
+        except (OSError, http.client.HTTPException) as e:
+            reason = getattr(e, "reason", None) or e
+            raise OcrUnavailableError(
+                f"the OCR server {self.base_url} ([ocr] base_url, [adapters] ocr ="
+                f' "openai-compatible") is not reachable: {reason}. Start it (serving/serve.sh llm'
+                " start), or pass -c with a config whose [ocr] base_url points to a running"
+                " OpenAI-compatible server; on Apple Silicon, installing the mlx extra and"
+                ' setting [adapters] ocr = "mlx-vlm" runs OCR without a server.'
+            ) from e
 
     def transcribe(self, image: Image.Image) -> OcrResult:
         data_url = _png_data_url(fit_image(image, self.profile.max_side))

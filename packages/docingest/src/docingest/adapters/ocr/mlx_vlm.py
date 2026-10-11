@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import time
 import zlib
@@ -10,6 +11,7 @@ from typing import Any
 
 from PIL import Image, ImageOps
 
+from ...domain.errors import OcrUnavailableError
 from ...domain.models import ModelRef
 from ...domain.ocr_guards import OcrGuards, image_area_sq_in
 from ...ports import OcrResult
@@ -96,6 +98,20 @@ class MlxVlmOcr:
         self._model: Any = None
         self._processor: Any = None
         self._config: Any = None
+
+    def check(self) -> None:
+        """Fail early, with the way out, when the in-process backend cannot be used."""
+        try:
+            importlib.import_module("mlx_vlm")
+        except ImportError as e:
+            raise OcrUnavailableError(
+                '[adapters] ocr = "mlx-vlm" needs the mlx_vlm package, which cannot be imported'
+                f" here ({type(e).__name__}: {e}). It runs on Apple Silicon only: install the"
+                " mlx extra (uv sync --all-extras, or add --extra mlx to the extras you use), or"
+                " pass -c with a config that selects an"
+                ' OpenAI-compatible server ([adapters] ocr = "openai-compatible" and'
+                " [ocr] base_url; see config/examples/lab-server.toml)."
+            ) from e
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
