@@ -69,7 +69,9 @@ def _summary(stored: list[StoredDocument]) -> None:
             m.source_kind.value,
             pages,
             ", ".join(f"{k}×{v}" for k, v in methods.most_common()),
-            str(sum(bool(p.warnings) for p in m.pages) or ""),  # pages OCR output was rejected on
+            str(
+                sum(bool(p.warnings) for p in m.pages) or ""
+            ),  # pages with a note: OCR rejected, a LaTeX section in plain text
             f"{m.total_seconds:.1f}",
             m.doc_id[:12],
         )

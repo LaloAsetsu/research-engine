@@ -724,7 +724,7 @@ A page whose adapter returned no lines still goes through `clean_text_layer` on 
 
 For `latex`, `office` and `text` the service calls one `DocumentConverter`, chosen by the kind (`_LazyConverters` maps `LATEX` to the `latex` port, `OFFICE` to `office`, `TEXT` to `text`). The converter always converts the whole document. `--max-pages N` then keeps the first N segments, and the conversion time is divided evenly among the kept segments. Converter warnings are logged. The converter's metadata is used when none was passed in or found in a sidecar, and its title is used when the metadata has no title.
 
-The LaTeX converter is the most involved adapter. In short, it unpacks archives safely (tar `data` filter, a size cap from `[latex] max_archive_mb`, media files skipped), finds the main file (`00README.json` first, then heuristics), inlines `\input`, `\include`, `\subfile` and `\import` in Python, runs pandoc with `--sandbox`, a heap cap and `[latex] timeout_s`, splits the Markdown into one segment per section at `split_level`, and falls back to pylatexenc plain text when pandoc fails. See [ADR 0003](adr/0003-latex-first-for-arxiv.md) and [adapters/converters/README.md](../src/docingest/adapters/converters/README.md). The fallback and the `degraded` flag are described in [section 10](#10-error-handling).
+The LaTeX converter is the most involved adapter. In short, it unpacks archives safely (tar `data` filter, a size cap from `[latex] max_archive_mb`, media files skipped), finds the main file (`00README.json` first, then heuristics), inlines `\input`, `\include`, `\subfile` and `\import` in Python, runs pandoc with `--sandbox`, a heap cap and `[latex] timeout_s`, splits the Markdown into one segment per section at `split_level`, and falls back to pylatexenc plain text when pandoc fails (section by section first: only the sections pandoc cannot read become plain text), recovering a reference list that pandoc dropped. See [ADR 0003](adr/0003-latex-first-for-arxiv.md) and [adapters/converters/README.md](../src/docingest/adapters/converters/README.md). The fallback and the `degraded` flag are described in [section 10](#10-error-handling).
 
 ### Building the result
 
@@ -979,7 +979,7 @@ classDiagram
 | `vlm_ocr` | `IngestService._ocr_record`, for PDF pages routed to OCR and for every image frame |
 | `docling` | `DoclingConverter` |
 | `latex` | `PandocLatexConverter` when pandoc succeeds |
-| `latex_plaintext` | `PandocLatexConverter` when the pylatexenc fallback is used |
+| `latex_plaintext` | `PandocLatexConverter` when the pylatexenc fallback is used, for the whole paper or for single sections (a segment can carry its own method) |
 | `passthrough` | `PassthroughConverter` |
 
 ### The Markdown format
@@ -1068,6 +1068,7 @@ flowchart TD
     DOCF --> FB{"fallback enabled and pylatexenc gives more text than pandoc?"}
     ENVF --> FB
     FB -->|"yes"| PLAIN["Conversion method = latex_plaintext with a warning, degraded = True only for an environment failure"]
+    DOCF -->|"fallback on, two pieces or more"| SECT["convert section by section; only the failing sections become plain text (their segments carry method = latex_plaintext)"]
     FB -->|"no"| SOME{"pandoc produced some text?"}
     SOME -->|"yes"| KEEP["Conversion method = latex with a warning"]
     SOME -->|"no"| RAISE["raise ConversionError"]

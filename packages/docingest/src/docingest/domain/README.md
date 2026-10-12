@@ -169,7 +169,7 @@ A `StrEnum` naming how the text of one page or segment was produced. It is store
 | `VLM_OCR` | `"vlm_ocr"` | `IngestService` through `OcrEngine.transcribe()` (an empty page whose OCR output was rejected also has this method) | PDF pages that need OCR, every image frame |
 | `DOCLING` | `"docling"` | `DoclingConverter` | OFFICE |
 | `LATEX` | `"latex"` | `PandocLatexConverter`, when pandoc succeeds (one segment per section) | LATEX |
-| `LATEX_PLAINTEXT` | `"latex_plaintext"` | `PandocLatexConverter`, when it falls back to pylatexenc plain text | LATEX |
+| `LATEX_PLAINTEXT` | `"latex_plaintext"` | `PandocLatexConverter`, when it falls back to pylatexenc plain text: for the whole paper, or for single sections (and a reference list) while the rest of the paper is `LATEX` | LATEX |
 | `PASSTHROUGH` | `"passthrough"` | `PassthroughConverter` (file content as one segment) | TEXT |
 
 ### `PageSignals`

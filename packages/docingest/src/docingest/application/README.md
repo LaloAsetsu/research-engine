@@ -445,9 +445,10 @@ first `max_pages` frames are transcribed. Every frame goes to OCR (`method=vlm_o
 `_convert` looks up the converter for the kind (a missing one raises
 `UnsupportedInputError("no converter configured for <kind> inputs")`), calls
 `convert(path)` once, logs every `Conversion.warnings` entry, and keeps the first
-`max_pages` segments. Each segment becomes one `PageRecord` with the conversion's
-`method` (`docling`, `latex`, `latex_plaintext` or `passthrough`), the conversion's
-`engine` string, the segment's `title` (a section heading for LaTeX), and `seconds`
+`max_pages` segments. Each segment becomes one `PageRecord` with its own `method` when
+the converter set one (a LaTeX section that fell back to plain text) and else the
+conversion's (`docling`, `latex`, `latex_plaintext` or `passthrough`), the segment's
+`warnings`, the conversion's `engine` string, the segment's `title` (a section heading for LaTeX), and `seconds`
 equal to the total conversion time divided by the number of segments kept. The
 conversion's `title`, `metadata` and `degraded` flag are passed on to the manifest and
 the store.
@@ -483,6 +484,8 @@ sequenceDiagram
     Note over Conv: unpack safely, pick the main file, inline includes, run pandoc with a timeout, split at split_level
     alt pandoc produced enough text
         Conv-->>Svc: Conversion(method=latex, segments, title, metadata)
+    else pandoc failed on the document, but took some of its sections
+        Conv-->>Svc: Conversion(method=latex, the failed sections as segments with method=latex_plaintext)
     else pandoc failed, timed out or kept too little text, and the fallback kept more
         Conv-->>Svc: Conversion(method=latex_plaintext, degraded if the machine was the cause)
     else fallback off or no better, but pandoc kept some text

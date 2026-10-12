@@ -58,7 +58,7 @@ Routing by kind (detection rules live in `adapters/detection/magic.py`):
 
 | `SourceKind` | Detected when | `[adapters]` key | Default adapter | `PageMethod` values produced |
 | --- | --- | --- | --- | --- |
-| `latex` | suffix `.tex` or `.ltx`, or the bytes are a tar archive (any file name), or a gzip stream holding a tar archive or a single `.tex` file | `latex` | `pandoc` | `latex`, or `latex_plaintext` after the fallback |
+| `latex` | suffix `.tex` or `.ltx`, or the bytes are a tar archive (any file name), or a gzip stream holding a tar archive or a single `.tex` file | `latex` | `pandoc` | `latex`, or `latex_plaintext` after the fallback (a single section can fall back alone, see [section by section](#section-by-section-and-the-reference-guard)) |
 | `office` | suffix `.docx`, `.pptx`, `.xlsx`, `.html`, `.htm` or `.xhtml` | `office` | `docling` | `docling` |
 | `text` | suffix `.md`, `.markdown` or `.txt` | `text` | `passthrough` | `passthrough` |
 
@@ -79,6 +79,8 @@ The port is defined in [`ports/converters.py`](../../ports/converters.py). `Docu
 | --- | --- | --- |
 | `text` | `str` | Markdown of the segment, including its own heading line when it has one. |
 | `title` | `str \| None` (default `None`) | Heading path of the segment, for example `"Method > Complexity"`. `None` for untitled content. |
+| `method` | `PageMethod \| None` (default `None`) | Only for a segment made differently from the rest of its conversion: a LaTeX section that fell back to plain text (`latex_plaintext`). The segment's page record takes it instead of the conversion's `method`. |
+| `warnings` | `tuple[str, ...]` (default `()`) | The notes that belong to this segment alone, such as why its section fell back to plain text. They become the `warnings` of its page record. |
 
 `Conversion` (frozen dataclass): the result of one `convert()` call.
 
@@ -98,7 +100,7 @@ The port is defined in [`ports/converters.py`](../../ports/converters.py). `Docu
 
 1. Every warning is logged as `  warning: <text>`.
 2. With `--max-pages N`, only the first `N` segments are kept. The manifest still records the total in `source_pages`.
-3. Each kept segment becomes one `PageRecord` with the conversion's `method` and `engine`, the segment's `title`, `n_chars = len(text)`, and `seconds` = conversion time divided by the number of kept segments.
+3. Each kept segment becomes one `PageRecord` with the segment's `method` (the conversion's `method` when the segment has none) and `warnings`, the conversion's `engine`, the segment's `title`, `n_chars = len(text)`, and `seconds` = conversion time divided by the number of kept segments.
 4. The manifest title is the first one available of: the title in external metadata (a `<file>.meta.json` sidecar or the arXiv crawler), the conversion's `title`, the file stem. External metadata also takes precedence over the conversion's `metadata`.
 5. `document.md` is written as `# <title>` followed by one `<!-- page N | method=<method> -->` marker and the segment text per segment.
 6. If `degraded` is true, the service logs a warning and the store writes the result under `<output_dir>/_degraded/`, where the cache lookup never reads. The next run tries the converter again.
@@ -141,7 +143,8 @@ flowchart TD
     META --> SPLIT["split_markdown at headings up to split_level"]
     SPLIT --> ASM["assemble: abstract first, heading paths as titles"]
     ASM --> CHECK{"enough text?"}
-    CHECK -->|"yes"| OUT["Conversion with method latex, engine pandoc version"]
+    CHECK -->|"yes"| GUARD["reference guard: is the reference list complete?"]
+    GUARD --> OUT["Conversion with method latex, engine pandoc version"]
     CHECK -->|"no, or pandoc failed"| FB["fallback decisions, see below"]
 ```
 
@@ -347,10 +350,14 @@ flowchart TD
     ANY -->|"no"| FAIL
     ANY -->|"yes"| RATIO{"at least 20 percent of approx_text_length?"}
     RATIO -->|"no"| FAIL
-    RATIO -->|"yes"| GOOD["return pandoc result: method latex, not degraded"]
+    RATIO -->|"yes"| GOOD["return pandoc result: method latex, not degraded, after the reference guard"]
     FAIL --> FBON{"latex.fallback is true?"}
     FBON -->|"no"| SOME{"did pandoc keep some text?"}
-    FBON -->|"yes"| PLAIN["run the pylatexenc plain-text conversion"]
+    FBON -->|"yes"| DOC{"failure about the document, and at least two pieces?"}
+    DOC -->|"yes"| SEC["convert piece by piece, see below"]
+    SEC -->|"pandoc took some piece"| MIXED["return method latex, the failed pieces latex_plaintext, after the reference guard"]
+    SEC -->|"no piece"| PLAIN
+    DOC -->|"no"| PLAIN["run the pylatexenc plain-text conversion"]
     PLAIN --> CRASH{"did it raise?"}
     CRASH -->|"yes"| NOTE["append pylatexenc failed to the reason"]
     CRASH -->|"no"| LONGER{"more characters than pandoc kept?"}
@@ -364,9 +371,24 @@ flowchart TD
 Consequences:
 
 - `degraded` is `True` only when the fallback result is returned and the failure was environmental. A timeout on a busy machine, a killed pandoc or a missing binary therefore never becomes the cached conversion of a paper; the result is stored under `_degraded/` and the next run tries pandoc again.
-- A fallback caused by the document itself (a parse error, too little text) is deterministic and is cached normally.
+- A fallback caused by the document itself (a parse error, too little text) is deterministic and is cached normally. So is a paper converted section by section, unless a piece was left to plain text for want of time.
 - With `fallback = false`, pandoc's result is still returned when it kept some text (too little text only adds the reason to the warnings). Any other failure raises `ConversionError`, for example `main.tex: pandoc exited with code 64: ...`.
 - A document with no text at all (for example only comments) raises `ConversionError` with `pandoc produced no text`.
+
+### Section by section and the reference guard
+
+**One construct no longer sends the whole paper to plain text.** When pandoc fails on the whole prepared document, or keeps under 20 percent of its text, for a reason about the document (not a timeout, a crash or a missing binary) and `fallback` is true, `_by_section()` converts the paper piece by piece:
+
+1. `split_document()` separates the preamble (everything up to `\begin{document}`) from the body, and `section_units()` cuts the body at the top-level sectioning command (`\chapter` when the body has chapters, else `\section`; a `\part` is a cut too): the text before the first cut, and one piece per section. A body with fewer than two non-blank pieces is not cut: the whole-document fallback runs as before.
+2. The preamble is converted alone first. If pandoc cannot read it, no piece can be read either, and the whole-document fallback runs (two pandoc runs in all).
+3. Every piece is a document of its own: the preamble, the definitions (`macro_context()`: `\newcommand`, `\def` and the like, `\newtheorem`) that the earlier pieces made in the body, and the piece. Pieces are run in order, each with the same command line as the whole document. A piece is accepted by the rules of the whole document (text, and at least 20 percent of its `approx_text_length()`), except that a piece with no text in it (a bare `\maketitle`) may come out empty.
+4. A piece that is not accepted goes through pylatexenc on its own, without the macro definitions, which it does not expand. If that gives more text than pandoc kept, the piece's segments get `method = latex_plaintext` and a `warnings` entry (`<pandoc's reason>; used the pylatexenc plain-text fallback`). Otherwise the little pandoc made is kept, with a warning, or the piece is dropped when neither made any text.
+5. The pieces, and the reference guard after them, share one time budget of `timeout_s` seconds that starts after the whole-document run: a paper can take up to twice `timeout_s` of pandoc time. A piece that has no time left, or whose run times out, is plain text and marks the conversion `degraded`, like a timeout of the whole document; so does a timeout of the preamble check, or of every piece, which leaves the plain text of the whole paper.
+6. If pandoc took no piece with text, the result is the whole-document fallback, as before. Otherwise the conversion has `method = latex`, the plain-text sections carry their own `method`, the engine reads `pandoc <version> + pylatexenc <version>` when there are any, the title, authors and abstract come from the front matter (or the preamble), and one warning says how many pieces pandoc took and which sections are plain text: `<reason>; converted section by section, pandoc took 4 of 5 pieces, the pylatexenc plain-text fallback the rest (Setup)`. pandoc's own warnings of all pieces are summarised into one.
+
+A construct that makes a section fail but spans sections (an environment opened in one section and closed in a later one) makes both ends fail, not the rest. Heading levels follow the piece, so a paper with `\part` headings is not shifted under them as pandoc does for a whole document.
+
+**A reference list that pandoc dropped is recovered.** pandoc can drop a whole `thebibliography` list without an error when one entry holds a construct it cannot read; `MIN_TEXT_RATIO` does not notice, as the list is a small part of the text. After every pandoc result (whole or by section), `_guard_references()` matches the lists that `rewrite_bibliography()` wrote (`bibliography_blocks()`), in order, with the "References" headings it finds at the start of the segments, and counts the numbered entries under each heading (items that start with their `[@key]`; a numbered list of the paper's own after the list is not entries and is never removed) against the entries with a key in the source (`count_bibliography_entries()`). A list under `MIN_REFERENCE_SHARE = 0.9` of its entries is lost, unless it is in a piece that went to plain text, which keeps its entries. Each lost list is converted on its own, with the preamble and the macros of the body: through pandoc, and the result is used when it keeps that share; else through pylatexenc, if that has more entries than pandoc kept (an entry that neither can read, such as an unclosed brace, cuts the list short for both, and plain text would only be a worse list). Only the heading and the entries of a lost list are replaced, in their place. Whatever else the segment holds stays: pandoc puts the text that follows `\end{thebibliography}` and has no section of its own (an "End Matter", a bold "Supplementary Information" title) in the same segment as the list, so it stays as a segment after the new one. When pandoc dropped a list, its heading is glued onto the next section (see `assemble()`), and the heading is removed from that section. A complete list is never touched, also when another list of the paper is lost. If the headings do not match the lists one to one (pandoc dropped a list and its heading, or the paper has a section of its own called "References"), each list is counted by its citation keys in the numbered entries of the whole output, and a lost one is added at the end of the paper without removing anything. The new segments carry the warning `pandoc kept <n> of <m> reference entries; converted the bibliography on its own with pandoc` (or `as plain text`; with several lists it says `in list <i> of <k>`), which is also added to the conversion's warnings; when nothing can be recovered the conversion only gets `pandoc kept <n> of <m> reference entries; the list could not be recovered`. A paper without a `thebibliography` (BibTeX without a `.bbl`, `biblatex`) is not checked. The 90 percent share comes from an arXiv crawl of about 680 papers with a bibliography: 625 kept every entry, 17 kept none and four kept 6 to 51 percent, so any share between 51 and 100 percent gives the same decisions, and 90 percent leaves room for an entry that is merged or has no key. The recovery runs share with the pieces what is left of the `timeout_s` budget; a recovery that cannot run for want of time, or fails because of the machine (a timeout), marks the conversion `degraded`.
 
 ### The pylatexenc plain-text fallback
 
@@ -389,6 +411,7 @@ arXiv sources are often unbalanced or huge, so every scan in `latex_source.py` i
 | --- | --- |
 | `match_brace(text, i, limit=MAX_MACRO_BODY)` | Index just past the `}` that closes the `{` at `text[i]`, where `\` escapes the next character. Gives up and returns `None` after `MAX_MACRO_BODY = 20_000` characters, since a longer "definition" is an unbalanced brace rather than a macro. Used for `\title`, `\author` and `\thanks` arguments in the fallback. |
 | `brace_pairs(text)` | The same matching for every `{` in one linear pass, as a dict from opening index to closing index. Used, with the same 20,000-character limit, to read macro definition bodies (`macro_definitions()`) and section titles (`split_sections()`). Scanning a window per candidate went quadratic on unbalanced sources. |
+| `section_units(body)`, `split_document(text)`, `macro_context(text)`, `bibliography_blocks(text)` | The pieces for the section-by-section run and the reference guard: one scan each over the text, with the same brace matching and the same limits as `split_sections()`. |
 | `regions(text, begin, end)` and `sub_regions(...)` | The pairs the lazy regex `begin.*?end` would find, in linear time. Once an end pattern is missing after one begin, later begins with the same end pattern are skipped instead of rescanning the rest of the text. Used for `thebibliography`, `abstract`, `\iffalse ... \fi` and the environments dropped by `approx_text_length()`. |
 | `verbatim_parts(text)` | The verbatim regions in order, as `Verbatim(start, end, body, env)`: verbatim-like environments (an unclosed one runs to the end of the text, as in TeX), `filecontents`, and `\verb`-like arguments, which must close on their own line within 1,000 characters. |
 | `sanitize_citation_keys()` and the `@`-macro and layout rewrites | Read definitions through `brace_pairs()` and bound the optional arguments they match, so an unclosed `\cite[`, `\label[`, `\newcolumntype{a}{` or a run of `\global\long` repeated many times is rewritten in linear time. |
@@ -409,10 +432,10 @@ arXiv sources are often unbalanced or huge, so every scan in `latex_source.py` i
 The fingerprint has the form:
 
 ```text
-pandoc-latex r3 | pandoc <version or unavailable> | <pandoc arguments> | split_level=2 | pylatexenc <version>
+pandoc-latex r4 | pandoc <version or unavailable> | <pandoc arguments> | split_level=2 | pylatexenc <version>
 ```
 
-`<pandoc arguments>` is `PANDOC_ARGS` joined with spaces (without the heap cap and the template option), and the last part is `no fallback` when `fallback = false`. `REVISION = 3` at the top of `pandoc_latex.py` must be bumped whenever this adapter's output changes for the same pandoc and pylatexenc versions, so that cached LaTeX conversions are invalidated. The `engine` recorded per page is `pandoc <version>` (or `pandoc unknown`) for a pandoc result.
+`<pandoc arguments>` is `PANDOC_ARGS` joined with spaces (without the heap cap and the template option), and the last part is `no fallback` when `fallback = false`. `REVISION = 4` at the top of `pandoc_latex.py` must be bumped whenever this adapter's output changes for the same pandoc and pylatexenc versions, so that cached LaTeX conversions are invalidated. The `engine` recorded per page is `pandoc <version>` (or `pandoc unknown`) for a pandoc result, and `pandoc <version> + pylatexenc <version>` when some sections or the reference list are plain text.
 
 ### Warnings and errors
 
@@ -428,6 +451,8 @@ Warnings, in the order they are collected (all end up in `Conversion.warnings` a
 | `<reason>` (for example `pandoc kept 120 chars of ~4000 in the source`) | short pandoc output kept |
 | `pandoc: N warning(s), e.g. <kinds>` | pandoc result returned |
 | `pylatexenc failed on N fragment(s); kept their bare text` | fallback returned |
+| `<reason>; converted section by section, pandoc took N of M pieces, the pylatexenc plain-text fallback the rest (<sections>)` | paper converted section by section |
+| `pandoc kept N of M reference entries; converted the bibliography on its own with pandoc` (or `as plain text`, or `; the list could not be recovered`) | reference guard |
 
 Errors are raised as `ConversionError` (a `DocingestError`). The `ingest` command reports each failed input in a `Failed inputs` table, continues with the next input and exits with status 1 at the end.
 

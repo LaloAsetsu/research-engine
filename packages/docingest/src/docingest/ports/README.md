@@ -349,6 +349,8 @@ class Segment:
 
     text: str
     title: str | None = None
+    method: PageMethod | None = None  # only for a segment made differently from its conversion
+    warnings: tuple[str, ...] = ()  # notes that belong to this segment alone
 
 
 @dataclass(frozen=True)
@@ -398,7 +400,7 @@ Implementations (details in [adapters/converters/README.md](../adapters/converte
 | Class | Module | Slot | `method` |
 |---|---|---|---|
 | `DoclingConverter` | `adapters/converters/docling.py` | `office` | `DOCLING` |
-| `PandocLatexConverter` | `adapters/converters/pandoc_latex.py` (helpers in `latex_source.py`) | `latex` | `LATEX`, or `LATEX_PLAINTEXT` for the pylatexenc fallback |
+| `PandocLatexConverter` | `adapters/converters/pandoc_latex.py` (helpers in `latex_source.py`) | `latex` | `LATEX`, or `LATEX_PLAINTEXT` for the pylatexenc fallback (a segment can carry its own `method`, so a paper can mix both) |
 | `PassthroughConverter` | `adapters/converters/plaintext.py` | `text` | `PASSTHROUGH` |
 
 Test fake: `FakeConverter`.
