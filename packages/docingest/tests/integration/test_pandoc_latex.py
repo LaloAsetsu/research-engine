@@ -305,9 +305,9 @@ def test_timeout_falls_back_to_plain_text(tmp_path):
 @pytest.mark.skipif(os.name != "posix", reason="shell-script stand-in for pandoc")
 def test_suspiciously_short_output_falls_back(tmp_path):
     stub = "printf '{}\\n@@docingest-body@@\\n# Only a heading\\n'"
-    conv = PandocLatexConverter(LatexConfig(pandoc_path=fake_pandoc(tmp_path, stub))).convert(
-        PAPER / "main.tex"
-    )
+    src = tmp_path / "main.tex"  # one section: nothing to convert piece by piece
+    src.write_text(DOC % ("\\section{Long}\n" + "A sentence with some words in it. " * 20))
+    conv = PandocLatexConverter(LatexConfig(pandoc_path=fake_pandoc(tmp_path, stub))).convert(src)
     assert conv.method == PageMethod.LATEX_PLAINTEXT
     assert any("pandoc kept" in w for w in conv.warnings)
     assert not conv.degraded  # the same document gives the same output next time

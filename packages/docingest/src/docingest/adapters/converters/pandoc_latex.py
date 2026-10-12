@@ -10,6 +10,9 @@ When pandoc fails, times out or returns suspiciously little text, pylatexenc pro
 plain text instead (``PageMethod.LATEX_PLAINTEXT``) and the Conversion says so in its
 warnings; it is also marked ``degraded`` when the cause was the machine (a timeout, a
 crash, no pandoc binary) rather than the document, so it is not cached as the result.
+When the document itself is the cause, it is first converted section by section, and only
+the sections pandoc still cannot read are plain text (a segment then has its own method).
+A reference list that pandoc drops without an error is converted on its own and put back.
 Title, authors and abstract come from pandoc's metadata (``$meta-json$``).
 """
 
@@ -20,8 +23,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
+from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache, cached_property
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -35,19 +40,24 @@ from .latex_source import (
     FI,
     IFFALSE,
     approx_text_length,
+    bibliography_blocks,
+    count_bibliography_entries,
     document_body,
     find_main,
     flatten,
+    macro_context,
     match_brace,
     prepare_for_pandoc,
     regions,
+    section_units,
+    split_document,
     split_sections,
     sub_regions,
     unpack,
     verbatim_parts,
 )
 
-REVISION = 3  # bump when this adapter's output changes for the same pandoc / pylatexenc
+REVISION = 4  # bump when this adapter's output changes for the same pandoc / pylatexenc
 # Markdown that keeps $math$, $$display$$, pipe tables and [@citations], without raw
 # HTML/TeX or attribute syntax (gfm would drop the citations).
 _DISABLED = (
@@ -64,6 +74,11 @@ PANDOC_ARGS = (
 )  # fmt: skip
 PANDOC_HEAP = "+RTS -M2g -RTS"  # pandoc's manual: cap the heap for untrusted input
 MIN_TEXT_RATIO = 0.2  # pandoc output under 20% of the source's text -> try the fallback
+# A reference list with fewer entries than this share of the source's was cut short: pandoc
+# drops a whole list without an error when one entry has a construct it cannot read. On an
+# arXiv crawl of about 680 papers with a bibliography, 625 keep every entry, 17 none and four
+# 6% to 51%, none in between, so any share from 52% to 99% decides alike.
+MIN_REFERENCE_SHARE = 0.9
 _BODY_MARK = "@@docingest-body@@"
 _TEMPLATE = f"$meta-json$\n{_BODY_MARK}\n$body$\n"
 
@@ -80,10 +95,30 @@ class _Attempt:
     segments: list[Segment]
     metadata: SourceMetadata | None
     warnings: list[str] = field(default_factory=list)
+    stderr: str = ""
 
     @property
     def n_chars(self) -> int:
         return sum(len(s.text) for s in self.segments)
+
+
+@dataclass
+class _Piece:
+    """One part of a document converted on its own: the document that holds just that part
+    (``document``, with the macros the earlier parts defined; ``bare``, without them, for
+    pylatexenc, which does not expand them), what pandoc made of it, and why it was not taken."""
+
+    document: str
+    bare: str
+    attempt: _Attempt | None = None
+    failure: _Failure | None = None
+
+
+@dataclass
+class _Sectioned:
+    conv: Conversion
+    plain: list[str]  # the (bare) documents of the pieces that went to plain text
+    deadline: float  # the time budget the pieces shared, for whatever runs after them
 
 
 @dataclass(frozen=True)
@@ -167,19 +202,23 @@ class PandocLatexConverter:
     def _convert_latex(self, latex: str, work: Path, warnings: list[str], name: str) -> Conversion:
         attempt, failure = self._pandoc(latex, work)
         if attempt is not None:
-            expected = approx_text_length(latex)
-            if attempt.n_chars == 0:
-                failure = _Failure("pandoc produced no text")
-            elif attempt.n_chars < MIN_TEXT_RATIO * expected:
-                failure = _Failure(
-                    f"pandoc kept {attempt.n_chars} chars of ~{expected} in the source"
-                )
-            else:
-                return _conversion(attempt, PageMethod.LATEX, self.engine, warnings)
+            failure = _unacceptable(attempt, latex)
+            if failure is None:
+                conv = _conversion(attempt, PageMethod.LATEX, self.engine, warnings)
+                deadline = time.monotonic() + self.cfg.timeout_s
+                return self._guard_references(conv, latex, work, deadline)
         assert failure is not None
         problem = failure.reason
         got = attempt.n_chars if attempt else 0
         if self.cfg.fallback:
+            if not failure.environmental:
+                sectioned, machine = self._by_section(latex, work, warnings, problem)
+                if sectioned is not None:
+                    return self._guard_references(
+                        sectioned.conv, latex, work, sectioned.deadline, sectioned.plain
+                    )
+                if machine:  # a timeout while sectioning: the plain text is not the paper's result
+                    failure = _Failure(failure.reason, environmental=True)
             try:
                 plain = self._plaintext(latex)
             except Exception as e:  # pylatexenc bugs of any kind mean "no fallback"
@@ -200,26 +239,233 @@ class PandocLatexConverter:
         context = f" ({'; '.join(warnings)})" if warnings else ""
         raise ConversionError(f"{name}: {problem}{context}")
 
+    def _labelled(self, conv: Conversion) -> Conversion:
+        """``conv``, with the engine naming pylatexenc too when it made some of the segments."""
+        if any(s.method == PageMethod.LATEX_PLAINTEXT for s in conv.segments):
+            return replace(conv, engine=f"{self.engine} + pylatexenc {_pylatexenc_version()}")
+        return conv
+
+    # ----------------------------------------------------- section by section
+    def _by_section(
+        self, latex: str, work: Path, warnings: list[str], problem: str
+    ) -> tuple[_Sectioned | None, bool]:
+        """Convert the document one top-level section at a time, after pandoc failed on it whole.
+
+        Each piece is a document of its own: the preamble, the macros that the earlier pieces
+        defined in the body, and the piece. pandoc stops at the first error, so one construct
+        it cannot read used to send the whole paper to plain text; now only the pieces that
+        fail, or keep under ``MIN_TEXT_RATIO`` of their text, are plain text. The pieces share
+        one budget of ``timeout_s`` seconds, which the reference guard shares. Returns the
+        result, or None when sectioning cannot help: fewer than two pieces, a preamble pandoc
+        cannot read, or no piece that pandoc converts. The second item says that the machine
+        (a timeout) was part of the reason, so the plain text of the whole paper is not final.
+        """
+        pre, body = split_document(latex)
+        front, sections = section_units(body)
+        texts = [t for t in (front, *sections) if t.strip()]
+        if len(texts) < 2:
+            return None, False
+        tail = "\n\\end{document}\n" if pre else "\n"
+        deadline = time.monotonic() + self.cfg.timeout_s
+        base, failure = self._pandoc_within(f"{pre}{tail}", work, deadline)
+        if base is None or failure is not None:
+            return None, failure is not None and failure.environmental
+        pieces = self._convert_pieces(pre, tail, texts, work, deadline)
+        if not any(p.attempt and p.attempt.n_chars and p.failure is None for p in pieces):
+            return None, any(p.failure is not None and p.failure.environmental for p in pieces)
+
+        segments: list[Segment] = []
+        metadata = base.metadata
+        plain: list[str] = []
+        lost: list[str] = []
+        plain_docs: list[str] = []
+        degraded = False
+        for i, piece in enumerate(pieces):
+            chosen, method, note = piece.attempt, None, ""
+            if piece.failure is not None:
+                degraded = degraded or piece.failure.environmental
+                chosen, method = self._settle(piece)
+                name = _first_title(chosen) or f"section {i + 1}"
+                if chosen is None:
+                    lost.append(name)
+                    continue
+                kind = "used the pylatexenc plain-text fallback" if method else "kept what it made"
+                note = f"{piece.failure.reason}; {kind}"
+                if method:
+                    plain.append(name)
+                    plain_docs.append(piece.bare)
+            assert chosen is not None
+            if note:
+                marked = [replace(s, method=method, warnings=(note,)) for s in chosen.segments]
+                chosen = replace(chosen, segments=marked)
+            if i == 0 and front.strip() and chosen.metadata:
+                metadata = chosen.metadata
+            segments += chosen.segments
+        took = sum(p.failure is None for p in pieces)
+        summary = f"{problem}; converted section by section, pandoc took {took} of {len(pieces)}"
+        if plain:
+            summary += f" pieces, the pylatexenc plain-text fallback the rest ({_listed(plain)})"
+        if lost:
+            summary += f"; no text from {_listed(lost)}"
+        stderr = "\n".join(p.attempt.stderr for p in pieces if p.attempt)
+        attempt = _Attempt(segments, metadata, pandoc_warnings(stderr))
+        engine = self.engine
+        conv = _conversion(
+            attempt, PageMethod.LATEX, engine, [*warnings, summary], degraded=degraded
+        )
+        return _Sectioned(self._labelled(conv), plain_docs, deadline), False
+
+    def _convert_pieces(
+        self, pre: str, tail: str, texts: list[str], work: Path, deadline: float
+    ) -> list[_Piece]:
+        pieces: list[_Piece] = []
+        context = ""
+        for text in texts:
+            piece = _Piece(f"{pre}\n{context}\n{text}{tail}", f"{pre}\n{text}{tail}")
+            piece.attempt, piece.failure = self._pandoc_within(piece.document, work, deadline)
+            if piece.attempt is not None:
+                piece.failure = _unacceptable(piece.attempt, piece.document, empty_ok=True)
+            pieces.append(piece)
+            context = "\n".join(x for x in (context, macro_context(text)) if x)
+        return pieces
+
+    def _settle(self, piece: _Piece) -> tuple[_Attempt | None, PageMethod | None]:
+        """What to use for a piece pandoc did not convert: its plain text if that has more
+        text than the little pandoc kept, else what pandoc kept, else nothing."""
+        got = piece.attempt.n_chars if piece.attempt else 0
+        try:
+            plain = self._plaintext(piece.bare)
+        except Exception:  # pylatexenc bugs of any kind mean "no fallback" for this piece
+            plain = None
+        if plain is not None and plain.n_chars > got:
+            return plain, PageMethod.LATEX_PLAINTEXT
+        return (piece.attempt, None) if got else (None, None)
+
+    # --------------------------------------------------------- reference guard
+    def _guard_references(
+        self,
+        conv: Conversion,
+        latex: str,
+        work: Path,
+        deadline: float,
+        plain: Sequence[str] = (),
+    ) -> Conversion:
+        """Recover a reference list that pandoc dropped or cut short, without an error.
+
+        The lists that ``rewrite_bibliography`` wrote are matched, in order, with the
+        "References" headings in the segments, and the numbered entries under each heading
+        are counted against the entries in the source. A list under ``MIN_REFERENCE_SHARE`` of
+        them (one in a plain-text piece, listed in ``plain``, is not lost) is converted on
+        its own, with the preamble and the macros of the body: through pandoc if that keeps
+        enough entries, else as pylatexenc plain text. Only that heading and its entries are
+        replaced; the text that follows the list in the same segment stays, and so do the
+        lists that are complete. The new segments and the conversion carry a warning. The
+        runs share what is left of ``deadline``.
+        """
+        blocks = bibliography_blocks(latex)
+        if not blocks:
+            return conv
+        found = _reference_lists(conv.segments)
+        # With a heading for each list, the entries under it are the list's; with some heading
+        # missing (pandoc dropped it as well), the lists are matched by their citation keys.
+        mapped = len(found) == len(blocks)
+        kept = [f.items for f in found] if mapped else _kept_by_key(blocks, conv.segments)
+        expected = [count_bibliography_entries(b) for b in blocks]
+        lost = [
+            i
+            for i, (k, e) in enumerate(zip(kept, expected, strict=True))
+            if e and k < MIN_REFERENCE_SHARE * e and not _in_plain(blocks[i], plain)
+        ]
+        if not lost:
+            return conv
+        pre, body = split_document(latex)
+        tail = "\n\\end{document}\n" if pre else "\n"
+        macros = macro_context(body)
+        degraded = conv.degraded
+        notes: list[str] = []
+        replacements: dict[int, list[Segment]] = {}
+        for i in lost:
+            documents = (f"{pre}\n{macros}\n{blocks[i]}{tail}", f"{pre}\n{blocks[i]}{tail}")
+            seen = f"pandoc kept {kept[i]} of {expected[i]} reference entries"
+            if len(blocks) > 1:
+                seen += f" in list {i + 1} of {len(blocks)}"
+            got, method, machine = self._recover_references(
+                documents, expected[i], kept[i], work, deadline
+            )
+            degraded = degraded or machine
+            if got is None:
+                notes.append(f"{seen}; the list could not be recovered")
+                continue
+            how = "as plain text" if method else "with pandoc"
+            notes.append(f"{seen}; converted the bibliography on its own {how}")
+            replacements[i] = [
+                replace(s, method=method, warnings=(notes[-1],)) for s in got.segments
+            ]
+        if not mapped:  # a list without its heading: no way to tell where it stood, so at the end
+            segments = [*conv.segments, *(s for new in replacements.values() for s in new)]
+        else:
+            segments = _put_back(conv.segments, found, replacements)
+        return self._labelled(
+            replace(conv, segments=segments, warnings=[*conv.warnings, *notes], degraded=degraded)
+        )
+
+    def _recover_references(
+        self, documents: tuple[str, str], expected: int, kept: int, work: Path, deadline: float
+    ) -> tuple[_Attempt | None, PageMethod | None, bool]:
+        """A reference list alone, converted: ``(result, method, the machine failed)``.
+
+        ``documents`` holds the list with the macros of the body (for pandoc, which expands
+        them) and without (for pylatexenc, which does not). pandoc's result needs
+        ``MIN_REFERENCE_SHARE`` of the entries, else the plain text is used, if it has more
+        entries than the ``kept`` ones: an entry that neither converter can read (an unclosed
+        brace) cuts the list short for both, and plain text would only be a worse list.
+        """
+        with_macros, without = documents
+        attempt, failure = self._pandoc_within(with_macros, work, deadline)
+        degraded = failure is not None and failure.environmental
+        if attempt is not None:
+            items = sum(f.items for f in _reference_lists(attempt.segments))
+            if items >= MIN_REFERENCE_SHARE * expected:
+                return attempt, None, degraded
+        if self.cfg.fallback:
+            try:
+                plain = self._plaintext(without)
+            except Exception:  # pylatexenc bugs of any kind mean "no fallback"
+                return None, None, degraded
+            entries = sum(len(_PLAIN_ENTRY.findall(s.text)) for s in plain.segments)
+            if entries > kept:
+                return plain, PageMethod.LATEX_PLAINTEXT, degraded
+        return None, None, degraded
+
     # --------------------------------------------------------------- pandoc
-    def _pandoc(self, latex: str, work: Path) -> tuple[_Attempt | None, _Failure | None]:
+    def _pandoc_within(
+        self, latex: str, work: Path, deadline: float
+    ) -> tuple[_Attempt | None, _Failure | None]:
+        """:meth:`_pandoc` with what is left of a shared time budget as its timeout."""
+        if (remaining := deadline - time.monotonic()) <= 0:
+            return None, _Failure("no time left for this run", environmental=True)
+        return self._pandoc(latex, work, remaining)
+
+    def _pandoc(
+        self, latex: str, work: Path, timeout: float | None = None
+    ) -> tuple[_Attempt | None, _Failure | None]:
         if not self.pandoc_path:
             return None, _Failure("pandoc not found", environmental=True)
         template = work / "docingest-template.md"
         template.write_text(_TEMPLATE)
         cmd = [self.pandoc_path, *PANDOC_HEAP.split(), *PANDOC_ARGS, f"--template={template}"]
+        limit = timeout or self.cfg.timeout_s
         try:
             proc = subprocess.run(
                 cmd,
                 input=latex.encode("utf-8"),
                 capture_output=True,
                 cwd=work,
-                timeout=self.cfg.timeout_s,
+                timeout=limit,
                 check=False,
             )
         except subprocess.TimeoutExpired:  # a loaded machine, or a document pandoc loops on
-            return None, _Failure(
-                f"pandoc timed out after {self.cfg.timeout_s}s", environmental=True
-            )
+            return None, _Failure(f"pandoc timed out after {limit:g}s", environmental=True)
         except OSError as e:
             return None, _Failure(f"pandoc could not run: {e}", environmental=True)
         stderr = proc.stderr.decode("utf-8", errors="replace")
@@ -235,7 +481,7 @@ class PandocLatexConverter:
         metadata = markdown_metadata(meta if isinstance(meta, dict) else {})
         parts = split_markdown(body, self.cfg.split_level)
         abstract = metadata.abstract if metadata else None
-        return _Attempt(assemble(parts, abstract), metadata, pandoc_warnings(stderr)), None
+        return _Attempt(assemble(parts, abstract), metadata, pandoc_warnings(stderr), stderr), None
 
     # ------------------------------------------------------------- fallback
     def _plaintext(self, latex: str) -> _Attempt:
@@ -277,6 +523,142 @@ class PandocLatexConverter:
             else []
         )
         return _Attempt(assemble(parts, abstract), metadata, notes)
+
+
+def _unacceptable(attempt: _Attempt, latex: str, *, empty_ok: bool = False) -> _Failure | None:
+    """Why pandoc's output for ``latex`` is not taken, or None when it is. ``empty_ok``: a
+    piece of a document with no text in it (a bare ``\\maketitle``) may come out empty."""
+    expected = approx_text_length(latex)
+    if attempt.n_chars == 0:
+        return None if empty_ok and expected == 0 else _Failure("pandoc produced no text")
+    if attempt.n_chars < MIN_TEXT_RATIO * expected:
+        return _Failure(f"pandoc kept {attempt.n_chars} chars of ~{expected} in the source")
+    return None
+
+
+def _first_title(attempt: _Attempt | None) -> str | None:
+    return next((s.title for s in attempt.segments if s.title), None) if attempt else None
+
+
+@dataclass(frozen=True)
+class _ListFound:
+    """One "References" heading at the start of a segment and what follows it: the entries
+    under it (only under the last of several headings in a row), where it starts, the
+    headings of other sections glued before it, and the text of the segment after the entries."""
+
+    segment: int
+    position: int  # among the "References" headings that open the segment
+    headings: int
+    items: int
+    start: int
+    lead: str
+    remainder: str
+
+
+_ITEM_LINE = re.compile(r"(\d+)\.[ \t]+\[@")  # an entry starts with its citation key
+_HEADING_RUN = re.compile(r"(?:#{1,6}[ \t]+\S[^\n]*(?:\n+|\Z))+")
+_REFERENCES_LINE = re.compile(r"^#{1,6}[ \t]+References[ \t]*$", re.M)
+
+
+def _numbered_list(text: str) -> tuple[int, int]:
+    """``(entries, end offset)`` of the reference list that opens ``text``: items numbered
+    1, 2, ... that start with ``[@key]``, their indented lines and the blank lines between
+    them. Any other numbered item ends it: it is the paper's own list, not an entry."""
+    count = end = offset = 0
+    for line in text.split("\n"):
+        nxt = offset + len(line) + 1
+        m = _ITEM_LINE.match(line)
+        if m and int(m[1]) == count + 1:
+            count, end = count + 1, nxt
+        elif line.strip() and (count == 0 or not line[0].isspace()):
+            break
+        elif line.strip():
+            end = nxt
+        offset = nxt
+    return count, min(end, len(text))
+
+
+def _reference_lists(segments: Sequence[Segment]) -> list[_ListFound]:
+    """The reference lists in ``segments``, in order, one per "References" heading. The
+    heading of a list that vanished is glued onto the next section, so a segment can open
+    with several headings, the paper's own among them (a "REFERENCES" before the list)."""
+    found: list[_ListFound] = []
+    for at, s in enumerate(segments):
+        run = _HEADING_RUN.match(s.text)
+        heads = list(_REFERENCES_LINE.finditer(run[0])) if run else []
+        if not heads:
+            continue
+        plain = s.method == PageMethod.LATEX_PLAINTEXT  # its list has no numbered entries
+        after = s.text[heads[-1].end() :].lstrip("\n")
+        count, end = (0, 0) if plain else _numbered_list(after)
+        remainder = "" if plain else after[end:].strip()
+        previous = 0
+        for j, m in enumerate(heads):
+            lead = s.text[previous : m.start()].strip()
+            previous = m.end()
+            n = len(heads)
+            found.append(
+                _ListFound(at, j, n, count if j == n - 1 else 0, m.start(), lead, remainder)
+            )
+    return found
+
+
+def _put_back(
+    segments: Sequence[Segment], found: Sequence[_ListFound], new: dict[int, list[Segment]]
+) -> list[Segment]:
+    """``segments`` with the lists numbered in ``new`` replaced by the segments in it: their
+    heading and entries go, the text after the entries stays after the new segments, and a
+    complete list that shares its segment with a lost one stays as it was."""
+    out: list[Segment] = []
+    for at, s in enumerate(segments):
+        mine = [(i, f) for i, f in enumerate(found) if f.segment == at]
+        if not any(i in new for i, _ in mine):
+            out.append(s)
+            continue
+        for i, f in mine:
+            last = f.position == f.headings - 1
+            lead = f"{f.lead}\n\n" if f.lead else ""
+            if i in new:
+                first, *others = new[i]
+                out += [replace(first, text=lead + first.text), *others]
+                if last and f.remainder:
+                    out.append(replace(s, text=f.remainder))
+            elif last:
+                out.append(replace(s, text=lead + s.text[f.start :]))
+    return out
+
+
+_KEYED_ITEM = re.compile(r"^\d+\.[ \t]+\[@([^\]\s;]+)\]", re.M)
+_BLOCK_KEY = re.compile(r"\\item \\cite\{([^{},]*)")
+
+
+def _kept_by_key(blocks: Sequence[str], segments: Sequence[Segment]) -> list[int]:
+    """How many entries of each list are in the segments, found by their citation keys (a key
+    in two lists is counted for the first that has it)."""
+    available = Counter(
+        key
+        for s in segments
+        if s.method != PageMethod.LATEX_PLAINTEXT
+        for key in _KEYED_ITEM.findall(s.text)
+    )
+    kept: list[int] = []
+    for block in blocks:
+        n = 0
+        for key in _BLOCK_KEY.findall(block):
+            if available[key] > 0:
+                available[key] -= 1
+                n += 1
+        kept.append(n)
+    return kept
+
+
+def _in_plain(block: str, plain: Sequence[str]) -> bool:
+    return any(block in doc for doc in plain)
+
+
+def _listed(names: list[str]) -> str:
+    shown = "; ".join(n[:60] for n in names[:5])
+    return shown + ("; ..." if len(names) > 5 else "")
 
 
 def _conversion(
@@ -449,6 +831,7 @@ def pandoc_warnings(stderr: str) -> list[str]:
     return [f"pandoc: {len(msgs)} warning(s), e.g. {sample}"]
 
 
+_PLAIN_ENTRY = re.compile(r"^[ \t]*\[?@", re.M)  # an entry in plain text starts with its key
 _CITE = re.compile(
     r"\\(?:[cC]ite[a-zA-Z]*|[pP]arencite|[tT]extcite|[aA]utocite)\*?\s*(?:\[[^\]]*\]\s*){0,2}"
     r"\{([^{}]*)\}"

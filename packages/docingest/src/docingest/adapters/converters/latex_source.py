@@ -22,6 +22,7 @@ import tarfile
 import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 
 from ...domain.errors import ConversionError
@@ -485,6 +486,12 @@ _HREF_NOOP = re.compile(r"\\href@noop\s*\{\}\s*")
 _EPRINT = re.compile(r"\\providecommand\s*\{?\\Eprint\}?\s*(?:\[0\])?\s*\{\\href\s*\}")
 
 
+# What rewrite_bibliography writes around the entries of a list; bibliography_blocks finds it again.
+_BIB_OPEN = "\\section*{References}\n\\begin{enumerate}\n"
+_BIB_CLOSE = "\n\\end{enumerate}\n"
+_ITEM = re.compile(r"\\item \\cite\{")  # what _bibitem writes for an entry with a key
+
+
 def _bibitem(match: re.Match[str]) -> str:
     keys = clean_citation_keys(match.group("key"))
     return f"\\item \\cite{{{keys}}} " if keys else "\\item "
@@ -519,11 +526,28 @@ def rewrite_bibliography(text: str) -> str:
         head = _EPRINT.sub(r"\\providecommand{\\Eprint}[2]{\\href{#1}{#2}}", head)
         items = _BIBITEM.sub(_bibitem, body[first.start() :])
         items = _HREF_BREAK.sub(r"\\href\1", _HREF_NOOP.sub("", items))
-        return (
-            f"{head}\n\\section*{{References}}\n\\begin{{enumerate}}\n{items}\n\\end{{enumerate}}\n"
-        )
+        return f"{head}\n{_BIB_OPEN}{items}{_BIB_CLOSE}"
 
     return sub_regions(text, _THEBIB_BEGIN, _THEBIB_END, _rewrite)
+
+
+def bibliography_blocks(text: str) -> list[str]:
+    """The reference lists that :func:`rewrite_bibliography` wrote into ``text``."""
+    blocks: list[str] = []
+    pos = 0
+    while (begin := text.find(_BIB_OPEN, pos)) != -1:
+        end = text.find(_BIB_CLOSE, begin + len(_BIB_OPEN))
+        if end == -1:
+            break
+        pos = end + len(_BIB_CLOSE)
+        blocks.append(text[begin:pos])
+    return blocks
+
+
+def count_bibliography_entries(text: str) -> int:
+    """How many reference entries with a key the lists in ``text`` hold (see
+    :func:`bibliography_blocks`); an entry without a key is not counted."""
+    return sum(len(_ITEM.findall(b)) for b in bibliography_blocks(text))
 
 
 # What an @-internal stands for in a macro whose whole body it is: (arguments, body).
@@ -1145,6 +1169,16 @@ def split_sections(body: str, max_level: int) -> list[tuple[int, str | None, str
     comes first with level 0 and no title. Levels follow pandoc: ``\\section`` is 1,
     unless the document has chapters, which then take level 1.
     """
+    cuts = _section_cuts(body, max_level)
+    starts = [c[0] for c in cuts] + [len(body)]
+    parts: list[tuple[int, str | None, str]] = [(0, None, body[: starts[0]])]
+    for (_, end, level, title), nxt in zip(cuts, starts[1:], strict=True):
+        parts.append((level, title, body[end:nxt]))
+    return parts
+
+
+def _section_cuts(body: str, max_level: int) -> list[tuple[int, int, int, str]]:
+    """``(start, end of the title, level, title)`` of each sectioning command to ``max_level``."""
     chapters = re.search(r"\\chapter\*?\s*[\[{]", body) is not None
     levels = {"part": 0, "chapter": 1, "section": 1 + chapters}
     levels["subsection"] = levels["section"] + 1
@@ -1156,8 +1190,28 @@ def split_sections(body: str, max_level: int) -> list[tuple[int, str | None, str
         end = _matched(pairs, m.end())
         if level <= max_level and end is not None:
             cuts.append((m.start(), end, max(level, 1), body[m.end() + 1 : end - 1]))
-    starts = [c[0] for c in cuts] + [len(body)]
-    parts: list[tuple[int, str | None, str]] = [(0, None, body[: starts[0]])]
-    for (_, end, level, title), nxt in zip(cuts, starts[1:], strict=True):
-        parts.append((level, title, body[end:nxt]))
-    return parts
+    return cuts
+
+
+def split_document(text: str) -> tuple[str, str]:
+    """``(preamble, body)``: the text up to and including ``\\begin{document}`` (empty when
+    there is none), and :func:`document_body`."""
+    begin = re.search(r"\\begin\s*\{document\}", text)
+    return (text[: begin.end()] if begin else ""), document_body(text)
+
+
+def section_units(body: str) -> tuple[str, list[str]]:
+    """The body cut into what comes before the first top-level section and one piece per
+    top-level section (``\\chapter`` when the body has chapters, else ``\\section``; a
+    ``\\part`` is a cut too), each piece starting with its sectioning command."""
+    starts = [c[0] for c in _section_cuts(body, 1)]
+    bounds = [*starts, len(body)]
+    return body[: bounds[0]], [body[a:b] for a, b in pairwise(bounds)]
+
+
+def macro_context(text: str) -> str:
+    """The macro and theorem definitions in ``text``, to hand on to a later piece of the body
+    that is converted on its own."""
+    keep = [text[d.start : d.end] for d in macro_definitions(text)]
+    keep += [m.group() for m in _NEWTHEOREM.finditer(text)]
+    return "\n".join(keep)
