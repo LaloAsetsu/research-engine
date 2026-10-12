@@ -192,6 +192,30 @@ def test_converters_produce_segments_and_metadata(src):
     assert m.title == "Paper" and m.metadata.year == 2024
 
 
+def test_a_segment_can_carry_its_own_method_and_warnings(src):
+    """A LaTeX section that fell back to plain text is a page record of its own kind."""
+    note = "pandoc exited with code 64; used the pylatexenc plain-text fallback"
+    conv = FakeConverter(
+        [
+            Segment("Intro text", "Introduction"),
+            Segment("Method text", "Method", PageMethod.LATEX_PLAINTEXT, (note,)),
+            Segment("Result text", "Results"),
+        ],
+    )
+    svc = make_service(converters={SourceKind.LATEX: conv})
+    doc = svc.ingest(src("paper.tex"))
+    pages = doc.manifest.pages
+    assert [p.method for p in pages] == [
+        PageMethod.LATEX,
+        PageMethod.LATEX_PLAINTEXT,
+        PageMethod.LATEX,
+    ]
+    assert [p.warnings for p in pages] == [[], [note], []]
+    markdown = svc.store.markdown(doc)
+    assert "<!-- page 2 | method=latex_plaintext -->" in markdown
+    assert "<!-- page 3 | method=latex -->" in markdown
+
+
 def test_explicit_metadata_wins_and_sidecar_is_read(src, tmp_path):
     svc = make_service(converters={SourceKind.TEXT: FakeConverter([Segment("hi")])})
     path = src("note.md")

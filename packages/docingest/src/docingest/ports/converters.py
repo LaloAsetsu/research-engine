@@ -15,6 +15,11 @@ class Segment:
 
     text: str
     title: str | None = None
+    # Only for a segment that was made differently from the rest of its conversion (a LaTeX
+    # section that fell back to plain text): its page record takes this method instead of
+    # the conversion's, and these notes as its warnings.
+    method: PageMethod | None = None
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -443,11 +443,12 @@ class IngestService:
         records = [
             PageRecord(
                 index=i,
-                method=conv.method,
+                method=s.method or conv.method,
                 n_chars=len(s.text),
                 seconds=per,
                 engine=conv.engine,
                 title=s.title,
+                warnings=list(s.warnings),
             )
             for i, s in enumerate(segments)
         ]
