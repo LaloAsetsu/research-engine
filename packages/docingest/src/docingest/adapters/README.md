@@ -627,6 +627,7 @@ Configuration (`QaConfig`):
 | `overlap` | `100` | Chunk overlap in characters |
 | `evidence_k` | `10` | PaperQA `answer.evidence_k` |
 | `answer_max_sources` | `3` | PaperQA `answer.answer_max_sources` |
+| `skip_summary` | `false` | `true`: the answer model reads the chunks given as `contexts` instead of their summaries (below) |
 | `max_concurrent_requests` | `2` | PaperQA `answer.max_concurrent_requests` |
 | `temperature` | `0.0` | Sampling temperature sent with every LLM request |
 
@@ -665,7 +666,8 @@ sequenceDiagram
 
 Details:
 
-- With `contexts` (chunks retrieved elsewhere, such as by a chunk index) the adapter skips the chunking and PaperQA2's retrieval: it builds a `Docs` that holds exactly those chunks, grouped by paper in order of first appearance and added as given (no token re-split), sets `answer.evidence_retrieval = False` so every chunk is summarized, and answers from them. Only `documents[i][0].manifest` is used then, for the `Doc` citations; the Markdown is not read. An empty `contexts` list raises `ValueError` (PaperQA2 would answer "no papers"). The embedder is still loaded because `Docs` embeds what it is given, but PaperQA2 does not use those vectors.
+- With `contexts` (chunks retrieved elsewhere, such as by a chunk index) the adapter skips the chunking and PaperQA2's retrieval: it builds a `Docs` that holds exactly those chunks, grouped by paper in order of first appearance and added as given (no token re-split), sets `answer.evidence_retrieval = False` so every chunk is used, and answers from them. Every chunk is summarized first, unless `[qa] skip_summary` is true (below). Only `documents[i][0].manifest` is used then, for the `Doc` citations; the Markdown is not read. An empty `contexts` list raises `ValueError` (PaperQA2 would answer "no papers"). The embedder is still loaded because `Docs` embeds what it is given, but PaperQA2 does not use those vectors.
+- `skip_summary = true` with `contexts` calls `keep_chunks_verbatim(settings, contexts)` after the `Docs` is built. It sets `answer.evidence_skip_summary` (each context is the chunk text, no summary request, score 5 for all) and `answer.skip_evidence_citation_strip` (PaperQA2 would delete any parenthesis with a letter and a four-digit number from the chunk, equations included), and installs a `custom_context_serializer` that gives the contexts a score from their place in `contexts` and then calls PaperQA2's own serializer, so the `answer_max_sources` cut keeps the retrieval order instead of PaperQA2's (score, chunk name) order, which for equal scores is the paper id. Context keys, `Doc` citations and chunk names are untouched, so citations and page ranges come out as before. Without `contexts` the key has no effect and `ask` calls `warn` once: PaperQA2's own retrieval loses the order before the answer step.
 - The stored Markdown is split back into pages with `split_pages()` (the `<!-- page N | method=... -->` markers) and chunked with PaperQA's `chunk_pdf`, so citations point at page ranges.
 - Each document becomes a PaperQA `Doc` with `docname = doc_id[:16]`, `dockey = doc_id` and `citation = manifest.citation()`; a partial run appends `, pages 1-N of M`.
 - With the pinned embedder, chunks longer than its window (`max_seq_length - 2` tokens, read from the snapshot's `sentence_bert_config.json`) are re-split into token windows with a 32-token overlap (`token_windows`), so no text goes unembedded. With a custom embedder no re-splitting is done, because its window is unknown.

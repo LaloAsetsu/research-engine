@@ -46,7 +46,7 @@ uv run docingest index status     # what is indexed, what is searchable, what a 
 uv run docingest index remove 3fa9c2d1
 ```
 
-`index build` is incremental: a second run over an unchanged corpus makes no embedding request. With the adapters selected, `docingest ask` answers from the index: it embeds the question, takes the top `candidates` (50) from the index, reranks them and gives the best `contexts` (10) to PaperQA2, which summarizes those chunks and writes the cited answer. `ask --no-index` goes back to PaperQA2's own retrieval, `ask --bm25 english|always|never` overrides the keyword setting for one question, and `ingest --index` and `crawl --index` add the papers they store to the index (off by default).
+`index build` is incremental: a second run over an unchanged corpus makes no embedding request. With the adapters selected, `docingest ask` answers from the index: it embeds the question, takes the top `candidates` (50) from the index, reranks them and gives the best `contexts` (10) to PaperQA2, which summarizes those chunks and writes the cited answer (with `[qa] skip_summary = true` the answer model reads the chunks themselves). `ask --no-index` goes back to PaperQA2's own retrieval, `ask --bm25 english|always|never` overrides the keyword setting for one question, and `ingest --index` and `crawl --index` add the papers they store to the index (off by default).
 
 ```bash
 uv run docingest ask "What limits T1 in transmons?"

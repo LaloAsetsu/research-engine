@@ -182,7 +182,7 @@ Look at the rows `indexed`, `searchable`, `corpus` and `to add`. After a complet
 uv run docingest ask "What limits T1 in transmons?" -c "$CONFIG"
 ```
 
-`ask` checks the index first, embeds the question, takes the 50 best chunks (dense vectors plus BM25 for English questions), reranks them and gives the best 10 to PaperQA2, which summarizes them and writes the answer. The output is the answer with its sources cited inline as `(<doc id prefix> pages N-M)`, followed by a reference list with one entry per cited paper and its pages. `warning:` lines come first if the index is behind the corpus. `ask` prints no timings; measure it with `time`.
+`ask` checks the index first, embeds the question, takes the 50 best chunks (dense vectors plus BM25 for English questions), reranks them and gives the best 10 to PaperQA2, which summarizes them and writes the answer. The summaries are about 100 words each and lose most LaTeX; to let the answer model read the chunks themselves, equations included, set `skip_summary = true` and `answer_max_sources = 10` in `[qa]` (see [Equations in answers](#equations-in-answers)). The output is the answer with its sources cited inline as `(<doc id prefix> pages N-M)`, followed by a reference list with one entry per cited paper and its pages. `warning:` lines come first if the index is behind the corpus. `ask` prints no timings; measure it with `time`.
 
 Before the answer you may also see lines that are harmless:
 
@@ -191,6 +191,20 @@ Before the answer you may also see lines that are harmless:
 - on a driver that supports only CUDA 12 (such as 535), a torch `CUDA initialization: The NVIDIA driver on your system is too old` warning. The workspace's torch is a CUDA 13 build, and `ask` runs it on the CPU only. It is not related to the vLLM install.
 
 None of them affects the answer. Two options change one question: `--no-index` answers with PaperQA2's own retrieval, and `--bm25 english|always|never` overrides the keyword setting. See [Spanish questions](#spanish-questions) for when to use the second.
+
+### Equations in answers
+
+PaperQA2 does not give the answer model the 10 chunks, it gives it a summary of about 100 words per chunk, and the summaries drop most LaTeX. For papers where the equations matter, add to the `[qa]` table of your configuration:
+
+```toml
+[qa]
+skip_summary = true        # the answer model reads the chunks, equations included
+answer_max_sources = 10    # how many of the [index] contexts it reads; the default is 3
+```
+
+With `skip_summary` the 10 summary requests of every question disappear and the answer prompt holds the 10 chunks as they are in the index, in the order the reranker gave them, cited as before. The prompt is then about 4,000 tokens (6,100 for the 10 largest chunks of a 200-paper sample), against the 16,384 of the default `LLM_MAX_LEN` and a reply of at most 1,024. Chunks of 900 characters are far from the limit; with `chunk_chars` of about 4,000 or more, or a smaller `LLM_MAX_LEN`, the server answers HTTP 400 instead. The details are in [config/README.md](../packages/docingest/config/README.md#reading-the-chunks-instead-of-summaries). Keeping `answer_max_sources = 3` is also valid and gives the 3 best chunks.
+
+The key has no effect with `--no-index`: `ask` prints `warning: [qa] skip_summary applies to chunks from the index ...` and summarizes as before. It changes only the answer, so the corpus and the index stay valid.
 
 ## 8. Add papers later, and stop the servers
 

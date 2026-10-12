@@ -582,7 +582,7 @@ The pipeline reads one TOML file, [`config/pipeline.toml`](config/pipeline.toml)
 | `[adapters]` | which adapter plugs into each port | `ocr = "mlx-vlm"` or `"openai-compatible"` | yes, through the adapters' fingerprints |
 | `[routing]` | per-page OCR thresholds | `min_chars = 50`, `image_coverage = 0.6` | yes, for PDFs |
 | `[ocr]` | OCR model and generation | `repo_id`, `revision` (a commit sha of that repo, required unless `repo_id` is the built-in default), `profile`, `dpi = 150`, `temperature = 0.0`, optional overrides `prompt`, `max_side`, `max_tokens`, `repetition_penalty`; for HTTP: `base_url`, `served_model`, `api_key_env`, `timeout_s = 600`, `retries = 3` | yes, through the selected OCR adapter's fingerprint (`timeout_s`, `retries` and `api_key_env` excluded) |
-| `[qa]` | PaperQA2 | `llm`, `llm_base`, `embedding`, `embedding_repo_id`, `embedding_revision`, `chunk_chars = 900`, `overlap = 100`, `evidence_k = 10`, `answer_max_sources = 3`, `max_concurrent_requests = 2`, `temperature = 0.0` | no |
+| `[qa]` | PaperQA2 | `llm`, `llm_base`, `embedding`, `embedding_repo_id`, `embedding_revision`, `chunk_chars = 900`, `overlap = 100`, `evidence_k = 10`, `answer_max_sources = 3`, `skip_summary = false`, `max_concurrent_requests = 2`, `temperature = 0.0` | no |
 | `[latex]` | LaTeX conversion | `timeout_s = 120`, `max_archive_mb = 200`, `split_level = 2`, `fallback = true`, `pandoc_path` | `split_level`, `fallback` and the pandoc version |
 | `[arxiv]` | crawler | `delay_s = 3.0`, `timeout_s = 60.0`, `retries = 3`, `contact`, `prefer = ["latex", "pdf"]`, `fetch_license = true`, plus the endpoint URLs | no |
 
@@ -752,7 +752,7 @@ Install the `qa` extra (`uv sync --locked --all-extras`, or `--extra qa`).
 
 **Corpus mode.** `uv run docingest ask "..."` reads every document in the store (the canonical result, or else the variant or degraded result with the most pages, with a warning), splits each `document.md` at its page markers and chunks it with PaperQA2's page-aware `chunk_pdf`, so citations point at page ranges. With the pinned embedder, any chunk longer than the embedder's token window is re-split by tokens so no text goes unembedded. The documents are added with `Docs.aadd_texts`, and the question is answered with `Docs.aquery`. Each document's citation comes from its manifest; a partial document's citation says which pages were ingested. PaperQA2's network metadata lookups and multimodal parsing are turned off.
 
-**Index mode.** With a chunk index configured (`[adapters] embedder`, `index`, optionally `reranker`; the [docingest-index](../docingest-index/README.md) package provides them) `ask` does not chunk and embed the corpus for every question. It retrieves from the index built once by `docingest index build`, in two stages, and PaperQA2 only summarizes and answers:
+**Index mode.** With a chunk index configured (`[adapters] embedder`, `index`, optionally `reranker`; the [docingest-index](../docingest-index/README.md) package provides them) `ask` does not chunk and embed the corpus for every question. It retrieves from the index built once by `docingest index build`, in two stages, and PaperQA2 only summarizes and answers (with `[qa] skip_summary = true`, only answers: see below):
 
 ```mermaid
 flowchart LR
@@ -760,7 +760,7 @@ flowchart LR
     E --> S["ChunkIndex.search: dense, plus BM25 for English, top candidates (50)"]
     S --> R["Reranker: score the 50, stable sort"]
     R --> C["optional per-paper cap, first contexts (10)"]
-    C --> P["PaperQA2: evidence summaries and cited answer, its own retrieval off"]
+    C --> P["PaperQA2: evidence summaries (unless skip_summary) and cited answer, its own retrieval off"]
 ```
 
 ```bash
@@ -774,6 +774,7 @@ uv run docingest ingest data/raw --index -c config/examples/lab-server.toml    #
 - `--no-index` answers with PaperQA2's own retrieval even when an index is configured. `--bm25 english|always|never` overrides `[index] bm25` for one question. With `[adapters] index = "none"`, the default, `ask` behaves exactly as described under Corpus mode.
 - `ingest --index` and `crawl --index` (off by default) add the papers a run stored to the index and commit, without reading the rest of the corpus. The flag is checked before any work: without an index and an embedder in `[adapters]`, or with an index built for another embedder, the command stops first. If the index update fails after the papers were stored, they stay stored and the message says to run `docingest index build`.
 - In index mode `[qa] evidence_k` does not apply: the number of summarized chunks is `[index] contexts`. `ask` prints no timings in either mode.
+- PaperQA2 summarizes each chunk in about 100 words and the answer model reads only those summaries, so LaTeX is mostly lost on the way (none of 54 display equations in a sample reached it). `[qa] skip_summary = true` makes the answer model read the chunks themselves, in retrieval order, with the same citations and no summary requests; `answer_max_sources` (default 3) still decides how many it reads, so set it to `[index] contexts` to give it all. It applies only to chunks from the index; the reasons, the prompt budget against a 16K context and the measurements are in [config/README.md](config/README.md#reading-the-chunks-instead-of-summaries).
 
 **Model selection.**
 
@@ -781,7 +782,7 @@ uv run docingest ingest data/raw --index -c config/examples/lab-server.toml    #
 |---|---|---|
 | LLM | the pinned `[ocr]` model snapshot, served at `http://127.0.0.1:8080/v1` by `scripts/serve_llm.sh` (`mlx_vlm.server`, with `HF_HUB_OFFLINE=1`) | any litellm model in `[qa].llm` or `DOCINGEST_LLM`, e.g. `ollama/llama3.1` with `[qa].llm_base = "http://localhost:11434"` |
 | Embedding | pinned `sentence-transformers/all-MiniLM-L6-v2` snapshot | any PaperQA2 embedding string in `[qa].embedding` or `DOCINGEST_EMBEDDING`, e.g. `ollama/mxbai-embed-large` |
-| Retrieval | `chunk_chars = 900`, `overlap = 100`, `evidence_k = 10`, `answer_max_sources = 3`, `max_concurrent_requests = 2` (`evidence_k` is for PaperQA2's own retrieval; with an index see Index mode) | `[qa]` keys |
+| Retrieval | `chunk_chars = 900`, `overlap = 100`, `evidence_k = 10`, `answer_max_sources = 3`, `skip_summary = false`, `max_concurrent_requests = 2` (`evidence_k` is for PaperQA2's own retrieval; with an index see Index mode) | `[qa]` keys |
 | Temperature | `temperature = 0.0`, sent on every request | `[qa].temperature` |
 
 `[qa]` settings do not affect ingestion output and are not part of any cache key.

@@ -285,11 +285,31 @@ Settings of the PaperQA2 step (`docingest ask`, adapter `paperqa`). None of them
 | `chunk_chars` | int | `900` | Target chunk size in characters (page-aware chunks). With the pinned embedder, a chunk longer than the model's token window is re-split by tokens. With a custom `embedding`, it is not. |
 | `overlap` | int | `100` | Chunk overlap in characters. |
 | `evidence_k` | int | `10` | PaperQA2 `answer.evidence_k`: number of evidence chunks retrieved. Used when PaperQA2 retrieves by itself (no index, or `ask --no-index`); with an index the number of chunks is `[index] contexts`. |
-| `answer_max_sources` | int | `3` | PaperQA2 `answer.answer_max_sources`. |
+| `answer_max_sources` | int | `3` | PaperQA2 `answer.answer_max_sources`: how many contexts the answer model reads. With summaries (`skip_summary = false`) they are the best scored by the summary LLM; with `skip_summary = true` the first ones in retrieval order. |
+| `skip_summary` | bool | `false` | `false`: PaperQA2 summarizes each retrieved chunk in about 100 words and the answer model reads the summaries, which drop most LaTeX. `true`: the answer model reads the chunks as retrieved, equations included, and no summary request is made. Applies to chunks given by the index; with PaperQA2's own retrieval it has no effect and `ask` warns. See [Reading the chunks instead of summaries](#reading-the-chunks-instead-of-summaries). |
 | `max_concurrent_requests` | int | `2` | PaperQA2 `answer.max_concurrent_requests`. |
 | `temperature` | float | `0.0` | Sampling temperature sent with every LLM request (evidence summaries and the answer), for the default local model and for any `llm`. Before this key existed no temperature was sent, so the server's own default applied and the same question could get different answers. A hosted model that only accepts its default temperature needs this key set to that value. |
 
 The LLM answer is limited to 1024 tokens. The default local model is always called with the placeholder key `sk-local`. A custom `openai/...` model gets the same placeholder only when `OPENAI_API_KEY` is not set, which keyless local servers accept; a real key is never overridden.
+
+#### Reading the chunks instead of summaries
+
+By default PaperQA2 asks the LLM for a summary of each retrieved chunk (about 100 words, no instruction about equations) and the answer model reads only those summaries. On a sample of arXiv papers none of the 54 display equations in the retrieved chunks reached the answer model that way. With `skip_summary = true` (and an index) the answer model reads the chunk text itself:
+
+- **What changes.** The summary request of every chunk is gone (10 LLM calls fewer per question with `[index] contexts = 10`). The answer prompt holds each chunk as retrieved, `$$ ... $$` included, under the same citation key as before, so the answer cites the same `<doc id prefix> pages N-M` and the reference list is unchanged. The page ranges come from the chunk, not from the text.
+- **Three settings move together.** `skip_summary` sets PaperQA2 `answer.evidence_skip_summary`. It also sets `answer.skip_evidence_citation_strip`, because PaperQA2 otherwise deletes every parenthesis that contains a letter and a four-digit number from the context, which removes `(a + 1000)` from an equation and `(batch size 4096)` from a sentence (the in-text citations of the paper stay in the chunk). And it replaces PaperQA2's ordering of the contexts: without summary scores every context scores the same and PaperQA2 breaks ties by chunk name, which is the paper id, so the `answer_max_sources` chunks would be picked by id instead of by rank. The contexts keep the order `ask` gave them (the reranked order), and PaperQA2's own cut and prompt layout are applied to that order.
+- **How many chunks are read is still `answer_max_sources`** (default 3). With the default, only the 3 best-ranked chunks reach the answer model, so most equations of the 10 retrieved chunks still do not. To give it all of them, set `answer_max_sources` to `[index] contexts`. On 20 random sets of 10 chunks with display math, 568 `$$` delimiters were retrieved; 173 reached the prompt with `answer_max_sources = 3` and all 568 with `10`.
+- **A text that two retrieved chunks share** (a license notice, a running header, a paper stored twice) is given once, as the best ranked copy: PaperQA2 derives the citation key from the text, so two copies would share one key and cost a slot. Chunks that differ after their first 500 characters but are equal before it can still share a key.
+- **Without an index** (`[adapters] index = "none"`, or `ask --no-index`) PaperQA2 retrieves and orders the evidence by itself and the order is lost before the answer step. The key does not apply there: `ask` prints a warning and the evidence is summarized as before.
+
+**Prompt budget** (the `qwen-local` server of [`serving/`](../../../serving/README.md) has a context of 16,384 tokens, `LLM_MAX_LEN`, and the reply is limited to 1,024). The answer prompt is about 450 tokens of fixed text (instructions, question, one key and citation line) plus, per chunk, its tokens and about 40 for the key and the citation. Measured on 19,345 chunks of 200 papers with the Qwen3 tokenizer, `chunk_chars = 900`:
+
+| | chunk tokens | prompt, 10 chunks |
+|---|---|---|
+| chunks with display math: mean, 95th percentile, maximum | 305, 397, 689 | mean 4,053; largest of 20 random sets 4,284 |
+| the 10 largest chunks with display math of the sample | 464 to 689 | 6,089 |
+
+Even with the 10 largest chunks and the full reply the request is about 7,100 of 16,384 tokens. Chunks of math text hold about 2.95 characters per token. The window is exceeded only when `chunk_chars` is raised to about 4,000 characters or more with 10 chunks (`10 x (chunk_chars / 2.95 + 40) + 450 + 1,024` against the context length), or when the server runs with a smaller `LLM_MAX_LEN`; check the number for notation that tokenizes worse. A request over the window fails with an HTTP 400 from the server instead of being cut.
 
 ### `[latex]`
 
@@ -464,7 +484,7 @@ flowchart LR
 | `[latex] split_level`, `fallback`, the pandoc version (which `pandoc_path` can change) and, when `fallback` is on, the pylatexenc version | LaTeX |
 | `[latex] timeout_s`, `max_archive_mb` | nothing |
 | Docling version | office documents |
-| `[qa]`, `[arxiv]`, `output_dir`, `raw_dir` | nothing |
+| `[qa]` (`skip_summary` and `answer_max_sources` included), `[arxiv]`, `output_dir`, `raw_dir` | nothing |
 
 Changing only a `<file>.meta.json` sidecar updates the stored manifest and title without re-processing. `docingest ingest --force` re-processes regardless of the cache.
 

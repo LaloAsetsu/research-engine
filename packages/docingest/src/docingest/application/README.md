@@ -899,8 +899,8 @@ for key, error in report.failures:
 
 The default answerer (PaperQA2) splits each document back into pages with `split_pages`
 (plain mode), so its citations can name page ranges, and labels partial runs in the citation
-("pages 1-N of M"); in index mode it summarizes exactly the given chunks and retrieves
-nothing. `AskService` writes nothing and times nothing. The `[qa]` and `[index]` configuration
+("pages 1-N of M"); in index mode it summarizes exactly the given chunks (or, with `[qa] skip_summary`,
+answers from them as they are) and retrieves nothing. `AskService` writes nothing and times nothing. The `[qa]` and `[index]` configuration
 is described in [config/README.md](../../../config/README.md).
 
 ```mermaid
