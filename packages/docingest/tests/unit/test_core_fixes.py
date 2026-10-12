@@ -7,12 +7,14 @@ from pathlib import Path
 
 import pytest
 from fakes import FakeConverter, FakeDetector, FakeImages, FakeOcr, FakePdfReader
+from pydantic import ValidationError
 
 from docingest import __version__
 from docingest.adapters.qa import paperqa
 from docingest.adapters.store.filesystem import DEGRADED_DIR, FilesystemStore
 from docingest.application.ingest import PIPELINE_VERSION, IngestService, retitle_markdown
-from docingest.config import DEFAULT_LLM_BASE, AppConfig, load_config
+from docingest.bootstrap import Container
+from docingest.config import DEFAULT_CONFIG, DEFAULT_LLM_BASE, AppConfig, load_config
 from docingest.domain.models import (
     DocumentManifest,
     PageMethod,
@@ -116,6 +118,30 @@ def test_the_temperature_is_sent_on_every_request_and_defaults_to_zero(qa_env):
     assert paperqa.llm_params(_cfg(llm="ollama/llama3.1"))["temperature"] == 0.0
     assert paperqa.llm_params(_cfg(temperature=0.7))["temperature"] == 0.7
     assert paperqa.llm_params(_cfg(llm="openai/gpt-4o-mini", temperature=0.3))["temperature"] == 0.3
+
+
+def test_skip_summary_defaults_to_false_and_parses_booleans():
+    assert AppConfig().qa.skip_summary is False
+    assert _cfg(skip_summary=True).qa.skip_summary is True
+    assert load_config(DEFAULT_CONFIG).qa.skip_summary is False
+    parsed = AppConfig.model_validate(tomllib.loads("[qa]\nskip_summary = true\n"))
+    assert parsed.qa.skip_summary is True
+
+
+@pytest.mark.parametrize("value", ["maybe", 2, [True], {"on": 1}])
+def test_skip_summary_rejects_what_is_not_a_boolean(value):
+    with pytest.raises(ValidationError, match="skip_summary"):
+        _cfg(skip_summary=value)
+
+
+def test_skip_summary_is_not_in_any_cache_key(tmp_path):
+    # [qa] only changes question answering: a stored document stays a cache hit.
+    def keys(skip: bool) -> list[str]:
+        cfg = AppConfig(output_dir=str(tmp_path / "out"), qa={"skip_summary": skip})
+        container = Container(cfg, log=lambda _: None, overrides={"ocr": FakeOcr()})
+        return [container.ingest.config_hash(kind) for kind in SourceKind]
+
+    assert keys(True) == keys(False)
 
 
 # ---------------------------------------------------------------- retitle_markdown

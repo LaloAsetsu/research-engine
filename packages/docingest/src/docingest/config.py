@@ -94,6 +94,10 @@ class QaConfig(BaseModel):
     overlap: int = OVERLAP
     evidence_k: int = 10
     answer_max_sources: int = 3
+    # False: PaperQA2 summarizes each retrieved chunk (about 100 words, which drops LaTeX) and the
+    # answer model reads the summaries. True: it reads the chunks as retrieved, in retrieval order.
+    # Applies to chunks given by the index, not to PaperQA2's own retrieval.
+    skip_summary: bool = False
     max_concurrent_requests: int = 2
     temperature: float = 0.0  # sent on every LLM request: the same question gets the same answer
 

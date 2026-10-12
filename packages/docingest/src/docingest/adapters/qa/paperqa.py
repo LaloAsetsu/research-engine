@@ -122,6 +122,44 @@ def token_windows(texts, tokenizer, max_tokens: int, overlap_tokens: int = 32):
     return out
 
 
+def keep_chunks_verbatim(settings, contexts: list[Chunk]) -> None:
+    """Make the answer model read ``contexts`` as retrieved instead of PaperQA2's summaries.
+
+    Three things need to change together. ``evidence_skip_summary`` makes each context the
+    chunk text. PaperQA2 still strips any parenthesis that holds a letter and a four-digit
+    number from it, which deletes ``(a + 1000)`` from an equation, so that is switched off.
+    And with no summary score every context scores 5, so PaperQA2's default order (score, then
+    chunk name) would pick the ``answer_max_sources`` chunks by paper id: a serializer ranks
+    the contexts by their place in ``contexts`` (the reranked order) before applying the same
+    ``answer_max_sources`` cut and prompt layout as PaperQA2.
+    """
+    settings.answer.evidence_skip_summary = True
+    settings.answer.skip_evidence_citation_strip = True
+    rank: dict[str, int] = {}
+    for i, chunk in enumerate(contexts):
+        rank.setdefault(chunk.text, i)
+    default = settings.model_copy(update={"custom_context_serializer": None})
+
+    async def by_retrieval_rank(*, settings, contexts, question, pre_str):
+        ranked = [
+            c.model_copy(update={"score": len(rank) + 1 - rank.get(c.text.text, len(rank))})
+            for c in contexts
+        ]
+        return await default.context_serializer(ranked, question, pre_str)
+
+    settings.custom_context_serializer = by_retrieval_rank
+
+
+def without_repeated_text(contexts: list[Chunk]) -> list[Chunk]:
+    """``contexts`` without a chunk whose text an earlier (better ranked) one already has.
+    PaperQA2 keys a context by its text, so two such chunks would share one citation key; a
+    summary differs per paper, a verbatim chunk does not."""
+    first: dict[str, Chunk] = {}
+    for chunk in contexts:
+        first.setdefault(chunk.text, chunk)
+    return list(first.values())
+
+
 def _unused_embedding():
     from paperqa import EmbeddingModel
 
@@ -164,13 +202,22 @@ class PaperQAAnswerer:
             raise ValueError("contexts is empty: nothing to answer from")
         settings = local_settings(self.cfg)
         if contexts is None:
+            if self.cfg.qa.skip_summary:
+                warn(
+                    "[qa] skip_summary applies to chunks from the index; PaperQA2's own "
+                    "retrieval has no retrieval order to keep, so its evidence is summarized"
+                )
             embedding_model = settings.get_embedding_model()  # load the embedder once
             docs = await self._docs_from_corpus(documents, settings, embedding_model)
         else:
             # Nothing is retrieved from given contexts, so nothing is embedded either.
             embedding_model = _unused_embedding()
+            if self.cfg.qa.skip_summary:
+                contexts = without_repeated_text(contexts)
             docs = await self._docs_from_contexts(contexts, documents, settings)
-            settings.answer.evidence_retrieval = False  # summarize exactly these chunks
+            settings.answer.evidence_retrieval = False  # use exactly these chunks
+            if self.cfg.qa.skip_summary:
+                keep_chunks_verbatim(settings, contexts)
         session = await docs.aquery(question, settings=settings, embedding_model=embedding_model)
         return session.formatted_answer
 

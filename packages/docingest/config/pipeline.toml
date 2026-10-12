@@ -77,6 +77,7 @@ embedding_revision = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 chunk_chars = 900   # target size; chunks over MiniLM's 256-token window are re-split by tokens
 overlap = 100
 evidence_k = 10
+skip_summary = false   # true: with an index, the answer reads the retrieved chunks, not their summaries
 temperature = 0.0   # sent on every LLM request, so the same question gets the same answer
 
 [latex]

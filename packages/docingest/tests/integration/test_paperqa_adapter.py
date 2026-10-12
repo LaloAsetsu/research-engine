@@ -237,3 +237,124 @@ def test_without_contexts_paperqa_still_chunks_and_retrieves_itself(mock_llm, qa
     [(texts, _docs, retrieval)] = spy_evidence
     assert retrieval is True
     assert [t.name for t in texts] == [c.name for c in chunks_of(a.manifest.doc_id, pages)]
+
+
+# ------------------------------------------------------ [qa] skip_summary (chunks, not summaries)
+
+EQUATION = (
+    "Where $d$ is the dimension, $$\\begin{equation} d(n)=\\frac{n!}{(n/2)!(n/2+1)!}"
+    "=O(\\frac{2^n}{n^{3/2}}) + (a + 1000) \\end{equation}$$ holds."
+)
+
+
+def skip_cfg(skip: bool, **qa) -> AppConfig:
+    return AppConfig.model_validate(
+        {"qa": {"llm": "openai/mock", "embedding": "sparse", "skip_summary": skip, **qa}}
+    )
+
+
+def prompts(llm_calls) -> list[str]:
+    """The user message of every request, in the order they were sent."""
+    return [call["messages"][-1]["content"] for call in llm_calls]
+
+
+def ask_chunks(cfg, letters, texts, question="What is d(n)?"):
+    """Ask over one single-page chunk per letter, retrieved in the given order."""
+    docs = [(stored(letter), "") for letter in letters]
+    contexts = [
+        chunks_of(stored(letter).manifest.doc_id, {1: text})[0]
+        for letter, text in zip(letters, texts, strict=True)
+    ]
+    return asyncio.run(PaperQAAnswerer(cfg).ask(question, docs, print, contexts=contexts)), contexts
+
+
+def test_skip_summary_gives_the_answer_model_the_chunk_text_verbatim(mock_llm, llm_calls):
+    answer, _ = ask_chunks(skip_cfg(True), "a", [EQUATION])
+    assert len(llm_calls) == 1  # the answer; no summary request
+    [prompt] = prompts(llm_calls)
+    assert EQUATION in prompt  # $$ ... $$ untouched, and "(a + 1000)" not taken for a citation
+    assert answer.startswith("Question: What is d(n)?")
+    assert {call["temperature"] for call in llm_calls} == {0.0}
+
+
+def test_skip_summary_false_still_summarizes_every_chunk(mock_llm, llm_calls):
+    texts = [EQUATION, "A second passage."]
+    ask_chunks(skip_cfg(False), "ab", texts)
+    assert len(llm_calls) == len(texts) + 1  # one summary per chunk, then the answer
+    answer_prompt = prompts(llm_calls)[-1]
+    assert (
+        REPLY.split("\n", maxsplit=1)[0] in answer_prompt
+    )  # the summaries are what the answer reads
+    assert EQUATION not in answer_prompt and "$$" not in answer_prompt
+
+
+def test_skip_summary_is_off_by_default(mock_llm, llm_calls, qa_cfg):
+    assert qa_cfg.qa.skip_summary is False
+    ask_chunks(qa_cfg, "ab", ["First passage.", "Second passage."])
+    assert len(llm_calls) == 3
+
+
+def test_skip_summary_keeps_citations_and_page_provenance(monkeypatch):
+    from paperqa.utils import encode_id
+
+    question = "What is d(n)?"
+    key = "pqac-" + encode_id(question + EQUATION[:500], 8)  # PaperQA2's key for this chunk
+    real = paperqa.llm_params
+    reply = f"It grows like a Catalan number ({key})."
+    monkeypatch.setattr(paperqa, "llm_params", lambda cfg: {**real(cfg), "mock_response": reply})
+    answer, [chunk] = ask_chunks(skip_cfg(True), "a", [EQUATION], question)
+    assert f"({chunk.name})" in answer  # the key became the cited chunk name with its pages
+    assert chunk.name.endswith("pages 1-1")
+    assert "References" in answer and "Paper a" in answer
+    assert key not in answer
+
+
+def test_skip_summary_keeps_the_retrieval_order_for_the_source_cut(mock_llm, llm_calls):
+    # PaperQA2 alone would order equal scores by chunk name, i.e. by paper id (a, b, c...).
+    letters, texts = "edcba", [f"Passage {n} of paper {x}." for n, x in enumerate("edcba")]
+    ask_chunks(skip_cfg(True, answer_max_sources=3), letters, texts)
+    [prompt] = prompts(llm_calls)
+    assert [t in prompt for t in texts] == [True, True, True, False, False]
+    assert prompt.index(texts[0]) < prompt.index(texts[1]) < prompt.index(texts[2])
+
+
+def test_skip_summary_answer_max_sources_decides_how_many_chunks_are_read(mock_llm, llm_calls):
+    letters, texts = "abcd", [f"Passage {n}." for n in range(4)]
+    ask_chunks(skip_cfg(True, answer_max_sources=4), letters, texts)
+    assert all(t in prompts(llm_calls)[-1] for t in texts)
+
+
+def test_skip_summary_reads_a_text_that_two_papers_share_once(mock_llm, llm_calls):
+    # PaperQA2 keys a context by its text: the same text twice would be one key twice.
+    text = "A license notice that two papers repeat."
+    letters, texts = "abc", [text, "Own passage of b.", text]
+    ask_chunks(skip_cfg(True, answer_max_sources=3), letters, texts)
+    [prompt] = prompts(llm_calls)
+    assert prompt.count(text) == 1 and "Own passage of b." in prompt
+    assert "Paper a" in prompt and "Paper c" not in prompt  # the better ranked copy is kept
+    keys = prompt.split("Valid Keys: ")[1].split("\n")[0].split(", ")
+    assert len(keys) == len(set(keys)) == 2
+
+
+def test_skip_summary_off_keeps_every_chunk_even_with_the_same_text(mock_llm, llm_calls):
+    ask_chunks(skip_cfg(False), "ab", ["Same text.", "Same text."])
+    assert len(llm_calls) == 3  # a summary per chunk, then the answer
+
+
+def test_skip_summary_without_contexts_warns_and_keeps_the_summaries(mock_llm, llm_calls):
+    cfg = skip_cfg(True)
+    a = stored("a")
+    markdown = "<!-- page 1 | method=text_layer -->\nAttention is a softmax.\n\n"
+    warnings: list[str] = []
+    asyncio.run(PaperQAAnswerer(cfg).ask("What is attention?", [(a, markdown)], warnings.append))
+    assert len(warnings) == 1 and "skip_summary" in warnings[0]
+    assert len(llm_calls) == 2  # one summary, then the answer: PaperQA2's own retrieval
+    assert "Attention is a softmax." not in prompts(llm_calls)[-1]
+
+
+def test_skip_summary_off_is_silent_without_contexts(mock_llm, qa_cfg):
+    a = stored("a")
+    markdown = "<!-- page 1 | method=text_layer -->\nAttention is a softmax.\n\n"
+    warnings: list[str] = []
+    asyncio.run(PaperQAAnswerer(qa_cfg).ask("What is attention?", [(a, markdown)], warnings.append))
+    assert warnings == []

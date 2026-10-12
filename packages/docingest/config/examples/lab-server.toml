@@ -34,13 +34,15 @@ served_model = "qwen-local"
 llm = "openai/qwen-local"
 llm_base = "http://127.0.0.1:8001/v1"
 evidence_k = 10
+skip_summary = false                 # true: the answer model reads the retrieved chunks, equations included
+# answer_max_sources = 10            # with skip_summary = true: read all [index] contexts, not the default 3
 max_concurrent_requests = 10
 temperature = 0.0
 
 [index]
 dir = "data/index"                   # one subfolder per corpus, embedder and chunk setting
 candidates = 50                      # chunks the first stage hands to the reranker
-contexts = 10                        # chunks PaperQA2 summarizes (the top of the reranked candidates)
+contexts = 10                        # chunks PaperQA2 reads (the top of the reranked candidates)
 bm25 = "english"                     # add keyword matching for English questions
 max_chunks_per_paper = 0             # 0: no cap; else at most this many contexts per paper, after reranking
 
