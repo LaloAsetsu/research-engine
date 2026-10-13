@@ -731,9 +731,9 @@ N = 12_000
 def seconds(fn, text) -> float:
     best = float("inf")
     for _ in range(2):
-        t0 = time.perf_counter()
+        t0 = time.process_time()
         fn(text)
-        best = min(best, time.perf_counter() - t0)
+        best = min(best, time.process_time() - t0)
     return best
 
 

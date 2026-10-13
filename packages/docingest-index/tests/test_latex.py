@@ -117,11 +117,27 @@ def test_a_long_question_with_no_latex_is_cheap():
     assert latex_text("$ " * 5_000) == ""
 
 
-def test_unclosed_delimiters_cost_time_in_proportion_to_the_question():
-    start = time.perf_counter()
-    for opener in (r"\(a", r"\[a", "$$a", "$a", "{a "):
-        latex_text(opener * 40_000 + " fin")
-    assert time.perf_counter() - start < 2.0  # quadratic scanning took seconds per opener
+def _best_seconds(question: str) -> float:
+    best = float("inf")
+    for _ in range(3):  # best of 3: the least disturbed run
+        start = time.process_time()  # CPU time: waiting for a busy CPU is not counted
+        latex_text(question)
+        best = min(best, time.process_time() - start)
+    return best
+
+
+# Each opener repeated must stay unclosed, or the question is just a row of closed pairs: "$a" and
+# "$$a" repeated close each other at once, and a "$" opener cannot reach past the next "$", so no
+# amount of them is quadratic. "{a " alone holds no character that starts LaTeX, so a command
+# before the brace is what makes the scanner look at it.
+@pytest.mark.parametrize("opener", [r"\(a", r"\[a", r"\frac{a "])
+def test_unclosed_delimiters_cost_time_in_proportion_to_the_question(opener):
+    # Quadrupling the question must cost far less than 16x (quadratic scanning). Only the ratio
+    # of two runs is checked, in CPU time of this process, so other load on the machine barely
+    # moves it; the floor keeps a timer-sized `small` from making the ratio noise.
+    small = _best_seconds(opener * 10_000 + " fin")
+    big = _best_seconds(opener * 40_000 + " fin")
+    assert big < max(8 * small, 0.05), (small, big)
 
 
 @pytest.mark.parametrize(

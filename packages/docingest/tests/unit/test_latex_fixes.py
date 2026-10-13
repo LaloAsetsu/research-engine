@@ -208,15 +208,15 @@ N_UNCLOSED = 16_000  # ~280 KB: the lazy-regex versions took 10+ s here, quadrat
 
 def _seconds(fn, arg) -> float:
     best = float("inf")
-    for _ in range(2):  # best of 2: robust to a busy machine
-        t0 = time.perf_counter()
+    for _ in range(2):  # best of 2, in CPU time: waiting for a busy CPU is not counted
+        t0 = time.process_time()
         fn(arg)
-        best = min(best, time.perf_counter() - t0)
+        best = min(best, time.process_time() - t0)
     return best
 
 
 def _linear(fn, make) -> None:
-    """Quadrupling the input must cost far less than 16x (quadratic); load-independent."""
+    """Quadrupling the input must cost far less than 16x (quadratic), in CPU time."""
     small, big = _seconds(fn, make(N_UNCLOSED // 4)), _seconds(fn, make(N_UNCLOSED))
     assert big < 10  # backstop: the old regexes took 10+ s at this size
     assert big < max(8 * small, 0.05), (small, big)

@@ -398,9 +398,9 @@ def test_unclosed_constructs_are_rewritten_in_linear_time(unit):
         text = unit * n
         best = float("inf")
         for _ in range(2):
-            t0 = time.perf_counter()
+            t0 = time.process_time()
             prepare_for_pandoc(text)
-            best = min(best, time.perf_counter() - t0)
+            best = min(best, time.process_time() - t0)
         return best
 
     small, big = seconds(N_UNCLOSED // 4), seconds(N_UNCLOSED)
