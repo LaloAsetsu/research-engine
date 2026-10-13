@@ -20,7 +20,8 @@ import json
 import re
 import tarfile
 import zlib
-from collections.abc import Callable, Iterator
+from bisect import bisect_left, bisect_right
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
@@ -678,14 +679,402 @@ def simplify_layout(text: str) -> str:
     return _VSKIP.sub(" ", text)
 
 
+# --------------------------------------------------------- quantum circuits
+# pandoc has no reader for the environments that draw a quantum circuit. With raw TeX off it
+# drops the commands inside them (``\gate{H}``, ``\ctrl{1}``, ``\qw``) and keeps the column
+# separators, so a circuit came out as ``& & &\`` or as nothing, and inside ``\resizebox``,
+# ``\scalebox`` or a TikZ node it vanished. A circuit is source code, and its gates and wires
+# are what a reader needs, so each one is handed to pandoc as a ``minted`` listing in LaTeX
+# (a fenced code block in the Markdown) holding its original text. A circuit in math is left
+# alone: pandoc copies math verbatim.
+CIRCUIT_MAX = 200_000  # chars; a longer "circuit" is an environment or group that never closed
+CIRCUIT_LANGUAGE = "latex"  # the language of the code block, so of the ``minted`` listing
+
+
+def _env_pattern(*names: str) -> re.Pattern[str]:
+    return re.compile(rf"\\(?P<kind>begin|end)\s*\{{(?P<env>{'|'.join(names)})\}}")
+
+
+_ANY_CIRCUIT = re.compile(r"quantikz|\\Qcircuit|yquant|tikzcd")  # the cheap test before the scans
+_DRAWN_ENVS = _env_pattern("quantikz", r"yquant\*?")
+_TIKZCD = _env_pattern("tikzcd")
+_LISTING_HEAD = re.compile(
+    rf"\\begin\s*\{{minted\}}\{{{CIRCUIT_LANGUAGE}\}}\n"
+)  # as protect_circuits writes it
+_LISTING_TAIL = re.compile(r"\n\\end\s*\{minted\}\Z")
+_BLANK_LINE = re.compile(r"\n[ \t]*\n")  # an argument TeX reads cannot hold one: a brace is missing
+_QCIRCUIT = re.compile(r"\\Qcircuit(?![a-zA-Z])[^{}$&\\]{0,200}\{")  # \Qcircuit @C=1em { ... }
+# What only a circuit has. A tikzcd with none of them is a commutative diagram, not touched.
+_CIRCUIT_COMMAND = re.compile(
+    r"\\(?:gate|ctrl|octrl|targ|qw|qwbundle|meter|measuretab|lstick|rstick|control|ocontrol"
+    r"|swap|targX|phase|slice|wireoverride|setwiretype|multigate|ghost|measureD|cw)"
+    r"(?![a-zA-Z@])"
+)
+_TIKZPICTURE = _env_pattern("tikzpicture")
+_ADJUSTBOX = _env_pattern("adjustbox")
+_TABULAR = _env_pattern(r"tabular\*?", "tabularx", "tabulary", "longtable", "tabu", "supertabular")
+_MATH_ENV = (
+    r"(?:equation|align|gather|multline|eqnarray|flalign|alignat|displaymath|math|dmath"
+    r"|IEEEeqnarray)\*?"
+)
+_MATH_TOKEN = re.compile(
+    r"(?P<blank>\n[ \t]*\n)"  # TeX forbids a blank line in math: whatever opened it is over
+    rf"|\\begin\s*\{{(?P<begin>{_MATH_ENV})\}}"
+    rf"|\\end\s*\{{(?P<end>{_MATH_ENV})\}}"
+    r"|(?P<open>\\\[|\\\()"
+    r"|(?P<close>\\\]|\\\))"
+    r"|\\."  # an escaped character: \$, \\, \%
+    r"|(?P<brace>[{}])"
+    r"|(?P<dollars>\$\$?)"
+)
+_MATH_CLOSER = {"\\[": "\\]", "\\(": "\\)"}
+# A block (the listing) in the argument of a command stops pandoc 3.9 (``\\centerline{...}``,
+# ``\\mbox{...}``), and some commands make it drop their argument whole (the text in a
+# ``\\resizebox``) or print their options. So the commands around a circuit are taken off it,
+# keeping their content, unless the content would lose its meaning there (a caption).
+_KEPT = frozenset(
+    {
+        *("caption", "captionof", "footnote", "footnotetext", "thanks", "title", "author", "date"),
+        *("part", "chapter", "section", "subsection", "subsubsection", "paragraph", "item"),
+    }
+)
+# What pandoc empties: a circuit in math, which it would copy, vanishes with these.
+_DROPPING = frozenset(
+    {
+        *("resizebox", "scalebox", "raisebox", "rotatebox", "adjustbox", "makebox", "framebox"),
+        *("fbox", "subfloat", "subfigure", "subcaptionbox"),
+    }
+)
+_CAPTIONED = frozenset({"subfloat", "subfigure", "subcaptionbox"})  # their caption stays
+_LINKED = "href"  # its URL stays too, after the block
+_HEAD_MAX = 400  # chars before a brace group in which the command it belongs to is looked for
+_DEPTH = 8  # groups around a circuit that are looked at
+_CONTROL_WORD = re.compile(r"\\([a-zA-Z]+)\*?\Z")
+
+
+@dataclass(frozen=True)
+class _Env:
+    start: int  # of ``\begin``
+    inner: int  # just past ``\begin{name}``
+    close: int  # of ``\end``
+    end: int  # just past ``\end{name}``
+
+
+def _environments(text: str, pattern: re.Pattern[str]) -> list[_Env]:
+    """Every ``\\begin{name} ... \\end{name}`` pair that ``pattern`` finds (groups ``kind``
+    and ``env``), nested ones too, by start. One pass: a ``\\begin`` without its ``\\end``
+    is not a pair and costs nothing."""
+    opened: dict[str, list[re.Match[str]]] = {}
+    found: list[tuple[re.Match[str], re.Match[str]]] = []
+    for m in pattern.finditer(text):
+        if m["kind"] == "begin":
+            opened.setdefault(m["env"], []).append(m)
+        elif opened.get(m["env"]):
+            found.append((opened[m["env"]].pop(), m))
+    found.sort(key=lambda pair: pair[0].start())
+    return [_Env(b.start(), b.end(), e.start(), e.end()) for b, e in found]
+
+
+class _Covered:
+    """Spans of a text, asked whether a position or a span lies in one of them. Spans that
+    overlap (nested ones) count as the outermost."""
+
+    def __init__(self, spans: Iterable[tuple[int, int]]):
+        self.starts: list[int] = []
+        self.ends: list[int] = []
+        for a, b in sorted(spans):
+            if self.ends and a < self.ends[-1]:
+                self.ends[-1] = max(self.ends[-1], b)
+            else:
+                self.starts.append(a)
+                self.ends.append(b)
+
+    def containing(self, a: int, b: int) -> tuple[int, int] | None:
+        """The span that holds ``[a, b)``, if one does."""
+        i = bisect_right(self.starts, a) - 1
+        return (self.starts[i], self.ends[i]) if i >= 0 and b <= self.ends[i] else None
+
+    def __contains__(self, pos: int) -> bool:
+        i = bisect_right(self.starts, pos) - 1
+        return i >= 0 and pos < self.ends[i]
+
+
+def _math_spans(text: str, start: int) -> Iterator[tuple[int, int]]:
+    """The spans of ``text[start:]`` that are math: ``$..$``, ``$$..$$``, ``\\[..\\]``,
+    ``\\(..\\)`` and the display environments. Verbatim text is not scanned. A blank line ends
+    what is open, as in TeX, so a stray ``$`` does not turn the rest of the paper into math. A
+    ``$`` inside braces within ``$..$`` is a box of its own (``\\lstick{$q_0$}`` in a circuit)."""
+    for a, b in _outside_verbatim(text, start):
+        mode: str | None = None  # what is open: "$", "$$", "\\[", "\\(" or an environment's name
+        opened = depth = 0
+        for m in _MATH_TOKEN.finditer(text, a, b):
+            if mode is None:
+                if m.lastgroup in ("dollars", "open"):
+                    mode, opened, depth = m[0], m.start(), 0
+                elif m.lastgroup == "begin":
+                    mode, opened, depth = m["begin"], m.start(), 0
+            elif m.lastgroup == "blank":
+                yield opened, m.start()
+                mode = None
+            elif m.lastgroup == "brace":
+                depth = max(depth + (1 if m[0] == "{" else -1), 0)
+            elif (depth == 0 or m.lastgroup != "dollars") and _closes(mode, m):
+                reopen = mode == "$" and m[0] == "$$"  # adjacent inline maths: $a$$b$
+                end = m.start() + 1 if reopen else m.end()
+                yield opened, end
+                mode, opened = ("$", end) if reopen else (None, opened)
+        if mode is not None:
+            yield opened, b
+
+
+def _closes(mode: str, m: re.Match[str]) -> bool:
+    if m.lastgroup == "dollars":
+        return mode == "$" or (mode == "$$" and m[0] == "$$")
+    if m.lastgroup == "close":
+        return m[0] == _MATH_CLOSER.get(mode)
+    return m.lastgroup == "end" and m["end"] == mode
+
+
+def _skipped(text: str) -> tuple[_Covered, _Covered]:
+    """Where a circuit is left as it is: the preamble, verbatim text, a macro definition and
+    an ``\\iffalse`` block (nothing of it is typeset), and, apart, math."""
+    begin = re.search(r"\\begin\s*\{document\}", text)
+    body = begin.end() if begin else 0
+    spans = [(0, body)] if body else []
+    spans += ((v.start, v.end) for v in verbatim_parts(text))
+    spans += ((d.start, d.end) for d in macro_definitions(text))
+    spans += ((b.start(), e.end()) for b, e in regions(text, IFFALSE, FI))
+    return _Covered(spans), _Covered(_math_spans(text, body))
+
+
+def _any_in(positions: list[int], start: int, end: int) -> bool:
+    """Whether the sorted ``positions`` have one in ``[start, end)``."""
+    i = bisect_left(positions, start)
+    return i < len(positions) and positions[i] < end
+
+
+def circuit_spans(text: str) -> list[tuple[int, int]]:
+    """``(start, end)`` of each quantum circuit in ``text`` that :func:`protect_circuits`
+    rewrites, in order and not overlapping: a ``quantikz`` or ``yquant`` environment, a
+    ``\\Qcircuit`` group, a ``tikzcd`` with circuit commands in it. Where a circuit sits inside a
+    ``tikzpicture`` the span is the whole picture: that is what holds it together, and what
+    pandoc drops. Nothing in math, verbatim text, a macro definition or the preamble
+    (:func:`_skipped`)."""
+    return _circuits(text)[0]
+
+
+def _circuits(text: str) -> tuple[list[tuple[int, int]], list[int], _Covered]:
+    """The spans of :func:`circuit_spans`, the starts of the circuits that sit in math (left
+    alone), and the math of ``text``."""
+    if not _ANY_CIRCUIT.search(text):
+        return [], [], _Covered([])
+    pairs = brace_pairs(text)
+    commands = [m.start() for m in _CIRCUIT_COMMAND.finditer(text)]
+    found = [(e.start, e.end) for e in _environments(text, _DRAWN_ENVS)]
+    found += (
+        (e.start, e.end) for e in _environments(text, _TIKZCD) if _any_in(commands, e.start, e.end)
+    )
+    found += (
+        (m.start(), end)
+        for m in _QCIRCUIT.finditer(text)
+        if (end := pairs.get(m.end() - 1)) and not _BLANK_LINE.search(text, m.start(), end)
+    )
+    skipped, math = _skipped(text)
+    pictures = _Covered(
+        (e.start, e.end)
+        for e in _environments(text, _TIKZPICTURE)
+        if e.end - e.start <= CIRCUIT_MAX
+    )
+    spans: list[tuple[int, int]] = []
+    in_math: list[int] = []
+    last = 0
+    for a, b in sorted(found):
+        if a < last or b - a > CIRCUIT_MAX or a in skipped:
+            continue
+        last = b
+        if a in math:
+            in_math.append(a)
+            continue
+        span = pictures.containing(a, b) or (a, b)
+        if spans and span[0] < spans[-1][1]:  # crossed environments, or a picture already taken
+            continue
+        spans.append(span)
+        last = span[1]
+    kept = _Covered(spans)
+    return spans, [a for a in in_math if a not in kept], math
+
+
+def _enclosing(pairs: dict[int, int], positions: list[int]) -> dict[int, list[int]]:
+    """For each of ``positions``, the opening braces of the groups around it, innermost first
+    (``_DEPTH`` of them), found in one sweep."""
+    opens = sorted(pairs)
+    found: dict[int, list[int]] = {}
+    stack: list[int] = []
+    i = 0
+    for pos in sorted(set(positions)):
+        while i < len(opens) and opens[i] < pos:
+            while stack and pairs[stack[-1]] <= opens[i]:  # closed before this one opens
+                stack.pop()
+            stack.append(opens[i])
+            i += 1
+        while stack and pairs[stack[-1]] <= pos:
+            stack.pop()
+        found[pos] = stack[: -_DEPTH - 1 : -1]
+    return found
+
+
+def _head(text: str, i: int) -> tuple[str, int, str, list[tuple[str, str]]]:
+    """What the brace group that opens at ``text[i]`` belongs to: ``("command", start, name,
+    arguments)`` when it follows a control word and the ``[options]`` and ``{arguments}`` that
+    come before it (``\\resizebox{a}{b}{``), ``("bare", ...)`` when it follows plain text, and
+    ``("unknown", ...)`` when those arguments hold groups too deep to read. Spaces are skipped
+    right after a control word only (``\\centerline {``): a group after a space that follows an
+    argument or text (``\\textbf{Note.} {``), a line break or ``\\begin{env}`` is a group of its
+    own."""
+    limit = max(0, i - _HEAD_MAX)
+    j = i
+    arguments: list[tuple[str, str]] = []
+    while True:
+        if j > limit and text[j - 1] in "}]":
+            opener = "{" if text[j - 1] == "}" else "["
+            o = text.rfind(opener, limit, j - 1)
+            inner = text[o + 1 : j - 1] if o >= 0 else "{"
+            if any(c in inner for c in "{}[]"):
+                return "unknown", 0, "", []
+            arguments.append((opener, inner))
+            j = o
+            continue
+        k = j
+        while k > limit and text[k - 1] in " \t":  # TeX skips the spaces after a control word
+            k -= 1
+        if (word := _CONTROL_WORD.search(text, limit, k)) is None:
+            return ("unknown" if arguments else "bare"), 0, "", []
+        if word[1] in ("begin", "end"):
+            return "bare", 0, "", []
+        return "command", word.start(), word[1], arguments[::-1]
+
+
+def _circuit_block(source: str) -> str:
+    return f"\n\\begin{{minted}}{{{CIRCUIT_LANGUAGE}}}\n{source}\n\\end{{minted}}\n"
+
+
+def protect_circuits(text: str) -> str:
+    """``text`` with each quantum circuit (see :func:`circuit_spans`) written as a ``minted``
+    listing in LaTeX, which pandoc turns into a fenced code block with the circuit's own
+    source, where the circuit was. A circuit in the cell of a table, which cannot hold a code
+    block, goes after the table. The commands around a circuit are taken off it (their name and
+    arguments go, their content stays): ``\\resizebox``, ``\\scalebox``, ``\\mbox``,
+    ``\\centerline`` and the like, which pandoc empties or stops at. A subfigure's caption stays
+    as a paragraph after its circuit. A circuit whose surroundings cannot be read (inside a
+    caption, or in an argument too deep to parse) is left as it is."""
+    spans, in_math, math = _circuits(text)
+    if not spans and not in_math:
+        return text
+    pairs = brace_pairs(text)
+    tables = _Covered((e.start, e.end) for e in _environments(text, _TABULAR))
+    anchors = [(t[1] - 1 if (t := tables.containing(a, b)) else a) for a, b in spans]
+    around = _enclosing(pairs, [*anchors, *in_math])
+    edits: list[tuple[int, int, str]] = []
+    behind: dict[int, list[str]] = {}  # table end -> the circuits that were in its cells
+    taken: dict[int, tuple[int, str, list[tuple[str, str]]]] = {}  # brace -> its command
+    kept: list[int] = []  # the starts of the circuits that are rewritten
+    for (a, b), anchor in zip(spans, anchors, strict=True):
+        heads = [(o, *_head(text, o)) for o in around[anchor]]
+        if any(kind == "unknown" or name in _KEPT for _, kind, _, name, _ in heads):
+            continue
+        taken.update(
+            {o: (start, name, args) for o, kind, start, name, args in heads if kind == "command"}
+        )
+        kept.append(a)
+        block = _circuit_block(text[a:b])
+        if table := tables.containing(a, b):  # in a cell pandoc would write "[TABLE]" for the table
+            edits.append((a, b, ""))
+            behind.setdefault(table[1], []).append(block)
+        else:
+            edits.append((a, b, block))
+    edits += ((end, end, "".join(blocks)) for end, blocks in behind.items())
+    for a in in_math:  # math that sits in a box pandoc empties: the box goes, the math stays
+        for o in around[a]:
+            kind, start, name, args = _head(text, o)
+            if kind == "command" and name in _DROPPING and o not in taken and start not in math:
+                taken[o] = (start, name, args)
+    for o, (start, name, args) in taken.items():
+        edits += [(start, o + 1, ""), (pairs[o] - 1, pairs[o], _caption(name, args))]
+    starts = sorted([*kept, *in_math])
+    for env in _environments(text, _ADJUSTBOX):
+        if _any_in(starts, env.inner, env.close):
+            edits += [
+                (env.start, _skip_arguments(text, env.inner, pairs), ""),
+                (env.close, env.end, ""),
+            ]
+    parts: list[str] = []
+    pos = 0
+    for a, b, replacement in sorted(edits):
+        parts += (text[pos:a], replacement)
+        pos = b
+    parts.append(text[pos:])
+    return "".join(parts)
+
+
+def _caption(name: str, arguments: list[tuple[str, str]]) -> str:
+    """What follows a command that is taken off and has a text of its own: a subfigure's
+    caption, or the URL of a link, as a paragraph."""
+    if name == _LINKED:
+        url = next((c for opener, c in arguments if opener == "{"), "").strip()
+        return f"\n\n\\url{{{url}}}\n\n" if url else ""
+    if name not in _CAPTIONED:
+        return ""
+    chosen = [c for opener, c in arguments if opener == ("{" if name == "subcaptionbox" else "[")]
+    caption = (chosen[0] if name == "subcaptionbox" else chosen[-1]).strip() if chosen else ""
+    return f"\n\n{caption}\n\n" if caption else ""
+
+
+def _skip_arguments(text: str, i: int, pairs: dict[int, int]) -> int:
+    """The index after the ``{options}`` of ``\\begin{adjustbox}`` that ends at ``i``."""
+    while i < len(text) and text[i] in " \t\n":
+        i += 1
+    return pairs.get(i, i) if i < len(text) and text[i] == "{" else i
+
+
+def _hide_listings(text: str) -> tuple[str, Callable[[str], str]]:
+    """``text`` with the body of each circuit listing (see :func:`protect_circuits`) replaced
+    by a word, and the function that puts the bodies back. The rewrites that follow
+    (``\\vskip``, ``\\today``, citation keys, ``\\label[type]``, ...) read the whole text and
+    must not change a circuit: its block is the author's source."""
+    if "minted" not in text:
+        return text, lambda out: out
+    word = "DOCINGESTLISTING"
+    while word in text:
+        word += "X"
+    bodies: list[str] = []
+    parts: list[str] = []
+    pos = 0
+    for v in verbatim_parts(text):
+        listing = text[v.start : v.end]
+        head = _LISTING_HEAD.match(listing) if v.env == "minted" else None
+        tail = _LISTING_TAIL.search(listing, head.end()) if head else None
+        if head is None or tail is None:
+            continue
+        parts += (text[pos : v.start + head.end()], f"{word}{len(bodies)}END")
+        bodies.append(listing[head.end() : tail.start()])
+        pos = v.start + tail.start()
+    parts.append(text[pos:])
+
+    def restore(out: str) -> str:
+        return re.sub(rf"{word}(\d+)END", lambda m: bodies[int(m[1])], out)
+
+    return "".join(parts), restore
+
+
 def prepare_for_pandoc(text: str) -> tuple[str, list[str]]:
     """Source rewrites that make pandoc's output complete and its run bounded."""
+    text, restore = _hide_listings(protect_circuits(text))
     text, dropped = drop_unsafe_macros(text)
     text = rewrite_bibliography(text)
     # NeurIPS/ICLR styles separate authors with \And / \AND: pandoc only knows \and.
     text = re.sub(rf"\\(?:And|AND){_NOT_LETTER}", r"\\and", text)
     text = re.sub(rf"\\today{_NOT_LETTER}", "", text)  # sandboxed pandoc prints 1970-01-01
-    text = simplify_layout(sanitize_citation_keys(shim_at_macros(text)))
+    text = restore(simplify_layout(sanitize_citation_keys(shim_at_macros(text))))
     warnings = []
     if dropped:
         names = ", ".join(sorted({f"\\{n}" for n in dropped}))

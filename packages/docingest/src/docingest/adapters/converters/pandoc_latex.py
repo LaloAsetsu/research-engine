@@ -25,7 +25,7 @@ import subprocess
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache, cached_property
 from importlib.metadata import PackageNotFoundError, version
@@ -37,6 +37,7 @@ from ...domain.errors import ConversionError
 from ...domain.models import PageMethod, SourceMetadata
 from ...ports import Conversion, Segment
 from .latex_source import (
+    CIRCUIT_LANGUAGE,
     FI,
     IFFALSE,
     approx_text_length,
@@ -57,7 +58,7 @@ from .latex_source import (
     verbatim_parts,
 )
 
-REVISION = 4  # bump when this adapter's output changes for the same pandoc / pylatexenc
+REVISION = 5  # bump when this adapter's output changes for the same pandoc / pylatexenc
 # Markdown that keeps $math$, $$display$$, pipe tables and [@citations], without raw
 # HTML/TeX or attribute syntax (gfm would drop the citations).
 _DISABLED = (
@@ -491,13 +492,15 @@ class PandocLatexConverter:
         crude: list[str] = []
 
         def text(fragment: str) -> str:
+            fragment, restore = _take_code_blocks(fragment)
             fragment = _plain_friendly(fragment)
             try:
                 out = l2t.latex_to_text(fragment)
             except Exception:  # pylatexenc has spec bugs (e.g. \href in a footnote)
                 crude.append(fragment)
                 out = _crude_text(fragment)
-            return re.sub(r"\n{3,}", "\n\n", "\n".join(ln.rstrip() for ln in out.splitlines()))
+            out = re.sub(r"\n{3,}", "\n\n", "\n".join(ln.rstrip() for ln in out.splitlines()))
+            return restore(out)
 
         title = _without_thanks(_braced_arg(latex, "title"))
         authors = _without_thanks(_braced_arg(latex, "author"))
@@ -726,6 +729,30 @@ def split_markdown(md: str, max_level: int) -> list[tuple[int, str | None, str, 
     return [(lvl, title, head, "\n".join(lines)) for lvl, title, head, lines in parts]
 
 
+def collapse_blank_lines(md: str) -> str:
+    """``md`` with each run of blank lines cut to one, except inside a fenced code block,
+    whose lines are the source it shows."""
+    out: list[str] = []
+    fence: re.Pattern[str] | None = None
+    blank = False
+    for line in md.split("\n"):
+        if fence is not None:
+            if fence.match(line):
+                fence = None
+        elif f := _FENCE.match(line):
+            char, n = f.group(1)[0], len(f.group(1))
+            fence = re.compile(rf"^[ \t]{{0,3}}{re.escape(char)}{{{n},}}[ \t]*$")
+        elif not line:
+            if blank:
+                continue
+            blank = True
+            out.append(line)
+            continue
+        blank = False
+        out.append(line)
+    return "\n".join(out)
+
+
 def assemble(
     parts: Sequence[tuple[int, str | None, str, str]], abstract: str | None = None
 ) -> list[Segment]:
@@ -744,7 +771,7 @@ def assemble(
             path = {k: v for k, v in path.items() if k < level}
             path[level] = title
             full = " > ".join(path[k] for k in sorted(path) if path[k])
-        body = re.sub(r"\n{3,}", "\n\n", content.strip())
+        body = collapse_blank_lines(content.strip())
         if heading and not body:
             carry.append(heading)
             carry_title = full
@@ -880,6 +907,46 @@ def _text_context() -> Any:
         environments=[EnvironmentTextSpec("verbatim", simplify_repl=_verbatim_text)],
     )
     return db
+
+
+_MINTED_LANGUAGE = re.compile(r"\A[ \t]*(?:\[[^\]\n]*\])?[ \t]*\{([^{}\n]*)\}")
+
+
+def _take_code_blocks(latex: str) -> tuple[str, Callable[[str], str]]:
+    """``latex`` with each ``minted`` listing in the language of the circuits (see
+    ``protect_circuits``) replaced by a word on a line of its own, and the function that puts the
+    listings back, as the fenced code blocks pandoc writes for them, into the text made from it.
+
+    pylatexenc would otherwise read a circuit as markup, or drop it: what it printed of
+    ``\\gate{H} & \\ctrl{1}`` depended on its macro tables. The words are letters and digits, so
+    neither pylatexenc nor the crude fallback changes them."""
+    if "minted" not in latex:
+        return latex, lambda out: out
+    word = "DOCINGESTCODE"
+    while word in latex:
+        word += "X"
+    blocks: list[str] = []
+    parts: list[str] = []
+    pos = 0
+    for v in verbatim_parts(latex):
+        found = _MINTED_LANGUAGE.match(v.body) if v.env == "minted" else None
+        if found is None or found[1].strip() != CIRCUIT_LANGUAGE:
+            continue
+        code = v.body[found.end() :].removeprefix("\n").removesuffix("\n").expandtabs(4)
+        fence = "`" * max(3, len(max(re.findall(r"`+", code), key=len, default="")) + 1)
+        parts += (latex[pos : v.start], f"\n\n{word}{len(blocks)}END\n\n")
+        blocks.append(f"{fence} {CIRCUIT_LANGUAGE}\n{code}\n{fence}")
+        pos = v.end
+    if not blocks:
+        return latex, lambda out: out
+    parts.append(latex[pos:])
+
+    def restore(out: str) -> str:
+        pieces = re.split(rf"{word}(\d+)END", out)
+        shown = [blocks[int(p)] if i % 2 else p.strip() for i, p in enumerate(pieces)]
+        return "\n\n".join(p for p in shown if p.strip())
+
+    return "".join(parts), restore
 
 
 def _plain_verbatim(latex: str) -> str:
