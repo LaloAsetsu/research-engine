@@ -102,6 +102,7 @@ flowchart LR
 | `test_ingest_service.py` | `IngestService` with fakes for every port: per-page routing, the cache and its invalidation, partial and forced-OCR variants, images, converters, metadata sidecars, degraded conversions, domain errors |
 | `test_latex_fixes.py` | Regressions of the LaTeX adapter (`latex_source`, `pandoc_latex`) |
 | `test_latex_sections.py` | Section-by-section conversion and the reference-loss guard, with pandoc replaced by a rule (counts the runs, the budget, the documents handed to pandoc), and the string helpers behind them |
+| `test_latex_circuits.py` | Quantum circuits as LaTeX code blocks (`protect_circuits`): each encoding, boxes, TikZ pictures, table cells, what is left alone (math, preamble, listings), circuits that never close, linear time, and the plain-text path's block |
 | `test_latex_pandoc_rewrites.py` | The source rewrites that keep pandoc 3.9 from failing: `@`-macro shim, REVTeX reference entries, citation keys, small layout forms |
 | `test_latex_source.py` | Pure LaTeX-source helpers and the pandoc adapter's Markdown helpers |
 | `test_metrics.py` | `application.metrics`: normalisation (Markdown, hyphenation), capping of runaway output, `char3_f1`, `bootstrap_ci` |
@@ -139,6 +140,7 @@ flowchart LR
 | `test_index_on_ingest.py` | `ingest --index` and `crawl --index`: off by default, only the papers of the run, checked before any work, a failing update keeps the papers |
 | `test_magic_detector.py` | `MagicBytesDetector` on real files |
 | `test_openai_ocr.py` | `OpenAICompatibleOcr` against a scripted local OpenAI-compatible server: request shape, retries, the retry ladder (stricter retries, more room for a dense page, a server that refuses it), authentication |
+| `test_pandoc_latex_circuits.py` | Circuits through the real pandoc and pylatexenc: each encoding with its caption, boxes, subfigures, a table cell, math not doubled, and the same block from the whole-paper, section-fallback and plain-text paths |
 | `test_pandoc_latex_sections.py` | A paper with one broken section (that section is plain text, the others pandoc), page records, malformed and slow input, a reference list pandoc drops (real pandoc and pylatexenc) |
 | `test_pandoc_latex.py` | `PandocLatexConverter` with the real pandoc (pypandoc-binary) and pylatexenc on `tests/fixtures/latex`; optional real arXiv sources (`slow`) |
 | `test_paperqa_adapter.py` | PaperQA2 token windows (needs the embedder in the local Hugging Face cache); answering from given `contexts` (only those chunks, an empty list refused, the temperature on every request; with `[qa] skip_summary` the raw chunk text with its `$$` blocks reaches the answer prompt, no summary request is sent, keys and page ranges are cited, the retrieval order decides the `answer_max_sources` cut; without it every chunk is summarized) and from the corpus (where `skip_summary` only warns), with litellm's mock reply and PaperQA2's keyword embedder, so no server or download. Skipped when `paperqa` is not installed |
