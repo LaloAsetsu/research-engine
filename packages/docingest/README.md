@@ -757,7 +757,7 @@ Install the `qa` extra (`uv sync --locked --all-extras`, or `--extra qa`).
 ```mermaid
 flowchart LR
     Q["question"] --> E["Embedder: embed the question once"]
-    E --> S["ChunkIndex.search: dense, plus BM25 for English, top candidates (50)"]
+    E --> S["ChunkIndex.search: dense, plus BM25 for English or LaTeX questions, top candidates (50)"]
     S --> R["Reranker: score the 50, stable sort"]
     R --> C["optional per-paper cap, first contexts (10)"]
     C --> P["PaperQA2: evidence summaries (unless skip_summary) and cited answer, its own retrieval off"]

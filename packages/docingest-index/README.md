@@ -75,11 +75,13 @@ scores = c.adapter("reranker").rerank(question, [h.chunk for h in hits])
 flowchart LR
     Q["question"] --> E["Embedder.embed_query: Instruct prefix if configured, L2-normalized"]
     E --> D["dense: exact cosine over all float16 vectors, top 100"]
-    Q --> L{"looks English and bm25 allows it?"}
-    L -->|yes| B["BM25 (tantivy en_stem) over the words of the question, top 100"]
+    Q --> L{"bm25 allows it, and the question looks English or holds LaTeX?"}
+    L -->|English| B["BM25 (tantivy en_stem) over the words of the question, top 100"]
+    L -->|LaTeX, not English| X["BM25 over the words of the LaTeX only, top 100"]
     D --> F["reciprocal rank fusion, k = 60, top 100"]
     B --> F
-    L -->|no| F
+    X --> F
+    L -->|neither| F
     F --> C["first 50 = candidates"]
     C --> R["Reranker.rerank: one /rerank request, instruction sent with it"]
     R --> T["stable sort by score"]
@@ -90,6 +92,9 @@ flowchart LR
 
 - Dense: vectors are unit length, so the score is a dot product; computed in float32 over float16 storage, in blocks of 16,384 rows. The float16 matrix is converted to float32 once, at the reader's first dense search, and the copy stays in memory until `close()` or a new object; the products, and so the scores, are the same as converting block by block for every question. Ranking by `argpartition` and a stable sort. The chunk records of the hits are cut from the memory-mapped `chunks.jsonl` in file order instead of one seek and read per record.
 - BM25: the question reduced to lowercased ASCII letters and digits, parsed by tantivy as an OR query over a field tokenized with `en_stem`. A question with none of those characters has no keyword part.
+- LaTeX: under `bm25 = "english"`, a question that is not English but holds LaTeX also gets BM25, over the words of its LaTeX only (`latex.py`), because the dense embedder places a quoted formula poorly (in a probe with English questions that quote a formula, the dense ranking left two of them out of its top 100, where BM25 over the whole question ranked them 3rd and 1st) and the prose words of a Spanish question rarely occur in an English corpus. An English question is unchanged: BM25 over all its words. `bm25 = "never"` (and `--bm25 never`) stays off for every question, `"always"` searches every word.
+- What counts as LaTeX: math between `$...$` (the opening `$` is followed by a non-space, the closing one is preceded by a non-space and not followed by a digit, and the inside is not prose or money, that is a word of three letters, or only numbers and words of one or two letters with two numbers or more, so "costs $5 and $10", "entre $5 y 10$", "$1.000 y 2.000$" and "$5 and 10$" are not math but "$n - 1$" and "$2 x$" are), `$$...$$`, `\(...\)` or `\[...\]`; outside delimiters, a word with a backslash command of two or more letters (`\frac`, `\sum`, `\ket`; a Windows path such as `C:\Users\me` is not one) or a subscript or superscript in braces (`x_{i}`, `10^{-3}`). Plain `snake_case`, `2^10`, `\n` and a bare `T_1`, `x_i` or `x^2` are not LaTeX: a bare mark is as likely a name or a variable as math, and a keyword ranking built from it has little to do with the dense one. Math between delimiters is read up to 1,000 characters. Even then the LaTeX of a question is searched only when it holds a token of two letters or more (`frac`, `omega`, `mc`) or at least three tokens, counting the whole question, so `$x$`, `$T_1$`, `$f(x)$`, `$k = 2$` and a lone `x_{i}` or `10^{-3}` do not start a keyword search. The detection is a few regular expressions and does not run on a question that has none of `\`, `$`, `^` or `_`.
+- How LaTeX meets the index: no change to the index. The chunks keep their LaTeX as written, and `en_stem` splits at every character that is not a letter or a digit, so `\frac{n!}{(n/2)!}` is indexed as `frac`, `n`, `n` and `2`; the query goes through the same reduction, so a command, a brace or a subscript matches by its letters and digits. The characters of the notation themselves (`\`, `{`, `^`, `_`) are not searchable, so `x_i` and `x^i` are the same query, and the command `\ket` is the same token as the word "ket". Unicode symbols in a question (for example `α`) are dropped by the ASCII reduction, as they always were.
 - Fusion: an item scores the sum of `1 / (60 + rank)` over the rankings that contain it (rank from 1); ties keep the order of first appearance, dense first.
 - Whether a question is English is decided from its function words (`language.py`); `bm25 = "always"` skips the test.
 
@@ -134,6 +139,7 @@ flowchart LR
 | `local.py` | `LocalIndex`: shards, `commit`, `search`, the on-disk format |
 | `fusion.py` | `rrf` |
 | `language.py` | `looks_english` |
+| `latex.py` | `latex_text`, `has_latex`: the LaTeX of a question, for BM25 on non-English formula questions |
 | `factories.py` | The three `(AppConfig) -> adapter` functions that the entry points name |
 
 The import-linter contract in `pyproject.toml` lets this package import only `docingest.ports`, `docingest.domain` and `docingest.config`.
@@ -150,9 +156,9 @@ No test needs a GPU or the network: the clients run over `httpx.MockTransport` (
 |---|---|
 | `test_contract.py` | docingest's retrieval contract (`tests/contract/test_retrieval_contract.py` of the docingest package, imported through `tests/conftest.py`) against the real embedder, index and reranker |
 | `test_embedder.py`, `test_reranker.py` | request bodies equal to the ones of the measured scripts, batching and order, normalization, retries, errors, keys |
-| `test_local_index.py` | layout, round trip, incremental add, change and remove, commit visibility, recovery after a crash, the write counter, a reader that stays open across another process's commit (one generation), `close()`, folder separation by fingerprint, RRF on a hand-checked example, English-only BM25 and the `keywords` override, the index leaving the per-paper cap to `ask`, blocks and depths, scores and records bit-identical to converting per question, the float32 copy made once per reader |
+| `test_local_index.py` | layout, round trip, incremental add, change and remove, commit visibility, recovery after a crash, the write counter, a reader that stays open across another process's commit (one generation), `close()`, folder separation by fingerprint, RRF on a hand-checked example, English-only BM25, BM25 on the LaTeX of a non-English question (a fixture where the formula chunks are found only through the keyword ranking, the prose words left out, the `never` setting and override still off) and the `keywords` override, the index leaving the per-paper cap to `ask`, blocks and depths, scores and records bit-identical to converting per question, the float32 copy made once per reader |
 | `test_retrieval_oracle.py` | the fused top 50 equals a literal copy of the measured retrieval script |
-| `test_fusion.py`, `test_language.py`, `test_settings.py`, `test_factories.py` | the helpers, the config tables and the entry points |
+| `test_fusion.py`, `test_language.py`, `test_latex.py`, `test_settings.py`, `test_factories.py` | the helpers, the config tables and the entry points |
 | `test_concurrent_build.py` | a second `IndexService.build` or `update` while the first is embedding fails with the busy error and sends no embedding request; the lock is free again afterwards |
 | `test_cli_end_to_end.py` | `docingest index build`, `status` and `remove` through the real CLI, store, entry points, client and index; `ask` through the real embedder, index and reranker (scripted servers) with a fake answerer; a build that fails between two papers does not lock a retry |
 | `test_example_config.py` | `config/examples/lab-server.toml` loads, names real adapters and talks to 127.0.0.1 only; no shipped config holds an absolute path of a machine |
@@ -163,5 +169,5 @@ CI runs the same gates on Linux (core and dev dependencies) and macOS (everythin
 
 - Exact search keeps the dense matrix as a float16 file and, in an open reader, as a float32 copy in memory, twice the size of the file (4 bytes per dimension per chunk, plus the pages of the mapped file the operating system keeps in its cache). It is fine to roughly 10,000 papers (about 100,000 chunks of 2,560 dimensions: 0.5 GB on disk, 1 GB for the copy). Beyond that, approximate search is a separate decision.
 - One process writes to an index folder at a time (enforced by the lock); readers can run alongside because `search` reads only the committed `search/` folder. The lock is an `flock` on a local file: use a local disk, not a network share.
-- The English test is a function-word count, not a language identifier.
+- The English test is a function-word count, not a language identifier. The LaTeX test is a pattern match: a formula typed without delimiters or commands (`E = mc^2`) is not seen, and a bare `T_1` or `x^2` is not counted. The two rankings weigh the same in the fusion whatever the quality of the keyword query, so in a question with LaTeX about half of the 50 candidates come from the keyword ranking; the words of a short or generic formula (`e n omega frac`) make a weak query, much weaker than the whole question, which is why a formula with fewer than three tokens and no word is left out.
 - BM25 ties are broken by tantivy's document order; the index is written with one thread so that order is the same in every build.

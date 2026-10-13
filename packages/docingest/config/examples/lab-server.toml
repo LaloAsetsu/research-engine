@@ -43,7 +43,7 @@ temperature = 0.0
 dir = "data/index"                   # one subfolder per corpus, embedder and chunk setting
 candidates = 50                      # chunks the first stage hands to the reranker
 contexts = 10                        # chunks PaperQA2 reads (the top of the reranked candidates)
-bm25 = "english"                     # add keyword matching for English questions
+bm25 = "english"                     # add keyword matching for English and LaTeX questions
 max_chunks_per_paper = 0             # 0: no cap; else at most this many contexts per paper, after reranking
 
 [embedder]
