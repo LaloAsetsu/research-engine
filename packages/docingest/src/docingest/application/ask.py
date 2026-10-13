@@ -4,8 +4,8 @@ Without an index the question goes to the ``QuestionAnswerer`` with the whole co
 retrieves its own evidence. With a ``Retrieval`` configured the evidence is retrieved here in
 two stages and handed over as ``contexts``:
 
-1. embed the question once, search the chunk index (dense, plus BM25 for English questions, as
-   the index adapter is set up) for the top ``candidates``;
+1. embed the question once, search the chunk index (dense, plus BM25 for English questions and for
+   questions with LaTeX, as the index adapter is set up) for the top ``candidates``;
 2. rerank those with the cross-encoder, a stable sort by score, and keep the first ``contexts``.
    With no reranker the first ``contexts`` of the first stage are kept as they are. If
    ``max_chunks_per_paper`` is set, the cap is applied here, to the reranked order and before the

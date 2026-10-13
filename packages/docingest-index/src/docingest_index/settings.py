@@ -32,8 +32,8 @@ class IndexSettings(IndexConfig):
     model_config = ConfigDict(extra="forbid")
 
     dir: str = "data/index"  # relative to the working directory, like output_dir
-    # Fuse BM25 with the dense ranking (RRF) for questions that look English ("english"),
-    # for every question ("always") or never.
+    # Fuse BM25 with the dense ranking (RRF) for questions that look English or hold LaTeX
+    # ("english"), for every question ("always") or never.
     bm25: KeywordMode = "english"
 
 

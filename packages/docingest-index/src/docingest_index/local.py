@@ -44,7 +44,8 @@ pays it once and a long-lived reader pays it once per commit it opens. It is mad
 first dense search, not when the index is opened.
 
 ``search`` is the measured first stage: exact cosine top 100, BM25 top 100 for questions that
-look English (``[index] bm25``), both fused by reciprocal rank fusion (k = 60).
+look English or hold LaTeX (``[index] bm25``), both fused by reciprocal rank fusion (k = 60).
+For a question that is not English, BM25 searches only the words of its LaTeX.
 """
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ from docingest.ports import Chunk, CommittedState, Hit, IndexStats, KeywordMode,
 from .embedder import embedder_fingerprint, query_task
 from .fusion import rrf
 from .language import looks_english
+from .latex import latex_text
 from .settings import EmbedderSettings, IndexSettings
 
 FORMAT_VERSION = 1
@@ -281,8 +283,9 @@ class LocalIndex:
         query = state.query(vector)
         depth = max(LIST_DEPTH, k)
         dense, cosine = state.dense_top(query, depth)
-        if self._wants_bm25(question, keywords or self.settings.bm25):
-            ranked = rrf(dense, state.bm25_top(question, depth), n=depth)
+        keyword_text = self._keyword_text(question, keywords or self.settings.bm25)
+        if keyword_text is not None:
+            ranked = rrf(dense, state.bm25_top(keyword_text, depth), n=depth)
         else:
             ranked = [(row, float(cosine[row])) for row in dense]
         taken = ranked[:k]
@@ -482,8 +485,15 @@ class LocalIndex:
 
     # ------------------------------------------------------------------ reading
 
-    def _wants_bm25(self, question: str, mode: str) -> bool:
-        return mode == "always" or (mode == "english" and looks_english(question))
+    def _keyword_text(self, question: str, mode: str) -> str | None:
+        """What BM25 searches for, or ``None`` for no keyword part: the question for "always"
+        and for an English one, and for any other question under "english" only its LaTeX, if
+        it has some (the dense embedder misses formulas in any language)."""
+        if mode == "always" or (mode == "english" and looks_english(question)):
+            return question
+        if mode == "english":
+            return latex_text(question) or None
+        return None
 
     def _shards(self) -> dict[str, _Shard]:
         if self._loaded is None:
@@ -645,9 +655,9 @@ class _Search:
         top = np.argpartition(-scores, depth)[:depth] if self.rows > depth else np.arange(self.rows)
         return [int(r) for r in top[np.argsort(-scores[top], kind="stable")]], scores
 
-    def bm25_top(self, question: str, depth: int) -> list[int]:
-        """Rows by BM25 over the words of the question (letters and digits, lowercased)."""
-        words = " ".join(_WORDS.findall(question)).lower()
+    def bm25_top(self, text: str, depth: int) -> list[int]:
+        """Rows by BM25 over the words of ``text`` (letters and digits, lowercased)."""
+        words = " ".join(_WORDS.findall(text)).lower()
         if not words:
             return []
         assert self._bm25 is not None

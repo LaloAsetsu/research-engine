@@ -10,7 +10,7 @@ from ..domain.chunking import Chunk
 from .embedding import Vector
 
 # Whether ``search`` also matches the words of the question: for questions that look English
-# ("english"), for every question ("always") or never.
+# or hold LaTeX ("english"), for every question ("always") or never.
 KeywordMode = Literal["english", "always", "never"]
 
 

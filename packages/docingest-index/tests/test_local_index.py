@@ -11,11 +11,12 @@ import pytest
 from docingest.domain.chunking import CHUNKER_VERSION, Chunk
 
 from docingest_index import local
+from docingest_index.language import looks_english
 from docingest_index.local import FORMAT_VERSION, IndexBusyError, LocalIndex
 from docingest_index.settings import EmbedderSettings, IndexSettings
 
 DOC_A, DOC_B, DOC_C = "a" * 64, "b" * 64, "c" * 64
-DOC_D, DOC_E = "d" * 64, "e" * 64
+DOC_D, DOC_E, DOC_F = "d" * 64, "e" * 64, "f" * 64
 DIMS = 4
 
 
@@ -568,6 +569,117 @@ def test_the_keywords_argument_overrides_the_setting_for_one_call(tmp_path):
     never = make(tmp_path / "never", settings={"bm25": "never"})
     zebra_corpus(never)
     assert ranking(never.search(english, vector, 3, keywords="always")) == [DOC_B, DOC_A, DOC_C]
+
+
+FORMULAS = {  # no two of them share a token, so each question matches one chunk
+    DOC_B: r"Catalan counts $$d(n)=\frac{n!}{(n/2)!(n/2+1)!}$$ paths",
+    DOC_C: r"Operator $\ket{\psi}\bra{\phi}$ projects",
+    DOC_D: r"Energy $$\sum_{j=3}^{m} y_{j}^{4}$$ total",
+    DOC_E: r"Oscillator $\hat{H}=\hbar\omega a^{\dagger}a$ levels",
+}
+
+
+def formula_corpus(index):
+    """Four chunks with a formula each, all dense-orthogonal to the question vector (1, 0, 0, 0)
+    and so behind a decoy that has nothing to do with them: only BM25 can bring them up."""
+    index.upsert(DOC_A, "k", [chunk(DOC_A, "alpha beta gamma delta")], [unit(1, 0, 0, 0)])
+    for i, (doc, text) in enumerate(FORMULAS.items()):
+        vector = [0.0, 0.0, 0.0, 0.0]
+        vector[1 + i % 3] = 1.0
+        index.upsert(doc, "k", [chunk(doc, text)], [vector])
+    index.commit()
+
+
+@pytest.mark.parametrize(
+    ("doc", "question"),
+    [
+        (DOC_B, r"¿De dónde sale $\frac{n!}{(n/2)!(n/2+1)!}$ en el artículo?"),
+        (DOC_B, r"¿Qué cuenta \frac{n!}{(n/2)!(n/2+1)!} aquí?"),  # no delimiters
+        (DOC_C, r"¿Qué operador es $\ket{\psi}\bra{\phi}$?"),
+        (DOC_C, r"Qué significa |\psi\rangle \bra{\phi} en el texto"),
+        (DOC_D, r"Calcula \sum_{j=3}^{m} y_{j}^{4} para cada muestra"),
+        (DOC_D, r"Por qué $$\sum_{j=3}^{m} y_j^4$$ ?"),
+        (DOC_E, r"Niveles de $\hat{H}=\hbar\omega a^{\dagger}a$ según el artículo"),
+        (DOC_E, r"Qué es \hbar \omega a^{\dagger} en la ecuación"),
+        (DOC_B, r"Que vale d(n)=\frac{n!}{(n/2)!(n/2+1)!} en el texto"),
+    ],
+)
+def test_a_formula_in_a_non_english_question_is_found_by_the_keyword_ranking_only(
+    tmp_path, doc, question
+):
+    index = make(tmp_path / "idx")  # bm25 = "english"
+    formula_corpus(index)
+    vector = unit(1, 0, 0, 0)
+    assert not looks_english(question)
+    dense = [h.chunk.doc_id for h in index.search(question, vector, 1, keywords="never")]
+    assert dense == [DOC_A]  # the dense ranking puts the decoy first
+    assert ranking(index.search(question, vector, 1)) == [doc]
+
+
+def test_only_the_latex_of_a_non_english_question_is_searched(tmp_path):
+    index = make(tmp_path / "idx")
+    index.upsert(DOC_A, "k", [chunk(DOC_A, "alpha beta gamma")], [unit(1, 0, 0, 0)])
+    index.upsert(DOC_B, "k", [chunk(DOC_B, "cebra zebra rayas")], [unit(0, 1, 0, 0)])
+    index.upsert(
+        DOC_C, "k", [chunk(DOC_C, r"the value $\ket{0}$ is a basis state")], [unit(0, 0, 1, 0)]
+    )
+    index.commit()
+    vector = unit(1, 0, 0, 0)
+    prose = "dónde vive la cebra zebra"
+    assert ranking(index.search(prose, vector, 3)) == [DOC_A, DOC_B, DOC_C]  # dense only
+    question = prose + r" y qué es $\ket{0}$"
+    # BM25 sees "ket 0": the words "cebra" and "zebra" of chunk B are not part of its query
+    hits = index.search(question, vector, 3)
+    assert ranking(hits) == [DOC_C, DOC_A, DOC_B]
+    assert [h.score for h in hits] == pytest.approx([1 / 61 + 1 / 63, 1 / 61, 1 / 62], abs=1e-9)
+    # "always" searches every word: chunk B holds two of them ("cebra zebra"), chunk C two ("ket 0")
+    assert ranking(index.search(question, vector, 3, keywords="always")) == [DOC_B, DOC_C, DOC_A]
+
+
+def test_non_english_questions_without_latex_keep_no_keyword_ranking(tmp_path):
+    index = make(tmp_path / "idx")
+    formula_corpus(index)
+    vector = unit(1, 0, 0, 0)
+    never = make(tmp_path / "never", settings={"bm25": "never"})
+    formula_corpus(never)
+    for question in (
+        "¿Qué energía tiene el estado cuántico del artículo?",
+        "El precio es $5 y luego $10 según el artículo",
+        r"Abre C:\Users\me\notes sobre la energía",
+        "Cuánto es $+$ aquí",  # LaTeX with no word to search: no keyword part, cosine scores
+    ):
+        assert not looks_english(question)
+        assert index.search(question, vector, 5) == never.search(question, vector, 5)
+
+
+def test_an_english_question_with_latex_searches_all_its_words(tmp_path):
+    index = make(tmp_path / "idx")
+    formula_corpus(index)
+    index.upsert(DOC_F, "k", [chunk(DOC_F, "a catalan story")], [unit(0, 0, 0, 1)])
+    index.commit()
+    vector = unit(1, 0, 0, 0)
+    question = r"What is $\ket{\psi}$ in the catalan story?"
+    assert looks_english(question)
+    # the last chunk in the dense ranking is in the first three only through its prose words
+    assert set(ranking(index.search(question, vector, 3))) == {DOC_B, DOC_C, DOC_F}
+    assert set(ranking(index.search(question, vector, 3, keywords="never"))) == {
+        DOC_A,
+        DOC_B,
+        DOC_C,
+    }
+
+
+def test_the_never_setting_and_the_never_override_also_switch_latex_off(tmp_path):
+    question = r"¿Qué operador es $\ket{\psi}\bra{\phi}$?"
+    vector = unit(1, 0, 0, 0)
+    never = make(tmp_path / "never", settings={"bm25": "never"})
+    formula_corpus(never)
+    assert ranking(never.search(question, vector, 1)) == [DOC_A]
+    auto = make(tmp_path / "auto")
+    formula_corpus(auto)
+    assert ranking(auto.search(question, vector, 1, keywords="never")) == [DOC_A]
+    assert ranking(auto.search(question, vector, 1, keywords="english")) == [DOC_C]
+    assert ranking(auto.search(question, vector, 1, keywords="always")) == [DOC_C]
 
 
 def test_the_keyword_ranking_stems_words_and_ignores_punctuation_and_case(tmp_path):

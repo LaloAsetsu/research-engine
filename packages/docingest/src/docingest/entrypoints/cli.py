@@ -284,8 +284,8 @@ def ask(
     bm25: Annotated[
         KeywordChoice | None,
         typer.Option(
-            help="When the index adds keyword (BM25) matching: for English questions, always "
-            "or never. Overrides [index] bm25 for this question."
+            help="When the index adds keyword (BM25) matching: for English questions and "
+            "questions with LaTeX, always or never. Overrides [index] bm25 for this question."
         ),
     ] = None,
 ) -> None:
