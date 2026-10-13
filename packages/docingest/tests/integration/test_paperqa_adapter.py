@@ -358,3 +358,95 @@ def test_skip_summary_off_is_silent_without_contexts(mock_llm, qa_cfg):
     warnings: list[str] = []
     asyncio.run(PaperQAAnswerer(qa_cfg).ask("What is attention?", [(a, markdown)], warnings.append))
     assert warnings == []
+
+
+# ------------------------------------------------------ the copy rule of the verbatim answer prompt
+
+RULE = (
+    "Take every circuit, gate, qubit index and equation only from the context above, "
+    "and copy it exactly, keeping its LaTeX. "
+    "Keep each one with the paper it comes from: do not move a gate or a term from one "
+    "paper's circuit or equation into another's. "
+    "If the context does not show a gate or a term, say so instead of guessing."
+)
+CIRCUIT = "\\begin{quantikz} \\lstick{$q_0$} & \\gate{H} & \\ctrl{1} & \\qw \\\\ & & \\gate{Z} & \\qw \\end{quantikz}"
+
+
+def test_the_copy_rule_text_is_pinned():
+    assert paperqa.COPY_RULE == RULE
+    assert "{" not in RULE and "}" not in RULE  # PaperQA2 fills the prompt with str.format
+
+
+def test_skip_summary_adds_the_copy_rule_to_the_answer_prompt(mock_llm, llm_calls):
+    ask_chunks(skip_cfg(True), "ab", [CIRCUIT, EQUATION])
+    [prompt] = prompts(llm_calls)
+    assert prompt.count(RULE) == 1
+    assert CIRCUIT in prompt and EQUATION in prompt  # the rule is in the prompt, not in the chunks
+    assert (
+        prompt.index(EQUATION) < prompt.index(RULE) < prompt.index("Answer (")
+    )  # after the context
+
+
+def test_skip_summary_false_has_no_copy_rule_in_any_request(mock_llm, llm_calls):
+    ask_chunks(skip_cfg(False), "ab", [CIRCUIT, EQUATION])
+    assert len(llm_calls) == 3  # two summaries and the answer
+    assert not any(RULE in call["messages"][-1]["content"] for call in llm_calls)
+    assert not any("copy it exactly" in str(call["messages"]) for call in llm_calls)
+
+
+def test_copy_rule_changes_nothing_else_in_the_answer_request(mock_llm, llm_calls, monkeypatch):
+    from paperqa.prompts import default_system_prompt
+
+    texts = [CIRCUIT, EQUATION, "A third passage."]
+    ask_chunks(skip_cfg(True), "abc", texts)
+    monkeypatch.setattr(paperqa, "with_copy_rule", lambda prompt: prompt)
+    ask_chunks(skip_cfg(True), "abc", texts)
+    ruled, plain = llm_calls
+    assert RULE in ruled["messages"][-1]["content"] and RULE not in plain["messages"][-1]["content"]
+    assert (
+        ruled["messages"][-1]["content"].replace(f"{RULE}\n\n", "")
+        == plain["messages"][-1]["content"]
+    )
+    assert ruled["messages"][0] == plain["messages"][0]  # the system prompt
+    assert ruled["messages"][0]["content"] == default_system_prompt  # untouched, PaperQA2's own
+    assert {k: v for k, v in ruled.items() if k != "messages"} == {
+        k: v for k, v in plain.items() if k != "messages"
+    }
+
+
+def test_copy_rule_keeps_the_citation_format_and_the_refusal_phrase(mock_llm, llm_calls):
+    from paperqa.prompts import CANNOT_ANSWER_PHRASE, CITATION_KEY_CONSTRAINTS
+
+    ask_chunks(skip_cfg(True), "a", [CIRCUIT])
+    [prompt] = prompts(llm_calls)
+    assert CITATION_KEY_CONSTRAINTS in prompt
+    assert f'reply "{CANNOT_ANSWER_PHRASE}."' in prompt
+    key = prompt.split("Valid Keys: ")[1].split("\n")[0]
+    assert key.startswith("pqac-") and f"{key}: {CIRCUIT}\nFrom Paper a" in prompt
+
+
+def test_copy_rule_is_not_added_without_contexts(mock_llm, llm_calls):
+    a = stored("a")
+    markdown = "<!-- page 1 | method=text_layer -->\nAttention is a softmax.\n\n"
+    asyncio.run(PaperQAAnswerer(skip_cfg(True)).ask("What is attention?", [(a, markdown)], print))
+    assert not any(RULE in call["messages"][-1]["content"] for call in llm_calls)
+
+
+def test_copy_rule_goes_before_the_answer_and_nowhere_else():
+    from paperqa.prompts import qa_prompt
+
+    ruled = paperqa.with_copy_rule(qa_prompt)
+    assert ruled.count(RULE) == 1
+    assert ruled.replace(f"{RULE}\n\n", "") == qa_prompt
+    assert ruled.index(RULE) > ruled.index("{context}")
+    assert ruled.index(RULE) < ruled.index("{prior_answer_prompt}")
+    assert ruled.index("extraneous information") < ruled.index(RULE)  # the last instruction
+    assert f"information.\n\n{RULE}\n\n{{prior_answer_prompt}}Answer (" in ruled
+
+
+@pytest.mark.parametrize(
+    "template", ["No placeholder.", "{prior_answer_prompt} twice {prior_answer_prompt}"]
+)
+def test_copy_rule_refuses_an_answer_prompt_it_cannot_place_it_in(template):
+    with pytest.raises(ValueError, match="answer prompt changed"):
+        paperqa.with_copy_rule(template)

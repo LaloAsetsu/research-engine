@@ -122,19 +122,44 @@ def token_windows(texts, tokenizer, max_tokens: int, overlap_tokens: int = 32):
     return out
 
 
+COPY_RULE = (
+    "Take every circuit, gate, qubit index and equation only from the context above, "
+    "and copy it exactly, keeping its LaTeX. "
+    "Keep each one with the paper it comes from: do not move a gate or a term from one "
+    "paper's circuit or equation into another's. "
+    "If the context does not show a gate or a term, say so instead of guessing."
+)
+"""Added to PaperQA2's answer prompt when the model reads raw chunks. A summary is written by a
+model; a raw circuit or equation is not, and an answer model that reads the circuits of several
+papers at once may lend a gate from one to another. The text is pinned here and must hold no
+curly brace: PaperQA2 fills the prompt with ``str.format``."""
+
+_RULE_ANCHOR = "{prior_answer_prompt}"
+
+
+def with_copy_rule(qa_prompt: str) -> str:
+    """``qa_prompt`` (PaperQA2's answer template) with ``COPY_RULE`` as its last instruction,
+    just before the answer. Every other instruction, the citation format included, is kept."""
+    if qa_prompt.count(_RULE_ANCHOR) != 1:
+        raise ValueError("PaperQA2's answer prompt changed: cannot place the copy rule in it")
+    return qa_prompt.replace(_RULE_ANCHOR, f"{COPY_RULE}\n\n{_RULE_ANCHOR}")
+
+
 def keep_chunks_verbatim(settings, contexts: list[Chunk]) -> None:
     """Make the answer model read ``contexts`` as retrieved instead of PaperQA2's summaries.
 
-    Three things need to change together. ``evidence_skip_summary`` makes each context the
+    Four things need to change together. ``evidence_skip_summary`` makes each context the
     chunk text. PaperQA2 still strips any parenthesis that holds a letter and a four-digit
     number from it, which deletes ``(a + 1000)`` from an equation, so that is switched off.
     And with no summary score every context scores 5, so PaperQA2's default order (score, then
     chunk name) would pick the ``answer_max_sources`` chunks by paper id: a serializer ranks
     the contexts by their place in ``contexts`` (the reranked order) before applying the same
-    ``answer_max_sources`` cut and prompt layout as PaperQA2.
+    ``answer_max_sources`` cut and prompt layout as PaperQA2. Last, the answer prompt gets
+    ``COPY_RULE``: the model reads raw circuits and equations, with no summary in between.
     """
     settings.answer.evidence_skip_summary = True
     settings.answer.skip_evidence_citation_strip = True
+    settings.prompts.qa = with_copy_rule(settings.prompts.qa)
     rank: dict[str, int] = {}
     for i, chunk in enumerate(contexts):
         rank.setdefault(chunk.text, i)
