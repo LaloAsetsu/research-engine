@@ -44,6 +44,12 @@ blank_dark_page = 128           # a page with a median grey below this is not pa
 # server. false keeps those layers. See config/README.md.
 scan_layer_to_ocr = true        # scan with an OCR text layer -> OCR
 scan_image_cover = 0.8          # images covering at least 80% of the page make it a scan
+# A page whose text layer is full of math (many "=" signs or math symbols) is read by the model
+# when this is true: better formulas, an occasional quiet error, and GPU time. Off by default.
+# See config/README.md for the measurements and the cost.
+math_to_ocr = false             # math-heavy page with a text layer -> OCR
+math_min_equals = 5             # this many "=" signs make a page math-heavy...
+math_min_density = 0.04         # ...or this share of math-symbol characters
 
 [ocr]
 # Vision-language model used for scanned pages and images (MLX, runs on Apple Silicon).

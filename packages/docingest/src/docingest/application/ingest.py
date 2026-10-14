@@ -136,7 +136,7 @@ class IngestService:
         match kind:
             case SourceKind.PDF:
                 parts = [
-                    self.policy.model_dump_json(),
+                    self.policy.cache_json(),
                     self.guards.model_dump_json(),
                     self.pdf.fingerprint,
                     self.ocr.fingerprint,

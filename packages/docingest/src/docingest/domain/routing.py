@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .models import PageProbe, PageSignals
 
+# The keys that enter the cache key only while math_to_ocr is true.
+MATH_KEYS = frozenset({"math_to_ocr", "math_min_equals", "math_min_density"})
+
 
 class RoutingPolicy(BaseModel):
     """Thresholds from published pipelines (Marker, olmOCR); tuned in config/pipeline.toml."""
@@ -45,6 +48,23 @@ class RoutingPolicy(BaseModel):
     # areas and 0.13 as a union. A born-digital page drawn over one full-page background image
     # (slide, poster, cover) with a long text is read by OCR too: see config/README.md.
     scan_image_cover: float = Field(default=0.8, gt=0, le=1)
+    # Math pages: a born-digital page whose text layer is full of math is read by the model
+    # instead. The layer loses the structure of formulas (fractions, scripts, sums) and the
+    # model keeps most of it, at the price of an occasional quiet error in a symbol. Off by
+    # default: the cost is GPU time (config/README.md has the measured values). A page counts
+    # as math-heavy at math_min_equals "=" signs or a math-symbol share of math_min_density.
+    # The three keys are in the cache key only while math_to_ocr is true (see ``cache_json``),
+    # so turning the rule off leaves the key of a configuration that never had it unchanged.
+    math_to_ocr: bool = False
+    math_min_equals: int = Field(default=5, ge=1)
+    math_min_density: float = Field(default=0.04, gt=0, le=1)
+
+    def cache_json(self) -> str:
+        """The policy as it enters the PDF cache key.
+
+        The math keys are left out while the rule is off, since nothing depends on them then.
+        """
+        return self.model_dump_json(exclude=None if self.math_to_ocr else set(MATH_KEYS))
 
 
 def could_be_blank(signals: PageSignals, policy: RoutingPolicy) -> bool:
@@ -101,6 +121,15 @@ def decide(signals: PageSignals, policy: RoutingPolicy, *, force_ocr: bool = Fal
         reasons.append(
             f"scanned page with a text layer: images cover {s.image_coverage:.0%} of the page,"
             f" {s.n_chars} embedded chars"
+        )
+    if (
+        p.math_to_ocr
+        and s.n_chars >= p.min_chars  # fewer chars is already a reason above
+        and (s.eq_signs >= p.math_min_equals or s.math_density >= p.math_min_density)
+    ):
+        reasons.append(
+            f"math-heavy page with a text layer: {s.eq_signs} '=' signs,"
+            f" math symbols {s.math_density:.1%} of the characters"
         )
     if force_ocr and not reasons:
         reasons.append("forced (--ocr-all)")

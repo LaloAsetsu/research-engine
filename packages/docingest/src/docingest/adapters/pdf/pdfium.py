@@ -18,7 +18,7 @@ from PIL.Image import Image
 from ...domain.errors import DocumentOpenError
 from ...domain.layout import PageLayout, TextLine, size_bucket
 from ...domain.models import PageSignals
-from ...domain.text import HYPHEN_MARK, alpha_ratio, garbage_ratio
+from ...domain.text import HYPHEN_MARK, alpha_ratio, equals_count, garbage_ratio, math_density
 
 BOLD_WEIGHT = 600  # pdfium reports 400 for regular and 700 for bold, with some spread
 FORCE_BOLD = 0x40000  # ForceBold bit of the font descriptor flags
@@ -183,6 +183,8 @@ class PdfiumPage:
             image_coverage=round(min(_union_share(rects), 1.0), 3),
             garbage_ratio=round(garbage_ratio(text), 3),
             alpha_ratio=round(alpha_ratio(text), 3),
+            eq_signs=equals_count(text),
+            math_density=round(math_density(text), 4),
         )
         return signals, text
 
