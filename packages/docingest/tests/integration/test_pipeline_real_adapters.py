@@ -83,3 +83,16 @@ def test_the_scan_rule_off_in_the_config_keeps_the_layer(cfg, tmp_path):
     scan = svc.ingest(picture_pdf(tmp_path / "scan.pdf", *PAGE, invisible=True))
     assert scan.manifest.pages[0].method == PageMethod.TEXT_LAYER and ocr.calls == 0
     assert "Attention" in svc.store.markdown(scan)
+
+
+def test_a_math_page_goes_to_ocr_only_when_the_rule_is_on(cfg, tmp_path):
+    # Real pdfium measurement: the page has 8 "=" signs.
+    path = text_pdf(tmp_path / "math.pdf", *[f"f{i} = g{i}" for i in range(8)], *PAGE)
+    ocr = FakeOcr("# read by the model")
+    off = container_with(cfg, ocr).ingest.ingest(path)
+    assert off.manifest.pages[0].method == PageMethod.TEXT_LAYER and ocr.calls == 0
+    assert off.manifest.pages[0].probe.eq_signs == 8
+    cfg.routing.math_to_ocr = True
+    on = container_with(cfg, ocr).ingest.ingest(path)  # the cache key moved: not served from off
+    assert on.manifest.pages[0].method == PageMethod.VLM_OCR and ocr.calls == 1
+    assert on.manifest.pages[0].probe.reasons[0].startswith("math-heavy page")

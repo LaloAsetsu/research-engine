@@ -33,7 +33,7 @@ case.
 |---|---|---|---|
 | `ingest.py` | `IngestService`, `IngestOptions`, `PIPELINE_VERSION`, `SIDECAR_SUFFIX`, `sha256_file`, `read_sidecar`, `retitle_markdown`, `Log` | Turn one file (PDF, image, office, LaTeX, text) into Markdown plus a `DocumentManifest`, with a content-addressed cache | `bootstrap.Container.ingest`, `docingest ingest`, `docingest eval-ocr`, the PaperQA2 hook, `CrawlService` |
 | `crawl.py` | `CrawlService`, `CrawlReport` | Search a remote source, download each record, write a metadata sidecar, ingest it | `bootstrap.Container.crawl`, `docingest crawl` |
-| `ask.py` | `AskService`, `Retrieval`, `retrieve`, `cap_per_paper` | Answer a question over every stored document, or from the chunk index when one is configured | `bootstrap.Container.ask`, `docingest ask` |
+| `ask.py` | `AskService`, `Retrieval`, `retrieve`, `cap_per_paper`, `with_gate_lists` | Answer a question over every stored document, or from the chunk index when one is configured | `bootstrap.Container.ask`, `docingest ask` |
 | `index.py` | `IndexService`, `IndexStatus`, `BuildReport`, `content_key`, `BATCH_CHUNKS` | Chunk every stored document like `ask` does, embed the new and changed ones, drop the vanished ones, and report the state of the index | `bootstrap.Container.index_service`, `docingest index` |
 | `benchmark.py` | `BenchmarkRunner`, `CandidateRun`, `RunMismatchError`, `score_run`, `needs_scoring`, `load_scores`, `rank`, `compare`, `throughput`, `build_summary`, `render_report`, `write_report`, `read_manifest`, `read_telemetry`, `telemetry_path`, `telemetry_stamp`, `latest_by_sample`, `machine_info`, `library_versions` | Transcribe benchmark samples with each OCR candidate (resumable), record telemetry, score, and write `summary.json` and `report.md` | `docingest bench run`, `bench score`, `bench report` (in `entrypoints/bench_cli.py`); `scripts/bench_docs.py` reads `load_scores` and `compare` |
 | `metrics.py` | `score`, `normalize`, `plain_text`, `latex_to_text`, `word_f1`, `char3_f1`, `running_lines`, `strip_furniture`, `bootstrap_ci`, `FURNITURE_ZONE` | Format-neutral text comparison: CER, WER, word F1, character 3-gram F1 | the synthetic benchmark suite, `docingest eval-ocr` |
@@ -854,7 +854,7 @@ for key, error in report.failures:
 
 ## `ask.py`: question answering over the corpus
 
-`AskService(*, store, qa, retrieval=None)` has one coroutine and one property:
+`AskService(*, store, qa, retrieval=None, circuit_lists=False)` has one coroutine and one property. `circuit_lists` is not a setting of its own: `Container.ask` passes `[qa] skip_summary`.
 
 `async ask(question, warn=print, *, use_index=True, keywords=None) -> str`
 
@@ -870,10 +870,26 @@ for key, error in report.failures:
    `qa.ask(question, [(document, markdown), ...], warn)`. `keywords` is then a `ValueError`: it
    belongs to the index.
 4. **With an index** it calls `retrieval()` and `retrieve(...)`, closes the index in a
-   `finally`, and awaits `qa.ask(question, [(document, "")...], warn, contexts=chunks)` with
+   `finally`, and, when `circuit_lists` is true, replaces the chunks by `with_gate_lists(...)`
+   (below). It then awaits `qa.ask(question, [(document, "")...], warn, contexts=chunks)` with
    the manifests of the papers the chunks come from (in order of first appearance) and no
-   Markdown: the corpus text is not read.
+   Markdown: the corpus text is not read for the answerer.
 5. It returns the answerer's text unchanged.
+
+`with_gate_lists(contexts, sources, store, warn)` adds the gate list of `domain.circuits` to the chunks the
+answerer will read as they are (`[qa] skip_summary`; with summaries a list would be summarized away):
+
+1. A chunk with no ``` in its text is returned as it is (the same object) and its paper's Markdown
+   is not read. For a chunk with one, `store.markdown(doc)` is read once per paper, split with
+   `split_pages` and joined as `chunk_pages` joins pages (each page followed by `"\n\n"`), and the
+   fenced `latex` blocks of that text are found once (`circuit_code_blocks`).
+2. `add_gate_lists` puts the list of every block whose closing fence lies in the chunk right after
+   that fence, using the chunk's `start` offset. A block that began in the chunk before gets the
+   list of the whole block; one cut by the end of the chunk gets none; a chunk that is not where
+   `start` says (the Markdown changed since the index was built) is left as it is.
+3. The list never stops an answer: any exception for a chunk (`store.markdown` failing, a reader bug) keeps the chunk as it is and calls `warn` once for that paper (`gate list skipped for <doc id prefix>: <error>`); `domain/circuits.py` itself has no `try`.
+4. Only `text` changes (`dataclasses.replace`); name, pages and `start` stay, so citations are the
+   same, and the order of the chunks is kept. Nothing is written and no cache or index key changes.
 
 `retrieve(retrieval, question, documents, warn, keywords)` is the two-stage retrieval:
 

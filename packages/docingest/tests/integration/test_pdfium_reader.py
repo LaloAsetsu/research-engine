@@ -10,6 +10,7 @@ from builders import (
     pdf,
     picture_pdf,
     pictures_pdf,
+    symbols_pdf,
     text_pdf,
 )
 
@@ -330,3 +331,44 @@ def test_a_marker_followed_by_a_space_is_a_hyphen_in_the_middle_of_a_row():
 def test_line_breaks_split_the_stream_and_empty_lines_are_dropped():
     lines = split_lines(stream("first\r\n \r\nsecond"), 0.0, 792.0)
     assert [ln.text for ln in lines] == ["first", "second"]
+
+
+def test_the_equals_signs_of_the_layer_are_counted(tmp_path):
+    lines = ["E = m c^2", "a = b = c", LONG, "no sign here"]
+    signals, raw = reader.open(text_pdf(tmp_path / "eq.pdf", *lines)).page(0).signals()
+    assert signals.eq_signs == raw.count("=") == 3
+    assert signals.math_density == 0.0  # ASCII text has no math-symbol characters
+
+
+def test_a_page_without_equals_signs_measures_zero(tmp_path):
+    signals, _ = reader.open(text_pdf(tmp_path / "t.pdf", *PAGE)).page(0).signals()
+    assert signals.eq_signs == 0 and signals.math_density == 0.0
+
+
+def test_the_math_rule_on_a_real_page(tmp_path):
+    path = text_pdf(tmp_path / "eq.pdf", *[f"x{i} = y{i} + z{i}" for i in range(6)], *PAGE)
+    assert not probe(path)[0].needs_ocr
+    p, _ = probe(path, RoutingPolicy(math_to_ocr=True))
+    assert p.eq_signs == 6 and p.needs_ocr
+    assert p.reasons[0].startswith("math-heavy page with a text layer: 6 '=' signs")
+    assert not probe(path, RoutingPolicy(math_to_ocr=True, math_min_equals=7))[0].needs_ocr
+
+
+def test_the_math_symbol_share_of_the_layer_is_measured(tmp_path):
+    # "±×÷" are the three math signs of Latin-1: 6 of the 10 non-space characters.
+    signals, raw = reader.open(symbols_pdf(tmp_path / "s.pdf", "±× ÷±×÷ abcd")).page(0).signals()
+    assert "±" in raw and signals.n_chars == 10
+    assert signals.math_density == 0.6 and signals.eq_signs == 0
+    dense = symbols_pdf(tmp_path / "dense.pdf", "±×÷ " * 10, *PAGE)  # 30 of 606: 0.05
+    p, _ = probe(dense, RoutingPolicy(math_to_ocr=True))
+    assert p.eq_signs == 0 and 0.04 < p.math_density < 0.06 and p.needs_ocr
+    assert p.reasons[0].startswith("math-heavy page with a text layer: 0 '=' signs, math symbols")
+    assert not probe(dense)[0].needs_ocr
+    sparse = symbols_pdf(tmp_path / "sparse.pdf", "±×÷", *PAGE)  # 3 of 579: far under 0.04
+    assert not probe(sparse, RoutingPolicy(math_to_ocr=True))[0].needs_ocr
+
+
+def test_the_math_share_is_recorded_with_four_decimals(tmp_path):
+    # 1 math sign among 3 characters: 0.3333, not 0.333 and not 0.33333...
+    signals, _ = reader.open(symbols_pdf(tmp_path / "third.pdf", "±ab")).page(0).signals()
+    assert signals.n_chars == 3 and signals.math_density == 0.3333

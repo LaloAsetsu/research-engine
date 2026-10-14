@@ -88,10 +88,12 @@ flowchart LR
 |---|---|
 | `test_arxiv.py` | `ArxivCrawler` against a fake transport and a fake clock: feed parsing, id normalisation, query parameters, retries, source format detection. No network, no real sleeping |
 | `test_arxiv_fixes.py` | Regression tests for the arXiv crawler, same fakes |
+| `test_ask_gate_lists.py` | `AskService` with `circuit_lists` on fakes: the list right after a block in the chunk that holds it, the whole block's list in a chunk that holds only its end, none for a block the chunk cuts, none for display math, the chunks unchanged with the switch off or for other papers, the Markdown read once per paper and only for a chunk with a fence, a changed document left alone, a chunk that starts where a block ends, a failing Markdown or reader that leaves the chunks as they are and warns once per paper, and that `Container.ask` turns it on with `[qa] skip_summary` |
 | `test_ask_retrieval.py` | `AskService` with fakes: the plain path unchanged, the two-stage retrieval (one query embedding, `candidates`, rerank by a stable sort, `contexts`, no reranker), the keyword override, the errors for an empty, uncommitted or foreign index, the warnings, and that the index is closed |
 | `test_bench_fixes.py` | Benchmark regressions: clustered statistics, the OCR retry ladder in telemetry, page furniture and LaTeX / `<img>` normalisation, stale saved scores. The MLX adapter runs against stub modules, never a model |
 | `test_benchmark.py` | `BenchmarkRunner`, score persistence and report aggregation on an in-memory suite (`MemSuite`) |
 | `test_bootstrap.py` | `REGISTRY` defaults, unknown adapter names, `Container` overrides, entry-point plugins including broken ones, the `none` retrieval adapters and the `[index]`, `[embedder]` and `[reranker]` tables reaching a plugin |
+| `test_circuits.py` | `domain.circuits`: the exact gate list of each construct (invented circuits: gates, controls and targets, swaps, measurements, multi-wire gates, labels, macros that must be `unparsed`), code-block finding and `add_gate_lists`, that no input raises and every item is a known operation or `unparsed`, and the linear-time ratio tests |
 | `test_chunking.py` | `domain.chunking.chunk_pages`: chunk names and page ranges, overlap, page breaks, invalid settings |
 | `test_core_fixes.py` | Regressions: config loading, the pipeline version against `pyproject.toml` and `uv.lock`, QA LLM parameters, metadata refresh and degraded results through the real `FilesystemStore` |
 | `test_domain_models.py` | `SourceMetadata` citation formatting |
@@ -103,6 +105,7 @@ flowchart LR
 | `test_latex_fixes.py` | Regressions of the LaTeX adapter (`latex_source`, `pandoc_latex`) |
 | `test_latex_sections.py` | Section-by-section conversion and the reference-loss guard, with pandoc replaced by a rule (counts the runs, the budget, the documents handed to pandoc), and the string helpers behind them |
 | `test_latex_circuits.py` | Quantum circuits as LaTeX code blocks (`protect_circuits`): each encoding, boxes, TikZ pictures, table cells, what is left alone (math, preamble, listings), circuits that never close, linear time, and the plain-text path's block |
+| `test_latex_equations.py` | Equation numbers written as `\tag` and the references to them (`number_equations`): each environment, `\nonumber`, `\tag`, `subequations`, `\numberwithin`, appendices, `\theequation` forms, counter commands, the macros of the paper, what stops the numbering, verbatim text and circuits left alone, malformed input, and linear time |
 | `test_latex_pandoc_rewrites.py` | The source rewrites that keep pandoc 3.9 from failing: `@`-macro shim, REVTeX reference entries, citation keys, small layout forms |
 | `test_latex_source.py` | Pure LaTeX-source helpers and the pandoc adapter's Markdown helpers |
 | `test_metrics.py` | `application.metrics`: normalisation (Markdown, hyphenation), capping of runaway output, `char3_f1`, `bootstrap_ci` |
@@ -112,10 +115,11 @@ flowchart LR
 | `test_ocr_profiles.py` | OCR profile clean-up code pinned against each profile's `code_version` (an edit fails until it is re-pinned, with a bump if results can change), and `code_version` in both engine fingerprints |
 | `test_ocr_rejection.py` | What `IngestService` does with OCR output it cannot trust: the text layer if there is a usable one, else an empty page, a warning in the manifest, pages that repeat an earlier page, truncation, images |
 | `test_routing_policy.py` | `domain.routing.decide`, configurable `RoutingPolicy` thresholds, the scan-with-a-text-layer rule and its two keys, unknown `[routing]` keys rejected |
+| `test_math_routing.py` | The math rule (off by default): the page read by OCR with its reason, the rule off, each threshold at its edge, `min_chars` as the floor, a page under both, a low-alphabetic page and a scan that also match (both reasons), the math rule without the scan rule, moved thresholds, the text layer as the fallback, the keys validated, the cache key (the three keys in it only while the rule is on, and the default key equal to the one from before the rule) |
 | `test_scan_layer_routing.py` | Scans that carry an OCR text layer through `IngestService`: read by OCR with the reason in the manifest, born-digital and figure pages untouched, the rule off, the text layer as the fallback when the OCR output is rejected, no text-layer structure for a page read by OCR and flat text for the fallback page, the keys in the PDF cache key |
 | `test_services.py` | `AskService` (plain path) and `CrawlService` with fakes |
 | `test_stats.py` | `application.stats`: paired bootstrap, `quantile`, `bootstrap_ci` |
-| `test_text.py` | `domain.text`: garbled-text detection, de-hyphenation, page splitting |
+| `test_text.py` | `domain.text`: garbled-text detection, the math-symbol and equals-sign counts (the edges of every symbol block, `ϕ`, `ˆ`, `™`), de-hyphenation, page splitting |
 | `test_structure.py` | `domain.structure`, `furniture` and `headings` on synthetic lines: running headers and page numbers, paragraphs, hyphenation, headings, footnotes |
 
 ### contract/
@@ -140,13 +144,15 @@ flowchart LR
 | `test_index_on_ingest.py` | `ingest --index` and `crawl --index`: off by default, only the papers of the run, checked before any work, a failing update keeps the papers |
 | `test_magic_detector.py` | `MagicBytesDetector` on real files |
 | `test_openai_ocr.py` | `OpenAICompatibleOcr` against a scripted local OpenAI-compatible server: request shape, retries, the retry ladder (stricter retries, more room for a dense page, a server that refuses it), authentication |
+| `test_ask_gate_lists_paperqa.py` | The whole ask path with a mocked LLM and the real `PaperQAAnswerer`: the answer prompt holds the gate list after the block with `skip_summary` and no request holds one without it |
 | `test_pandoc_latex_circuits.py` | Circuits through the real pandoc and pylatexenc: each encoding with its caption, boxes, subfigures, a table cell, math not doubled, and the same block from the whole-paper, section-fallback and plain-text paths |
+| `test_pandoc_latex_equations.py` | Equation numbers through the real pandoc and pylatexenc: the numbers and the references in the Markdown, subequations, appendix and `\numberwithin`, an own `\tag`, a circuit next to an equation, and the same numbers from the whole-paper, section-fallback and plain-text paths |
 | `test_pandoc_latex_sections.py` | A paper with one broken section (that section is plain text, the others pandoc), page records, malformed and slow input, a reference list pandoc drops (real pandoc and pylatexenc) |
 | `test_pandoc_latex.py` | `PandocLatexConverter` with the real pandoc (pypandoc-binary) and pylatexenc on `tests/fixtures/latex`; optional real arXiv sources (`slow`) |
-| `test_paperqa_adapter.py` | PaperQA2 token windows (needs the embedder in the local Hugging Face cache); answering from given `contexts` (only those chunks, an empty list refused, the temperature on every request; with `[qa] skip_summary` the raw chunk text with its `$$` blocks reaches the answer prompt, no summary request is sent, keys and page ranges are cited, the retrieval order decides the `answer_max_sources` cut; the answer prompt gains the pinned copy rule and nothing else changes, system prompt and citation format included; without it every chunk is summarized and no request carries the rule) and from the corpus (where `skip_summary` only warns), with litellm's mock reply and PaperQA2's keyword embedder, so no server or download. Skipped when `paperqa` is not installed |
-| `test_pdfium_reader.py` | `PdfiumReader` page signals and routing on generated PDFs (including a full-page image under an invisible text layer, a small figure, a plate), corrupt PDFs |
+| `test_paperqa_adapter.py` | PaperQA2 token windows (needs the embedder in the local Hugging Face cache); answering from given `contexts` (only those chunks, an empty list refused, the temperature on every request; with `[qa] skip_summary` the raw chunk text with its `$$` blocks reaches the answer prompt, no summary request is sent, keys and page ranges are cited, the retrieval order decides the `answer_max_sources` cut; the answer prompt gains the pinned copy rule and nothing else changes, system prompt and citation format included; without it every chunk is summarized and no request carries the rule) and from the corpus (where `skip_summary` only warns), the retry with half the sources when the server answers the context-length 400 (the rank order kept, the warning, 10, 5, 2, 1, the last error raised, other 400s and the summaries path not retried, the log record of a retried overflow held back for that ask only; once with a stub OpenAI-compatible server on localhost), with litellm's mock reply and PaperQA2's keyword embedder, so no server or download. Skipped when `paperqa` is not installed |
+| `test_pdfium_reader.py` | `PdfiumReader` page signals and routing on generated PDFs (including a full-page image under an invisible text layer, a small figure, a plate, the equals-sign and math-symbol signals and the math rule on real pages), corrupt PDFs |
 | `test_text_layer_structure.py` | Real pdfium on multi-page PDFs generated by `layout_pdf`: font size, weight and position of each line, the whole pipeline (running header and page number out, paragraphs joined, headings, hyphenation) |
-| `test_pipeline_real_adapters.py` | `Container` with the real detector, pdfium, Pillow and filesystem adapters and a fake OCR engine; blank, page-number and scan-with-a-text-layer PDFs |
+| `test_pipeline_real_adapters.py` | `Container` with the real detector, pdfium, Pillow and filesystem adapters and a fake OCR engine; blank, page-number and scan-with-a-text-layer and math-page PDFs |
 | `test_scripts.py` | `scripts/serve_llm.sh` run with a stub `uv` on `PATH`: which variable chooses the served model. Skipped without `bash` |
 | `test_synthetic_and_images.py` | Deterministic `make_scan`, `fit_image`, OCR profile post-processing |
 
@@ -210,12 +216,13 @@ Dependency-light builders for real input files. Every builder writes to the path
 | Builder | Produces |
 |---|---|
 | `LONG` | A sentence repeated three times, long enough to pass the text-layer thresholds |
-| `pdf(path, content, resources=b"", extra=(), page_box=b"/MediaBox [0 0 612 792]")` | A minimal one-page PDF written byte by byte, with Helvetica as `/F1`; `content` is the page content stream, `extra` adds objects numbered from 6 |
+| `pdf(path, content, resources=b"", extra=(), page_box=b"/MediaBox [0 0 612 792]", *, font_encoding=b"")` | A minimal one-page PDF written byte by byte, with Helvetica as `/F1` (`font_encoding` is added to the font dictionary); `content` is the page content stream, `extra` adds objects numbered from 6 |
 | `text_pdf(path, *lines)` | A born-digital one-page PDF with the given text lines (routes to the text layer when the text is long enough) |
 | `image_pdf(path)` | A one-page PDF whose only content is a 1275x1650 image with text drawn in pixels, saved at 150 dpi (routes to OCR) |
 | `blank_pdf(path, pages)` | A PDF with `pages` empty pages, made with pypdfium2 |
 | `layout_pdf(path, pages)`, `paragraph(text, x=, top=, size=, width=)` | A multi-page PDF where every text run is placed by hand as `(x, y, size, bold, text)` (Helvetica or Helvetica-Bold); `paragraph` wraps a text into the runs of its lines |
 | `pictures_pdf(path, boxes, *lines, invisible=False)` | A one-page PDF with the text lines and one image drawn over each box (x, y, width, height in points); boxes may overlap or tile the page. `invisible=True` draws the text in render mode 3, as an OCR program does over its scan |
+| `symbols_pdf(path, *lines)` | `text_pdf` with a WinAnsi font, so a line may hold `±`, `×` or `÷` (the math signs that fit Latin-1) |
 | `picture_pdf(path, *lines, box=(0, 0, 612, 792), invisible=False)` | A one-page PDF with an image over `box` (x, y, width, height in points; the full page by default) and the text lines; `invisible=True` draws the text in render mode 3, as an OCR program does over its scan, so the page has a text layer and shows only the image. A small `box` makes the image a figure |
 
 ## Markers and opt-in environment variables

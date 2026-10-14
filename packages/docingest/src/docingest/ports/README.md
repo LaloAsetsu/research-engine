@@ -246,6 +246,7 @@ Contract:
   - `n_chars`: non-whitespace characters of the text layer.
   - `n_images` and `image_coverage`: image objects and the fraction of the page they cover, from 0 to 1.
   - `garbage_ratio` and `alpha_ratio`: compute them with `docingest.domain.text.garbage_ratio` and `alpha_ratio`, so the routing thresholds keep their meaning.
+  - `eq_signs` and `math_density`: compute them with `docingest.domain.text.equals_count` and `math_density`.
   - Return the text uncleaned: `IngestService` cleans it with the whole document's vocabulary. A line-end hyphen may be marked with `domain.text.HYPHEN_MARK` (U+0002), as pdfium does.
 - `PdfPage.layout()` is called once for every page that keeps its text layer, after `signals()`. It returns a `domain.layout.PageLayout`: the page's width and height in points and its lines in reading order, each a `TextLine` (`text`, dominant `size` in points, `bold`, `x0`, `x1`, `baseline` counted from the top of the page, `upright`). `IngestService` uses it to take out running headers and page numbers, join the lines of a paragraph and mark headings (see [Text-layer structure](../domain/README.md#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy)).
   - The lines must be the ones of `signals()`' text, in the same order, and a line that ends in a hyphen that the library joined must keep `HYPHEN_MARK` at its end.

@@ -44,6 +44,8 @@ class PageSignals(BaseModel):
     image_coverage: float = 0.0  # fraction of page area covered by image objects
     garbage_ratio: float = 0.0  # share of replacement / control / (cid:x) glyphs
     alpha_ratio: float = 0.0  # share of letters among non-space chars
+    eq_signs: int = 0  # number of "=" in the text layer
+    math_density: float = 0.0  # share of math-symbol characters among non-space chars
 
 
 class PageProbe(PageSignals):

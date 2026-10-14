@@ -1,7 +1,12 @@
+import pytest
+
 from docingest.domain.text import (
     alpha_ratio,
     clean_text_layer,
+    equals_count,
     garbage_ratio,
+    is_math_char,
+    math_density,
     split_pages,
 )
 
@@ -12,6 +17,37 @@ def test_garbled_and_symbolic_text_detection():
     assert garbage_ratio("transduc\x02tion") == 0  # pdfium hyphen marker is not garbage
     assert alpha_ratio("∑∫≈ 1234 ## %%") < 0.5
     assert alpha_ratio("plain english words") == 1.0
+
+
+def test_math_symbols_and_equals_signs_are_counted():
+    assert equals_count("a = b, c == d") == 3 and equals_count("no sign") == 0
+    assert all(is_math_char(c) for c in "αΩ→∀∑≤⟨⨁ℏ𝐀±×√∞†")
+    assert not any(is_math_char(c) for c in "aZ09=+-<>(). é")  # ASCII operators are not counted
+    assert math_density("") == 0.0 and math_density("plain words") == 0.0
+    assert math_density("α β\n∑ x") == pytest.approx(3 / 4)  # spaces do not count
+    assert math_density("∑\x02x") == pytest.approx(1 / 2)  # nor does the hyphen mark
+
+
+@pytest.mark.parametrize(
+    "char",
+    [
+        "\u0370", "\u03ff",  # both ends of the Greek block
+        "ϕ", "ϑ", "ϵ",  # the variant forms TeX papers use (U+03D5, 03D1, 03F5)
+        "\u2300", "⌈", "\u23ff",  # technical block: brackets and floors
+        "\u2100", "\u214f", "\u2190", "\u21ff", "\u22ff", "\u27ef", "\u2980", "ℏ", "\u27c0", "\u2aff", "\U0001d400", "\U0001d7ff",
+        "ˆ", "™", "№",
+    ],
+)  # fmt: skip
+def test_the_edges_of_the_math_symbol_blocks(char):
+    assert is_math_char(char)
+
+
+@pytest.mark.parametrize(
+    "char",
+    ["\u036f", "\u0400", "\u20ff", "\u2150", "\u218f", "\u2400", "\u27bf", "\u2b00", "ˇ", "é"],
+)
+def test_just_outside_the_math_symbol_blocks(char):
+    assert not is_math_char(char)
 
 
 def test_clean_text_layer_handles_pdfium_hyphen_marker():

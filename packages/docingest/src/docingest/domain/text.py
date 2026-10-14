@@ -50,6 +50,36 @@ def alpha_ratio(text: str) -> float:
     return sum(c.isalpha() for c in stripped) / len(stripped) if stripped else 0.0
 
 
+def is_math_char(c: str) -> bool:
+    """Whether a character is a math symbol: Greek, arrows, operators, brackets, math alphabets."""
+    o = ord(c)
+    return (
+        0x0370 <= o <= 0x03FF  # Greek
+        or 0x2190 <= o <= 0x21FF  # arrows
+        or 0x2200 <= o <= 0x22FF  # math operators
+        or 0x2300 <= o <= 0x23FF  # misc technical (brackets)
+        or 0x27C0 <= o <= 0x27EF  # misc math A (angle brackets)
+        or 0x2980 <= o <= 0x2AFF  # misc math B, supplemental operators
+        or 0x2100 <= o <= 0x214F  # letterlike (hbar)
+        or 0x1D400 <= o <= 0x1D7FF  # math alphanumerics
+        or c in "±×÷√∞∑∏∫≈≠≤≥⊗⊕†ˆ"
+    )
+
+
+def equals_count(text: str) -> int:
+    """Number of "=" signs in a text layer."""
+    return text.count("=")
+
+
+def math_density(text: str) -> float:
+    """Share of math-symbol characters among the non-space characters of a text layer.
+
+    pdfium's soft-hyphen mark is not a character of the page and is left out.
+    """
+    chars = [c for c in text.replace(HYPHEN_MARK, "") if not c.isspace()]
+    return sum(is_math_char(c) for c in chars) / len(chars) if chars else 0.0
+
+
 def text_vocabulary(*texts: str) -> set[str]:
     return {w.lower() for t in texts for w in re.findall(r"\w+", t.replace(HYPHEN_MARK, " "))}
 

@@ -30,14 +30,19 @@ def pdf(
     resources: bytes = b"",
     extra: list[bytes] | tuple[bytes, ...] = (),
     page_box: bytes = b"/MediaBox [0 0 612 792]",
+    *,
+    font_encoding: bytes = b"",
 ) -> Path:
-    """Minimal PDF writer: one page, Helvetica as /F1, optional extra objects (6+)."""
+    """Minimal PDF writer: one page, Helvetica as /F1, optional extra objects (6+).
+
+    ``font_encoding`` is added to the font dictionary, e.g. ``/Encoding /WinAnsiEncoding``.
+    """
     objs = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         b"<< /Type /Page /Parent 2 0 R " + page_box + b" "
         b"/Resources << /Font << /F1 4 0 R >> " + resources + b" >> /Contents 5 0 R >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica " + font_encoding + b" >>",
         b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
         *extra,
     ]
@@ -56,6 +61,12 @@ def pdf(
 def text_pdf(path: Path, *lines: str) -> Path:
     ops = b"BT /F1 11 Tf 72 700 Td 14 TL " + b" ".join(b"(%s) '" % line.encode() for line in lines)
     return pdf(path, ops + b" ET")
+
+
+def symbols_pdf(path: Path, *lines: str) -> Path:
+    """``text_pdf`` in WinAnsi, so a line may hold the math signs of Latin-1 (± × ÷)."""
+    ops = b"BT /F1 11 Tf 72 700 Td 14 TL " + b" ".join(b"(%s) '" % _escape(ln) for ln in lines)
+    return pdf(path, ops + b" ET", font_encoding=b"/Encoding /WinAnsiEncoding")
 
 
 def image_pdf(path: Path) -> Path:

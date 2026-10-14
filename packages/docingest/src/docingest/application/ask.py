@@ -13,16 +13,21 @@ two stages and handed over as ``contexts``:
    Capping the first stage instead, before the reranker has judged the chunks, dropped gold
    evidence in the measurements.
 
-The answerer then summarizes exactly those chunks and writes the cited answer.
+The answerer then summarizes exactly those chunks and writes the cited answer. When the answerer
+reads the chunks as they are (``circuit_lists``, set from ``[qa] skip_summary``), each circuit
+code block in a chunk gets its gate list as a paragraph right after it first (see
+``domain.circuits``): the chunks themselves, the index and the stored Markdown are not changed.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from ..domain.chunking import Chunk
+from ..domain.chunking import NAME_LENGTH, PAGE_BREAK, Chunk
+from ..domain.circuits import CodeBlock, add_gate_lists, circuit_code_blocks
 from ..domain.errors import IndexMismatchError, IndexNotReadyError, RetrievalError
+from ..domain.text import split_pages
 from ..ports import (
     ChunkIndex,
     DocumentStore,
@@ -65,12 +70,17 @@ class AskService:
         store: DocumentStore,
         qa: QuestionAnswerer,
         retrieval: Callable[[], Retrieval] | None = None,
+        circuit_lists: bool = False,
     ):
         """``retrieval`` is called only for a question that uses the index, so a configuration
-        problem with it does not stop one that does not (``use_index=False``)."""
+        problem with it does not stop one that does not (``use_index=False``).
+        ``circuit_lists`` adds a gate list after each circuit code block of the retrieved chunks;
+        it is for an answerer that reads the chunks as they are (``[qa] skip_summary``), as a
+        summary would not keep the list."""
         self.store = store
         self.qa = qa
         self._retrieval = retrieval
+        self._circuit_lists = circuit_lists
 
     @property
     def has_index(self) -> bool:
@@ -103,6 +113,8 @@ class AskService:
             contexts, sources = retrieve(retrieval, question, documents, warn, keywords)
         finally:
             retrieval.index.close()
+        if self._circuit_lists:
+            contexts = with_gate_lists(contexts, sources, self.store, warn)
         # The answerer needs only the manifests of the papers the chunks come from.
         return await self.qa.ask(question, [(d, "") for d in sources], warn, contexts=contexts)
 
@@ -147,6 +159,47 @@ def retrieve(
     for chunk in top:
         seen.setdefault(chunk.doc_id, by_id[chunk.doc_id])
     return top, list(seen.values())
+
+
+def with_gate_lists(
+    contexts: list[Chunk],
+    sources: list[StoredDocument],
+    store: DocumentStore,
+    warn: Callable[[str], None],
+) -> list[Chunk]:
+    """``contexts`` with the gate list of each circuit code block added after the block (see
+    ``domain.circuits.add_gate_lists``). A chunk that holds the end of a block that began in the
+    chunk before is given the list of the whole block, read from the paper's Markdown. The
+    Markdown of a paper is read once, and only when one of its chunks holds a code fence; a chunk
+    with none is returned as it is.
+
+    The list is an addition to the answer, so it never stops one: if anything fails for a chunk
+    (the Markdown cannot be read, a circuit the reader chokes on) the chunk is kept as it is and
+    ``warn`` is called once for that paper."""
+    by_id = {d.manifest.doc_id: d for d in sources}
+    read: dict[str, tuple[str, list[CodeBlock]]] = {}
+    warned: set[str] = set()
+    out: list[Chunk] = []
+    for chunk in contexts:
+        if "```" not in chunk.text or chunk.doc_id not in by_id:
+            out.append(chunk)
+            continue
+        try:
+            if chunk.doc_id not in read:
+                # the text the chunker cut: the pages joined as chunk_pages joins them
+                pages = split_pages(store.markdown(by_id[chunk.doc_id]))
+                document = "".join(text + PAGE_BREAK for text in pages.values())
+                read[chunk.doc_id] = (document, circuit_code_blocks(document))
+            document, blocks = read[chunk.doc_id]
+            text = add_gate_lists(chunk.text, chunk.start, document, blocks)
+        except Exception as e:
+            if chunk.doc_id not in warned:
+                warned.add(chunk.doc_id)
+                warn(f"gate list skipped for {chunk.doc_id[:NAME_LENGTH]}: {e}")
+            out.append(chunk)
+            continue
+        out.append(replace(chunk, text=text) if text != chunk.text else chunk)
+    return out
 
 
 def cap_per_paper(chunks: list[Chunk], cap: int) -> list[Chunk]:

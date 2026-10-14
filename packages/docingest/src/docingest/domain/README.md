@@ -15,6 +15,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 - [text.py](#textpy)
 - [Text-layer structure](#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy)
 - [chunking.py](#chunkingpy)
+- [circuits.py](#circuitspy)
 - [errors.py](#errorspy)
 - [Changing the domain safely](#changing-the-domain-safely)
 
@@ -25,12 +26,13 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 | `models.py` | `SourceKind`, `PageMethod`, `PageSignals`, `PageProbe`, `ModelRef`, `SourceMetadata`, `PageRecord`, `DocumentManifest` (pydantic models and `StrEnum`s) | every layer |
 | `routing.py` | `RoutingPolicy` (thresholds, the `[routing]` config section), `decide()`, and the blank-page rule (`could_be_blank`, `is_blank`, `blank_probe`) | `IngestService` for every PDF page, `config.AppConfig.routing` |
 | `ocr_guards.py` | `OcrGuards` (thresholds), `OutputProblem`, `find_problem`, `is_looping`, `retry_max_tokens`, `duplicate_pages` | the OCR adapters' retry ladder, `IngestService` |
-| `text.py` | `HYPHEN_MARK`, `garbage_ratio`, `alpha_ratio`, `text_vocabulary`, `clean_text_layer`, `collapse_dot_leaders`, `render_markdown`, `split_pages` | PDF adapter (signals), `IngestService` (clean-up, rendering), synthetic benchmark suite (clean reference text), PaperQA2 adapter and hook, `eval-ocr` command (splitting) |
+| `text.py` | `HYPHEN_MARK`, `garbage_ratio`, `alpha_ratio`, `equals_count`, `math_density`, `is_math_char`, `text_vocabulary`, `clean_text_layer`, `collapse_dot_leaders`, `render_markdown`, `split_pages` | PDF adapter (signals), `IngestService` (clean-up, rendering), synthetic benchmark suite (clean reference text), PaperQA2 adapter and hook, `eval-ocr` command (splitting) |
 | `layout.py` | `TextLine`, `PageLayout`, `StructuredPage` (what a PDF adapter reports about a page's lines) | `PdfPage.layout()`, `IngestService` |
 | `furniture.py` | `repeated_lines`, `page_numbers` (running headers, running footers, page numbers) | `structure.py` |
 | `headings.py` | `line_style`, `page_styles`, `level`, `is_marker`, `is_caption` | `structure.py` |
 | `structure.py` | `structure_pages` (text-layer pages of a document to Markdown) | `IngestService` for the text-layer pages of a PDF |
 | `chunking.py` | `Chunk`, `chunk_pages`, `CHUNKER_VERSION`, `CHUNK_CHARS`, `OVERLAP` | `ports` (`Chunk` is re-exported there); the chunk index and `AskService` use it through those |
+| `circuits.py` | `gate_list`, `GateList`, `circuit_code_blocks`, `CodeBlock`, `add_gate_lists`, `MAX_STEPS` | `AskService` (a gate list after each circuit code block of the retrieved chunks) |
 | `errors.py` | `DocingestError` and its subclasses | adapters raise them, application and entrypoints handle them |
 
 ## How domain objects flow through an ingestion
@@ -87,6 +89,8 @@ classDiagram
         +float image_coverage
         +float garbage_ratio
         +float alpha_ratio
+        +int eq_signs
+        +float math_density
     }
     class PageProbe {
         +bool needs_ocr
@@ -183,6 +187,8 @@ Raw measurements of one PDF page, produced by a `PdfReader` adapter (`PdfPage.si
 | `image_coverage` | `float` | `0.0` | Fraction of the page area covered by image objects (the union of their rectangles: overlaps count once), from 0 to 1. |
 | `garbage_ratio` | `float` | `0.0` | Share of characters that indicate a broken text layer, computed with `text.garbage_ratio`. |
 | `alpha_ratio` | `float` | `0.0` | Share of letters among non-space characters, computed with `text.alpha_ratio`. |
+| `eq_signs` | `int` | `0` | Number of `=` in the text layer, computed with `text.equals_count`. Read by the math rule (6). A probe written before the signal existed loads with 0. |
+| `math_density` | `float` | `0.0` | Share of math-symbol characters among the non-space characters of the text layer, computed with `text.math_density`. Read by the math rule (6). Like `eq_signs`, 0 in results cached before the signal existed. Greek letters and letterlike symbols (`™`) count as math symbols. |
 
 ### `PageProbe`
 
@@ -333,6 +339,8 @@ A two-page PDF whose first page has a usable text layer and whose second page is
         "image_coverage": 0.0,
         "garbage_ratio": 0.0,
         "alpha_ratio": 0.83,
+        "eq_signs": 3,
+        "math_density": 0.0021,
         "needs_ocr": false,
         "reasons": []
       },
@@ -355,6 +363,8 @@ A two-page PDF whose first page has a usable text layer and whose second page is
         "image_coverage": 1.0,
         "garbage_ratio": 0.0,
         "alpha_ratio": 0.0,
+        "eq_signs": 0,
+        "math_density": 0.0,
         "needs_ocr": true,
         "reasons": [
           "only 0 embedded chars (<50)",
@@ -404,6 +414,9 @@ A pydantic model; its values come from the `[routing]` section of `config/pipeli
 | `blank_dark_page` | `int` | `128` | A page with a median grey below this counts as all ink. |
 | `scan_layer_to_ocr` | `bool` | `True` | A page that is a scan (images cover at least `scan_image_cover`) and has at least `min_chars` characters of text layer needs OCR. `False` keeps the layer. |
 | `scan_image_cover` | `float` | `0.8` | Image coverage from which a page counts as a scan for that rule; above 0, at most 1. |
+| `math_to_ocr` | `bool` | `False` | A page with at least `min_chars` characters of text layer and at least `math_min_equals` equals signs, or a `math_density` of at least `math_min_density`, needs OCR. Off by default. |
+| `math_min_equals` | `int` | `5` | Equals signs from which a page is math-heavy; 1 or more. |
+| `math_min_density` | `float` | `0.04` | Math-symbol share from which a page is math-heavy; above 0, at most 1. |
 
 `RoutingPolicy` forbids unknown fields (`extra="forbid"`), like the other config sections: a misspelled key in `[routing]` is a validation error, never a silently ignored threshold.
 
@@ -422,7 +435,8 @@ Every rule is evaluated; each one that fires adds a reason. `needs_ocr` is `True
 | 3 | `garbage_ratio > max_garbage_ratio` | `garbled text layer (<garbage_ratio as %> bad glyphs)` |
 | 4 | `n_chars >= min_chars` and `alpha_ratio < min_alpha_ratio` | `low alphabetic ratio (<alpha_ratio as %>)` |
 | 5 | `scan_layer_to_ocr` and `n_chars >= min_chars` and `image_coverage >= scan_image_cover` | `scanned page with a text layer: images cover <coverage as %> of the page, <n_chars> embedded chars` |
-| 6 | `force_ocr` is `True` and no other rule fired | `forced (--ocr-all)` |
+| 6 | `math_to_ocr` and `n_chars >= min_chars` and (`eq_signs >= math_min_equals` or `math_density >= math_min_density`) | `math-heavy page with a text layer: <eq_signs> '=' signs, math symbols <math_density as %> of the characters` |
+| 7 | `force_ocr` is `True` and no other rule fired | `forced (--ocr-all)` |
 
 The diagram shows the order in which `decide` evaluates the rules for one page. No rule short-circuits the others: each one that fires appends its reason, and the forced reason is added only when the list is still empty.
 
@@ -442,11 +456,14 @@ flowchart TD
     R4 -->|no| R5{"scan_layer_to_ocr, n_chars at least min_chars and image_coverage at least scan_image_cover?"}
     A4 --> R5
     R5 -->|yes| A5["add: scanned page with a text layer"]
-    R5 -->|no| F{"force_ocr and no reasons yet?"}
-    A5 --> F
-    F -->|yes| A6["add the forced reason"]
+    R5 -->|no| R6{"math_to_ocr, n_chars at least min_chars and eq_signs or math_density at least its threshold?"}
+    A5 --> R6
+    R6 -->|yes| A6["add: math-heavy page with a text layer"]
+    R6 -->|no| F{"force_ocr and no reasons yet?"}
+    A6 --> F
+    F -->|yes| A7["add the forced reason"]
     F -->|no| OUT["PageProbe: needs_ocr is true when reasons is not empty"]
-    A6 --> OUT
+    A7 --> OUT
 ```
 
 Properties to rely on:
@@ -454,11 +471,12 @@ Properties to rely on:
 - Reasons accumulate: a blank scanned page typically records both rule 1 and rule 2.
 - Rule 4 applies only when rule 1 does not, so a nearly empty page is never also flagged for its letter ratio. Rule 5 likewise leaves pages under `min_chars` to rule 1.
 - Rule 5 is the only one that sends a page to OCR for having a long, clean text layer. A scan whose layer is shorter than `image_coverage_max_chars` records rule 2 as well, and keeps going to OCR with `scan_layer_to_ocr = False`.
+- Rule 6 is off by default and, like rules 4 and 5, leaves pages under `min_chars` to rule 1. A page that rule 4 flagged for its letter ratio and that is also math-heavy records both reasons.
 - With `force_ocr=True` the page always needs OCR. The `forced (--ocr-all)` reason is added only when no rule fired, so a page that would have gone to OCR anyway keeps its real reasons.
 - `decide` is deterministic and has no side effects. It returns a new `PageProbe` with the signals copied in.
-- The policy is part of the cache key of PDF inputs only (its JSON is in `config_hash`). Changing a threshold re-processes PDFs on the next run and leaves images and converter inputs cached.
+- The policy is part of the cache key of PDF inputs only (`RoutingPolicy.cache_json()` is in `config_hash`). `cache_json()` leaves `math_to_ocr`, `math_min_equals` and `math_min_density` out while `math_to_ocr` is `False`, so a policy that does not use the rule hashes as it did before the rule existed. Changing a threshold re-processes PDFs on the next run and leaves images and converter inputs cached.
 
-Examples (these are the cases in `tests/unit/test_routing_policy.py`, run with the default policy):
+Examples (the cases in `tests/unit/test_routing_policy.py` and `tests/unit/test_math_routing.py`, run with the default policy unless stated):
 
 | Signals | `needs_ocr` | `reasons` |
 |---|---|---|
@@ -467,6 +485,7 @@ Examples (these are the cases in `tests/unit/test_routing_policy.py`, run with t
 | `n_chars=120, image_coverage=0.9, alpha_ratio=0.8` | `True` | `image covers 90% of page with little text`, `scanned page with a text layer: images cover 90% of the page, 120 embedded chars` |
 | `n_chars=2000, image_coverage=0.9, alpha_ratio=0.8` | `True` | `scanned page with a text layer: images cover 90% of the page, 2000 embedded chars` |
 | `n_chars=2000, image_coverage=0.5, alpha_ratio=0.8` | `False` | none (a figure on a page of text) |
+| `n_chars=2000, alpha_ratio=0.9, eq_signs=12, math_density=0.05`, with `math_to_ocr=True` | `True` | `math-heavy page with a text layer: 12 '=' signs, math symbols 5.0% of the characters` (the same page with the default policy: `False`, none) |
 | `n_chars=900, garbage_ratio=0.4, alpha_ratio=0.8` | `True` | `garbled text layer (40% bad glyphs)` |
 | `n_chars=900, alpha_ratio=0.2` | `True` | `low alphabetic ratio (20%)` |
 
@@ -490,6 +509,9 @@ Pure string functions: quality signals for a PDF text layer, its clean-up, and t
 | `HYPHEN_MARK` | `"\x02"` | The character pdfium puts in place of a line-end hyphen when it joins the two lines. |
 | `garbage_ratio` | `(text: str) -> float` | Share of characters that indicate a broken text layer. |
 | `alpha_ratio` | `(text: str) -> float` | Share of letters among non-space characters. |
+| `equals_count` | `(text: str) -> int` | Number of `=` signs. |
+| `math_density` | `(text: str) -> float` | Share of math-symbol characters among non-space characters (without `HYPHEN_MARK`). |
+| `is_math_char` | `(c: str) -> bool` | Whether a character is a math symbol: Greek, arrows, mathematical operators, technical brackets, angle brackets, supplemental operators, letterlike symbols, mathematical alphanumerics, and `± × ÷ √ ∞ ∑ ∏ ∫ ≈ ≠ ≤ ≥ ⊗ ⊕ † ˆ`. ASCII operators are not. |
 | `text_vocabulary` | `(*texts: str) -> set[str]` | Lower-cased word set used to decide de-hyphenation. |
 | `clean_text_layer` | `(text: str, vocab: set[str] \| None = None) -> str` | Normalize a PDF text layer. |
 | `collapse_dot_leaders` | `(text: str) -> str` | Remove the dot leaders between an entry and its page number on contents lines. |
@@ -501,7 +523,9 @@ Pure string functions: quality signals for a PDF text layer, its clean-up, and t
 - `garbage_ratio(text)`: whitespace is removed first. The "bad" count is the number of U+FFFD replacement characters, plus control characters below U+0020 other than `HYPHEN_MARK`, plus private-use characters (U+E000 to U+F8FF), plus the total length of every `(cid:N)` sequence (unmapped glyphs). The result is bad / non-whitespace length, or `0.0` for empty text.
 - `alpha_ratio(text)`: characters for which `str.isalpha()` is true, divided by the non-whitespace length, or `0.0` for empty text. olmOCR flags text below 0.5 as a bad text layer.
 
-A new `PdfReader` adapter should compute `PageSignals.garbage_ratio` and `alpha_ratio` with these functions so that the routing thresholds keep their meaning.
+- `equals_count(text)` and `math_density(text)`: the two signals of the math rule. The density is the count of `is_math_char` characters over the non-whitespace length after the soft-hyphen mark is removed, or `0.0` for empty text.
+
+A new `PdfReader` adapter should compute `PageSignals.garbage_ratio`, `alpha_ratio`, `eq_signs` and `math_density` with these functions so that the routing thresholds keep their meaning.
 
 ### `clean_text_layer(text, vocab=None)`
 
@@ -618,6 +642,33 @@ print([(c.name, c.start, len(c.text)) for c in chunks])
 # [('abababababababab pages 1-2', 0, 900), ('abababababababab pages 2-2', 800, 204)]
 ```
 
+## circuits.py
+
+`circuits.py` writes a plain-text gate list from the LaTeX source of a quantum circuit, as a pure function (standard library only). The LaTeX converter keeps each circuit as a fenced `latex` code block with the author's code; `AskService` uses this module at answer time to add a list after the block (the block, the stored Markdown and the index are never changed). Why it exists and what it fixed: an answer model misreads the wire-and-column grid (two control dots joined by a wire read as a CNOT); the list says `controlled-Z on wires 1 and 2 (control dots on both, symmetric: no target)`.
+
+| Name | Meaning |
+|---|---|
+| `gate_list(source)` | The list of the circuits in `source`, the body of one code block, as a `GateList`: `status` (`"parsed"` all circuits fully read, `"partial"` some part written as `unparsed`, `"unparsed"` nothing readable), `text` (empty when nothing could be read) and `n_circuits`. Reads `quantikz`, `\Qcircuit`, `yquant` and `tikzcd` drawn as a circuit. |
+| `circuit_code_blocks(markdown)` | The fenced `latex` blocks of a Markdown text as `CodeBlock(start, end, source)` (`text[start:end]` is both fences and the source). Other fenced blocks are skipped whole and a block that never closes is left out. One pass over the lines. |
+| `add_gate_lists(text, start, document, blocks)` | `text` (a chunk found at `start` of `document`) with `gate_list` of every block whose closing fence lies inside the chunk, as a paragraph right after that fence (`"\n\n" + list + "\n"`). A block that began in the chunk before is read whole from `document`; a block cut by the end of the chunk gets nothing, and a block whose closing fence ends exactly where the chunk starts belongs to the chunk before; a chunk that is not where `start` says is returned as it is. `document` is the page texts joined as `chunk_pages` joins them. |
+| `MAX_STEPS` | 60: a longer circuit is listed up to there, then `... N more lines not listed`. |
+
+```text
+Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):
+Wires: 1 = \ket{a}; 2 = \ket{b}
+Step 1: H on wire 1
+Step 2: CNOT: control wire 1, target wire 2
+Step 3: measure wire 2
+```
+
+Rules of the reader:
+
+- **Drawing order.** Grid columns (`&`) are the steps and rows (`\\`) the wires. A column with only wires is skipped, a row that draws nothing is not numbered (a quantikz row with as many cells as the widest row is a wire even when empty, as its manual draws with `&&&&& \\ &&&&&`; a Qcircuit row is a wire when a cell draws one, `\qw`, `\cw`, a bundle, a gate or `\ghost`, or holds an `\lstick`, and a row of text only, of barriers or of nothing is not), a row of dots is listed once. Text on a row that is not a wire is left out. It is not a schedule: gates in different columns may commute. A `\gate[n]`, `\lstick[wires=n]` or `\rstick[n]` that reaches past the last row gives its wires to those empty rows; a spacer row between two drawn rows is not a wire.
+- **Joined operations.** In one column, operations a vertical wire (`\ctrl{n}`, `\swap{n}`, `\qwx`, `\vqw`, `\wire`, `\sgate`) or a multi-wire gate joins are one item: CNOT, Toffoli, n-controlled X, open controls, controlled-U, controlled-Z (dots only, no target), a labelled dot gate (`\dstick`), SWAP, controlled-SWAP, multi-wire gates, a measurement that classically controls a gate (a classical wire, `\cwx`, `\vcw`, `\wire[d][1]{c}` or `\ctrl[vertical wire=c]`, marks the group "classically controlled"; a measurement group with anything else in it is unparsed). A gate whose cell draws a classical wire to a row with nothing in that column (a teleportation correction in a later column than its measurement) is written `X on wire 3, classically controlled by wire 1`; a quantum wire to such a row leaves the gate unparsed. `\meter[n]{}` is one measurement over n wires, like `\gate[n]`. Two controls and two targets in one group (CNOTs drawn over one another) are unparsed. `=`, `\equiv`, `\midstick{=}` and `\push{=}` start the right-hand side with its own step numbers. The vertical wire passes through rows between without joining them unless they hold a control, target or swap.
+- **Never guesses.** Anything else is `unparsed on wire k: <source>` at its step; a combination it does not know is `unparsed joined operation (...)`; a wire or gate that leads outside the grid, an unreadable count, a block that never closes, and a circuit made only of author macros are unparsed too. A count or offset of more than 6 digits and a `yquant` register of more than 128 wires are unparsed. Labels are copied as written. A `\label` inside the circuit goes to the header (`Gate list for \label{fig:x} (...)`); a block with several circuits has `Circuit k of n` headings.
+- **Linear time.** Every bracket is matched once, cells are read sparsely, and the vertical wires of a column are joined with a sweep (a difference array), so no source makes the work quadratic; a gate over many wires is written as a range (`wires 1 to 40`). Tests compare the time of an input with that of one four times larger.
+- Not read: circuits drawn with TikZ nodes or arrows, macros the author defined, `\gategroup` boxes, labels outside the grid, display-math circuits (the caller passes code blocks only).
+
 ## errors.py
 
 Domain errors describe expected, reportable failures. Adapters translate library exceptions into them (`raise ConversionError(...) from e`), so the application and the CLI never need to know which library failed.
@@ -722,4 +773,4 @@ The domain is small and everything depends on it, so changes ripple outward. Che
 | Different logic in `decide`, `clean_text_layer`, `collapse_dot_leaders`, `structure_pages` or `render_markdown` | Bump `PIPELINE_VERSION` in `application/ingest.py`. Code changes are not part of any adapter fingerprint, so without the bump cached results produced by the old logic would still be served. |
 | New error type | Subclass the closest existing error so that existing handlers keep working. Put adapter-specific errors in the adapter module, as `OcrServerError` does. |
 
-Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).
+Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`, `tests/unit/test_circuits.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).

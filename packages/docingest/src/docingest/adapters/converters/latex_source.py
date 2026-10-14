@@ -14,6 +14,7 @@ Pure functions over paths and strings: no pandoc, no pylatexenc.
 from __future__ import annotations
 
 import codecs
+import functools
 import gzip
 import io
 import json
@@ -21,6 +22,7 @@ import re
 import tarfile
 import zlib
 from bisect import bisect_left, bisect_right
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from itertools import pairwise
@@ -396,6 +398,9 @@ def drop_unsafe_macros(text: str) -> tuple[str, list[str]]:
     return "".join(parts), dropped
 
 
+_EQUATION_WITHIN = re.compile(r"\\(?:numberwithin|counterwithin)\*?\s*\{equation\}\s*\{[a-z]+\}")
+
+
 def package_macros(sty: str) -> str:
     """The notation macros of a local ``.sty``: what pandoc needs, nothing it chokes on.
 
@@ -412,6 +417,7 @@ def package_macros(sty: str) -> str:
         and not d.recursive
     ]
     keep += [m.group() for m in _NEWTHEOREM.finditer(sty)]
+    keep += [m.group() for m in _EQUATION_WITHIN.finditer(sty)]  # their numbers, for the count
     return "\n".join(keep)
 
 
@@ -1066,6 +1072,923 @@ def _hide_listings(text: str) -> tuple[str, Callable[[str], str]]:
     return "".join(parts), restore
 
 
+# ---------------------------------------------------------- equation numbers
+# pandoc keeps a display equation as math but not the number LaTeX gives it, and it writes a
+# reference to one (``\eqref{x}``) as a link whose text is the label. A reader asking what
+# "Eq. (7)" states then finds neither the equation nor the number. So the numbers are counted
+# here the way LaTeX counts them and written into the math as ``\tag{n}``, which pandoc (and
+# pylatexenc, with the math verbatim) copy as they copy the rest of the math, and a reference
+# to a numbered equation becomes its number. Whatever makes the count uncertain ends the
+# numbering at that point: an equation is left without a number rather than given a wrong one.
+_NUMBERED = frozenset(
+    {"equation", "multline", "align", "alignat", "xalignat", "flalign", "gather", "eqnarray"}
+)
+_ONE_NUMBER = frozenset({"equation", "multline"})  # one number for the whole environment
+# Numbered environments of packages whose rules are not modelled here.
+_UNMODELLED = frozenset(
+    {"dmath", "dgroup", "dseries", "IEEEeqnarray", "empheq", "numcases", "subnumcases"}
+)
+_HARD_ENVS = _NUMBERED | _UNMODELLED | {"subequations", "appendix", "appendices"}
+_BELOW = {"chapter": ("section", "subsection"), "section": ("subsection",), "subsection": ()}
+_BOOK_CLASSES = frozenset({"book", "report", "amsbook", "scrbook", "scrreprt"})
+_ARTICLE_CLASSES = frozenset(
+    {
+        "article",
+        "amsart",
+        "amsproc",
+        "scrartcl",
+        "quantumarticle",
+        "iopjournal",
+        "ieeeaccess",
+        "wlscirep",
+    }
+)
+_CLASS = re.compile(
+    r"\\documentclass\s*(?:\[(?P<options>[^\]]{0,300})\])?\s*\{(?P<name>[^{}]{0,100})\}"
+)
+_CHAPTER = re.compile(r"\\chapter\*?(?![A-Za-z@])(?=\s*(?:\[[^\]]{0,300}\]\s*)?\{)")
+_FORMATTED = frozenset({"theequation", "thesection", "thesubsection", "thechapter"})
+
+# How a counter is shown: ``\theequation`` and its relatives, as a list of ("text", s),
+# ("counter", name, style) and ("the", name).
+_Format = list[tuple[str, ...]]
+_FORMAT_TOKEN = re.compile(
+    r"\\(?P<style>arabic|Alph|alph|roman|Roman)\s*\{(?P<counter>[A-Za-z]+)\}"
+    r"|\\@(?P<atstyle>arabic|Alph|alph|roman|Roman)\s*\\c@(?P<atcounter>[A-Za-z]+)"
+    r"|\\the(?P<the>equation|section|subsection|chapter)(?![A-Za-z@])"
+    r"|(?P<text>[A-Za-z0-9.:()\- ]+)"
+    r"|(?P<bad>[\s\S])"
+)
+_ROMAN = (
+    (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"),
+    (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+)  # fmt: skip
+_SIMPLE_TAG = re.compile(r"[A-Za-z0-9.:+*'\-]+")  # a ``\tag`` text that is a number as it stands
+_NUMBER_SHOWN = re.compile(r"[A-Za-z0-9.\-]+")  # what is written into a ``\tag``
+_EQ_INTERESTING = re.compile(
+    r"\\(?:begin|end)\s*\{(?P<env>[A-Za-z@]+\*?)\}|\\(?P<word>nonumber|notag|tag)(?![A-Za-z@])"
+    r"|(?P<rowend>\\\\)"
+)
+_LET = re.compile(r"\\let\s*\\[A-Za-z@]+\s*=?\s*\\[A-Za-z@]+")
+_LET_ALIAS = re.compile(
+    r"\\let\s*\\(?P<name>[A-Za-z@]+)\s*=?\s*\\(?P<end>end)?(?P<env>[A-Za-z]+)(?![A-Za-z@*])"
+)
+_NEWENVIRONMENT = re.compile(
+    r"\\(?P<kind>re)?newenvironment\*?\s*\{(?P<name>[^{}]*)\}\s*(?:\[\d\]\s*(?:\[[^\]]*\]\s*)?)?"
+)
+_BEGIN_ONLY = re.compile(r"\\begin\s*\{(?P<env>[A-Za-z@]+\*?)\}")
+_END_ONLY = re.compile(r"\\end\s*\{(?P<env>[A-Za-z@]+\*?)\}")
+_SHARED_THEOREM = re.compile(r"\\newtheorem\s*\{(?P<name>[^{}]*)\}\s*\[(?P<counter>[^\]]{0,100})\]")
+_TWO_ARGUMENTS = re.compile(r"\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
+_ONE_ARGUMENT = re.compile(r"\s*\{([^{}]*)\}")
+_INTEGER = re.compile(r"\s*-?\d+\s*\Z")
+# What a macro does to the counters when it is used: sections, the appendix, counter commands and a
+# new form of the number of an equation or a section.
+_EFFECT = re.compile(
+    r"\\(?:chapter|section|subsection|appendix)(?![A-Za-z@])"
+    r"|\\(?:setcounter|addtocounter|stepcounter|refstepcounter|numberwithin|counterwithin"
+    r"|@addtoreset)(?![A-Za-z@])"
+    r"|\\(?:(?:re)?newcommand\*?\s*\{?|[gex]?def)\\the(?:equation|section|subsection|chapter)"
+)
+# Packages and options that number only the equations that are referred to, or number lines
+# in a way that is not modelled.
+_NUMBERING_PACKAGES = re.compile(
+    r"showonlyrefs(?!\s*=\s*false)"
+    r"|\\usepackage\s*(?:\[[^\]]{0,300}\])?\s*\{[^{}]{0,300}\b(?:autonum|numcases)\b"
+)
+# A conditional: \ifx ... \fi, or a command that takes the branches as arguments. What one holds may
+# or may not be typeset, which the count cannot know, so a counter that changes in one stops the
+# numbering. A main document takes the branch B of ``\ifSubfilesClassLoaded{A}{B}``.
+_CONDITIONAL = re.compile(
+    r"(?P<newif>\\newif\s*\\if[A-Za-z@]+)"
+    r"|(?P<fi>\\fi(?![A-Za-z@]))"
+    r"|\\(?P<name>(?:@?if|If)[A-Za-z@]*)(?![A-Za-z@])"
+)
+_BRANCHES = {  # commands that take their branches as arguments: how many groups they read
+    "ifthenelse": 3, "iftoggle": 3, "ifbool": 3, "ifdef": 3, "ifundef": 3, "ifcsdef": 3,
+    "ifcsundef": 3, "ifstrequal": 4, "ifstrempty": 3, "ifdefempty": 3, "ifdefstring": 4,
+    "ifdefequal": 4, "ifSubfilesClassLoaded": 2, "IfFileExists": 3,
+}  # fmt: skip
+_NOT_CONDITIONAL = frozenset({"iff"})  # the arrow of math
+_PRIMITIVE_CONDITIONALS = frozenset(
+    {
+        *("if", "ifcat", "ifnum", "ifdim", "ifodd", "ifvmode", "ifhmode", "ifmmode", "ifinner"),
+        *("ifvoid", "ifhbox", "ifvbox", "ifx", "ifeof", "iftrue", "iffalse", "ifcase"),
+        *("ifdefined", "ifcsname", "iffontchar"),
+    }
+)  # the others are declared with \newif (a name of the paper's own, or one of a package)
+_ELSE_OR_FI = re.compile(r"\\(?:else|fi)(?![A-Za-z@])")
+_COUNTERS_OF_THE_NUMBERING = frozenset({"equation", "chapter", "section", "subsection"})
+_COUNTER_COMMAND = re.compile(r"\s*\{([^{}]*)\}")
+_ROW_TAIL = re.compile(
+    r"\A\s*\*?\s*(?:\[[^\]]{0,100}\])?"
+)  # what follows ``\\`` before the next row
+_COUNTING = frozenset({"begin", "section", "appendix", "counter", "macro", "matter"})
+_ROWS = frozenset({"nonumber", "tag", "rowend"})  # what a conditional in an equation may change
+_CLOSE_ROUNDS = 50  # rounds that look for the macros that use a macro that steps a counter
+_NESTING_MAX = 4  # ``\thesubsection`` names ``\thesection``, which names ``\thechapter``
+
+
+def _parse_format(body: str) -> _Format | None:
+    """The parts of a ``\\theequation``-like definition, or None when it uses anything but
+    counters, ``\\the<counter>`` and plain text."""
+    parts: _Format = []
+    for m in _FORMAT_TOKEN.finditer(body):
+        if m["bad"] is not None:
+            return None
+        if style := m["style"] or m["atstyle"]:
+            parts.append(("counter", m["counter"] or m["atcounter"], style))
+        elif m["the"]:
+            parts.append(("the", m["the"]))
+        else:
+            parts.append(("text", m["text"]))
+    return parts or None
+
+
+def _style(value: int, style: str) -> str | None:
+    """A counter in one of the styles of ``\\arabic`` and the like. LaTeX prints nothing for
+    ``\\Alph{0}`` or ``\\Alph{27}`` (it reports an error and goes on), and so do we."""
+    if style == "arabic":
+        return str(value)
+    if style in ("Alph", "alph"):
+        letter = chr(96 + value) if 1 <= value <= 26 else ""
+        return letter.upper() if style == "Alph" else letter
+    if not 1 <= value < 4000:
+        return None
+    out = ""
+    for size, glyphs in _ROMAN:
+        count, value = divmod(value, size)
+        out += glyphs * count
+    return out.upper() if style == "Roman" else out
+
+
+@dataclass(frozen=True)
+class EquationNumbers:
+    """What :func:`number_equations` did: the new text, the numbers it wrote as ``\\tag`` in
+    order (``empty``: the numbers of rows that have nothing to show, which it counted and did not
+    write), why the numbering stopped (None: it did not), and how many ``\\ref`` and ``\\eqref``
+    it saw and how many it replaced by a number."""
+
+    text: str
+    written: tuple[str, ...]
+    stopped: str | None
+    refs: int
+    resolved: int
+    empty: tuple[str, ...] = ()  # the numbers of empty rows: counted, nothing written
+
+
+@dataclass
+class _Row:
+    start: int
+    labels: list[str] = field(default_factory=list)
+    tagged: bool = False  # a ``\tag`` of the author's
+    tag: str | None = None  # its text when that is a number as it stands
+    unnumbered: bool = False  # ``\nonumber`` or ``\notag``
+
+
+@dataclass
+class _Open:
+    """The numbered environment being read: its rows (a row ends at a ``\\\\`` that is neither
+    in braces nor in an environment of its own), its brace depth and its nested environments."""
+
+    name: str
+    row: _Row
+    rows: list[tuple[_Row, int]] = field(default_factory=list)
+    depth: int = 0
+    inner: int = 0
+
+
+@dataclass
+class _Sub:
+    prefix: str  # the number of the group: ``3`` in ``3a``
+    parent: int  # the value of the equation counter to go back to
+    at: int  # just past ``\begin{subequations}``
+    seen: bool = False  # a label was met: a later one has text before it
+
+
+@functools.cache
+def _eq_token(names: tuple[str, ...]) -> re.Pattern[str]:
+    """The tokens the numbering reads; ``names`` are the macros of the paper that stand for
+    them (``\\be``) or hide them."""
+    macros = (
+        rf"|(?P<macro>\\(?:{'|'.join(re.escape(n) for n in names)})(?![A-Za-z@]))" if names else ""
+    )
+    return re.compile(
+        r"(?P<begin>\\begin\s*\{(?P<benv>[A-Za-z@]+\*?)\})"
+        r"|(?P<end>\\end\s*\{(?P<eenv>[A-Za-z@]+\*?)\})"
+        r"|(?P<section>\\(?P<level>chapter|section|subsection)(?P<starred>\*?)(?![A-Za-z@])"
+        r"(?=\s*(?:\[[^\]]{0,300}\]\s*)?\{))"  # a heading, not ``\titleformat{\section}``
+        r"|(?P<appendix>\\appendix(?P<astar>\*?)(?![A-Za-z@]))"
+        r"|(?P<matter>\\(?:front|main|back)matter(?![A-Za-z@]))"
+        r"|(?P<counter>\\(?P<cmd>setcounter|addtocounter|stepcounter|refstepcounter|numberwithin"
+        r"|counterwithin\*?|@addtoreset)(?![A-Za-z@]))"
+        r"|(?P<label>\\label\s*\{(?P<key>[^{}]*)\})"
+        r"|(?P<tag>\\tag(?P<tstar>\*?)\s*\{)"
+        r"|(?P<nonumber>\\(?:nonumber|notag)(?![A-Za-z@]))"
+        r"|(?P<ref>\\(?P<refcmd>eqref|ref)(?![A-Za-z@])\s*\{(?P<refkey>[^{}]*)\})"
+        r"|(?P<rowend>\\\\)"
+        rf"{macros}"
+        r"|(?P<brace>[{}])"
+        r"|\\[A-Za-z@]+|\\."
+    )
+
+
+class _Numberer:
+    """One pass over a document, in order, with the counters LaTeX keeps."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.stop: str | None = None
+        self.n = {"chapter": 0, "section": 0, "subsection": 0, "equation": 0}
+        self.parent: str | None = None  # the counter whose step resets the equation counter
+        self.fmt: dict[str, _Format | None] = {
+            "equation": [("counter", "equation", "arabic")],
+            "section": [("counter", "section", "arabic")],
+            "subsection": [("the", "section"), ("text", "."), ("counter", "subsection", "arabic")],
+            "chapter": [("counter", "chapter", "arabic")],
+        }
+        self.family: str | None = None
+        self.prl = False  # the REVTeX option of Physical Review Letters
+        self.own_format = False  # the paper redefines \\theequation itself
+        self.appendix_seen = False
+        self.cur: _Open | None = None
+        self.sub: _Sub | None = None
+        self.aliases: dict[str, tuple[tuple[str, str], ...]] = {}  # macro -> what it stands for
+        self.env_aliases: dict[str, str] = {}  # environment -> the one it begins
+        self.hard: set[str] = set()  # macros that hide an environment of the numbering
+        self.soft: set[str] = set()  # macros that hide a row end or a ``\nonumber``
+        self.effects: dict[str, str] = {}  # macros that step a section or set a counter: their text
+        self.nested = 0
+        self.budget = len(text) + 10_000  # macro uses that are read, over the whole document
+        self.effect_names: tuple[str, ...] = ()
+        self.matter = True  # a book is in its main matter (chapters are numbered)
+        self.conditional = _Covered([])
+        self.hard_envs: set[str] = set()
+        self.redefined: set[str] = set()  # ``\eqref`` and ``\ref`` when the paper defines them
+        self.sharing: set[str] = set()  # theorem environments counted with the equations
+        self.labels: dict[str, str] = {}
+        self.label_count: Counter[str] = Counter()
+        self.refs: list[tuple[int, int, str, str]] = []
+        self.edits: list[tuple[int, int, str]] = []
+        self.written: list[str] = []
+        self.empty: list[str] = []
+        self._pairs: dict[int, int] | None = None
+
+    # -- the result
+    def result(self) -> EquationNumbers:
+        trusted = {k: v for k, v in self.labels.items() if self.label_count[k] == 1}
+        replaced = 0
+        for a, b, command, key in self.refs:
+            if (number := trusted.get(key)) is not None:
+                self.edits.append((a, b, f"({number})" if command == "eqref" else number))
+                replaced += 1
+        parts: list[str] = []
+        pos = 0
+        for a, b, new in sorted(self.edits):
+            parts += (self.text[pos:a], new)
+            pos = b
+        parts.append(self.text[pos:])
+        return EquationNumbers(
+            "".join(parts),
+            tuple(self.written),
+            self.stop,
+            len(self.refs),
+            replaced,
+            tuple(self.empty),
+        )
+
+    def poison(self, why: str) -> None:
+        if self.stop is None:
+            self.stop = why
+
+    @property
+    def pairs(self) -> dict[int, int]:
+        if self._pairs is None:
+            self._pairs = brace_pairs(self.text)
+        return self._pairs
+
+    # -- the document and its macros
+    def prepare(self) -> tuple[_Covered, list[tuple[int, MacroDef]]]:
+        """The class, the macros that matter and the stretches that are not read."""
+        text = self.text
+        self.read_class(text)
+        defs = list(macro_definitions(text))
+        spans = [(v.start, v.end) for v in verbatim_parts(text)]
+        spans += ((b.start(), e.end()) for b, e in regions(text, IFFALSE, FI))
+        spans += ((d.start, d.end) for d in defs)
+        extras: list[tuple[int, MacroDef]] = []
+        for d in defs:
+            if d.name in ("eqref", "ref"):
+                self.redefined.add(d.name)
+            if d.name in _FORMATTED:
+                extras.append((d.start, d))
+            else:
+                self.classify(d, _arguments(text, d))
+        self.close_effects(defs)
+        # ``\let\old\appendix`` saves a command, it does not use it
+        spans += ((m.start(), m.end()) for m in _LET.finditer(text))
+        for m in _LET_ALIAS.finditer(text):
+            if (env := m["env"]) in _NUMBERED | {"subequations"}:
+                self.aliases[m["name"]] = (("end" if m["end"] else "begin", env),)
+        for m in _SHARED_THEOREM.finditer(text):
+            if m["counter"] == "equation" or m["counter"] in self.sharing:
+                self.sharing.add(m["name"])
+        spans += self.environment_definitions()
+        self.effect_names = tuple(sorted(self.effects))
+        skipped = _Covered(spans)
+        branches = self.conditionals(skipped, {d.name for d in defs})
+        return _Covered([*spans, *branches]), extras
+
+    def conditionals(self, skipped: _Covered, defined: set[str]) -> list[tuple[int, int]]:
+        """Fills ``self.conditional`` with the stretches that are in a conditional, and returns the
+        spans to skip: the branch of ``\\ifSubfilesClassLoaded`` that a main document skips.
+        A name that the paper defines (``\\newcommand{\\ifo}``) is not a conditional, and an
+        ``\\if...`` that is not a TeX primitive, is not declared by ``\\newif`` and is followed
+        by a brace group takes its branches as arguments (``\\ifdraft{A}{B}``)."""
+        held: list[tuple[int, int]] = []
+        unused: list[tuple[int, int]] = []
+        opened: list[int] = []
+        found = [m for m in _CONDITIONAL.finditer(self.text) if m.start() not in skipped]
+        declared = {m["newif"].rsplit("\\", 1)[1] for m in found if m["newif"]}
+        for m in found:
+            if m["newif"]:
+                continue
+            if m["fi"]:
+                if opened and (start := opened.pop()) is not None and not opened:
+                    held.append((start, m.end()))
+            elif (name := m["name"]) in _NOT_CONDITIONAL or name in defined:
+                continue
+            elif name in _BRANCHES:
+                end, groups = self.groups(m.end(), _BRANCHES[name])
+                if name == "ifSubfilesClassLoaded" and len(groups) == 2:
+                    unused.append(groups[0])
+                else:
+                    held.append((m.start(), end))
+            elif name.startswith(("@if", "If")) or (
+                name not in _PRIMITIVE_CONDITIONALS
+                and name not in declared
+                and self.takes_branches(m.end())
+            ):
+                held.append((m.start(), self.groups(m.end(), 3)[0]))
+            else:
+                opened.append(m.start())
+        if opened:
+            held.append((opened[0], len(self.text)))  # a conditional that never closes
+        self.conditional = _Covered(held)
+        return unused
+
+    def takes_branches(self, i: int) -> bool:
+        """Whether an ``\\if...`` of unknown kind, whose name ends at ``i``, takes its branches as
+        brace groups (``\\ifdraft{A}{B}``). A group that is followed by ``\\else`` or ``\\fi`` is
+        the text of a TeX conditional that a package declared (``\\ifpdf{x}\\else..\\fi``)."""
+        groups = self.groups(i, 3)[1]
+        if not groups:
+            return False
+        after = [self.text[g[1] :].lstrip() for g in groups]
+        return not any(_ELSE_OR_FI.match(rest) for rest in after)
+
+    def groups(self, i: int, count: int) -> tuple[int, list[tuple[int, int]]]:
+        """The brace groups that follow position ``i`` (up to ``count``): where the last one ends
+        and the span of each."""
+        found: list[tuple[int, int]] = []
+        for _ in range(count):
+            while i < len(self.text) and self.text[i] in " \t\n":
+                i += 1
+            end = self.pairs.get(i)
+            if end is None:
+                break
+            found.append((i, end))
+            i = end
+        return i, found
+
+    def read_class(self, text: str) -> None:
+        found = _CLASS.search(text)
+        name = found["name"].strip() if found else ""
+        options = (found["options"] or "") if found else ""
+        chapters = _CHAPTER.search(text) is not None
+        if name.startswith("revtex4"):
+            self.family = "revtex"
+        elif name in _ARTICLE_CLASSES:
+            self.family = "article"
+        elif name in _BOOK_CLASSES:
+            self.family = "book"
+        self.prl = re.search(r"(?<![A-Za-z])prl(?![A-Za-z])", options) is not None
+        if self.family == "revtex" or name == "IEEEtran":  # sections are I, II, III
+            self.fmt["section"] = [("counter", "section", "Roman")]
+            self.fmt["subsection"] = None
+        elif name == "ieeeaccess":  # the style of IEEEtran: its section numbers are not modelled
+            self.fmt["section"] = self.fmt["subsection"] = None
+        if "eqsecnum" in options:
+            if self.family == "revtex":  # revtex4: equations numbered within the section, 2.3
+                self.parent = "section"
+                self.fmt["equation"] = [
+                    ("counter", "section", "arabic"),
+                    ("text", "."),
+                    ("counter", "equation", "arabic"),
+                ]
+            else:
+                self.poison("class option eqsecnum")
+        if self.family == "book":
+            if chapters:
+                self.parent = "chapter"
+                # no chapter, no prefix: ``\ifnum\c@chapter>\z@ \thechapter.\fi\arabic{equation}``
+                self.fmt["equation"] = [("chapter_prefix",), ("counter", "equation", "arabic")]
+                self.fmt["section"] = _within("chapter", "section")
+            else:
+                self.poison("a book class without chapters")
+        elif chapters:
+            self.poison(f"chapters in the class {name or 'unknown'}")
+
+    def classify(self, d: MacroDef, arguments: int) -> None:
+        """What a macro of the paper does to the count: it stands for some tokens of it
+        (``\\newcommand{\\be}{\\begin{equation}}``), or hides them in more text."""
+        found = list(_EQ_INTERESTING.finditer(d.body))
+        effect = _EFFECT.search(d.body) is not None
+        if not found and not effect:
+            return
+        if not found:
+            self.effects[d.name] = d.body
+            return
+        rest = _EQ_INTERESTING.sub("", d.body).replace("&", "")
+        ops = tuple(_operation(m) for m in found)
+        if arguments == 0 and not rest.strip() and not effect:
+            self.aliases[d.name] = ops
+        elif effect or _hides(d.body):
+            self.hard.add(d.name)
+        else:
+            self.soft.add(d.name)
+
+    def close_effects(self, defs: list[MacroDef]) -> None:
+        """A macro that only uses a macro that steps a counter does so too. Each round adds the
+        macros that use one found before; ``apply`` stops a chain at ``_NESTING_MAX`` levels."""
+        for _ in range(_CLOSE_ROUNDS):
+            if not self.effects:
+                return
+            uses = re.compile(
+                "|".join(rf"\\{re.escape(n)}(?![A-Za-z@])" for n in sorted(self.effects))
+            )
+            known = {*self.effects, *self.aliases, *self.hard, *self.soft}
+            more = {d.name: d.body for d in defs if d.name not in known and uses.search(d.body)}
+            if not more:
+                return
+            self.effects.update(more)
+        self.poison("macros that use each other too deeply")
+
+    def environment_definitions(self) -> list[tuple[int, int]]:
+        """The spans of ``\\newenvironment``; an environment that begins and ends another one
+        is an alias of it, and one that hides a numbered environment is not modelled."""
+        spans: list[tuple[int, int]] = []
+        for m in _NEWENVIRONMENT.finditer(self.text):
+            begin = _matched(self.pairs, m.end())
+            if begin is None:
+                continue
+            after = begin
+            while after < len(self.text) and self.text[after] in " \t\n":
+                after += 1
+            end = _matched(self.pairs, after)
+            if end is None:
+                continue
+            spans.append((m.start(), end))
+            name = m["name"]
+            first = self.text[m.end() + 1 : begin - 1].strip()
+            last = self.text[after + 1 : end - 1].strip()
+            if name in _HARD_ENVS:
+                self.poison(f"\\{'re' if m['kind'] else ''}newenvironment of {name}")
+            elif (b := _BEGIN_ONLY.fullmatch(first)) and (e := _END_ONLY.fullmatch(last)):
+                if b["env"] == e["env"]:
+                    self.env_aliases[name] = b["env"]
+            elif _hides(first + last):
+                self.hard_envs.add(name)
+        return spans
+
+    # -- the pass
+    def run(self) -> EquationNumbers:
+        if _NUMBERING_PACKAGES.search(self.text):
+            self.poison("a package or option that numbers only some equations")
+        skipped, extras = self.prepare()
+        names = tuple(sorted({*self.aliases, *self.hard, *self.soft, *self.effects}))
+        ei = 0
+        for m in _eq_token(names).finditer(self.text):
+            if m.start() in skipped:
+                continue
+            while ei < len(extras) and extras[ei][0] < m.start():
+                self.formats(extras[ei][1], at=extras[ei][0])
+                ei += 1
+            kind = m.lastgroup
+            if kind is not None:
+                if m.start() in self.conditional and (
+                    (kind in _COUNTING and self.counts(m))
+                    or (self.cur and (kind in _ROWS or self.hides_row(m)))
+                ):
+                    self.poison("a counter or an equation inside a conditional")
+                getattr(self, f"on_{kind}")(m)
+        for pos, d in extras[ei:]:
+            self.formats(d, at=pos)
+        if self.cur is not None:
+            self.poison("an environment that never closes")
+        return self.result()
+
+    def counts(self, m: re.Match[str]) -> bool:
+        """Whether the token changes a counter or is a numbered environment (a ``\\label``, a
+        ``\\tag`` and the like do not count)."""
+        kind = m.lastgroup
+        if kind == "section":
+            return not m["starred"]
+        if kind == "counter":  # only the counters of the numbering
+            first = _COUNTER_COMMAND.match(self.text, m.end())
+            return first is None or first[1] in _COUNTERS_OF_THE_NUMBERING
+        if kind == "begin":
+            return m["benv"].rstrip("*") in _HARD_ENVS and not m["benv"].endswith("*")
+        if kind == "macro":
+            name = m[0][1:]
+            ops = self.aliases.get(name, ())
+            return name in self.effects or any(
+                op == "begin" and arg.rstrip("*") in _HARD_ENVS for op, arg in ops
+            )
+        return True
+
+    def hides_row(self, m: re.Match[str]) -> bool:
+        """Whether the token is a macro of the paper that stands for a ``\\nonumber``, a ``\\tag``
+        or a row end (``\\newcommand{\\nn}{\\nonumber}``)."""
+        if m.lastgroup != "macro":
+            return False
+        ops = self.aliases.get(m[0][1:], ())
+        return any(op in ("word", "rowend") for op, _ in ops)
+
+    def formats(self, d: MacroDef, at: int | None = None) -> None:
+        """A redefinition of ``\\theequation`` or of the number of a section."""
+        if at is not None and at in self.conditional:
+            self.poison("a counter or an equation inside a conditional")
+        if self.stop is None:
+            parts = _parse_format(d.body)
+            if parts is None and d.name == "theequation":
+                self.poison("\\theequation is not a counter")
+            if d.name == "theequation":
+                self.own_format = True
+                if self.family == "revtex" and self.appendix_seen:
+                    self.poison("\\theequation set after the appendix of a REVTeX paper")
+            self.fmt[d.name.removeprefix("the")] = parts
+
+    def on_label(self, m: re.Match[str]) -> None:
+        key = m["key"]
+        self.label_count[key] += 1
+        if self.stop is not None:
+            return
+        if self.cur is not None:
+            self.cur.row.labels.append(key)
+        elif self.sub is not None and not self.sub.seen:
+            self.sub.seen = True  # a later label has this one before it
+            if not self.text[self.sub.at : m.start()].strip():
+                self.labels[key] = self.sub.prefix  # the label of the group
+
+    def on_ref(self, m: re.Match[str]) -> None:
+        if m["refcmd"] not in self.redefined:  # the paper's own \eqref may print more than (n)
+            self.refs.append((m.start(), m.end(), m["refcmd"], m["refkey"]))
+
+    def on_brace(self, m: re.Match[str]) -> None:
+        if self.cur is not None:
+            self.cur.depth += 1 if m[0] == "{" else -1
+            if self.cur.depth < 0:
+                self.poison("unbalanced braces in an equation")
+
+    def on_nonumber(self, _: re.Match[str]) -> None:
+        if self.cur is not None:
+            self.cur.row.unnumbered = True
+
+    def on_tag(self, m: re.Match[str]) -> None:
+        if self.cur is None:
+            return
+        close = self.pairs.get(m.end() - 1)
+        text = self.text[m.end() : close - 1].strip() if close else ""
+        self.cur.depth += 1  # the brace that opens the text is part of the token
+        self.cur.row.tagged = True
+        self.cur.row.tag = text if _SIMPLE_TAG.fullmatch(text) else None
+
+    def on_rowend(self, m: re.Match[str]) -> None:
+        cur = self.cur
+        if cur is not None and cur.name not in _ONE_NUMBER and cur.depth == 0 and cur.inner == 0:
+            cur.rows.append((cur.row, m.start()))
+            cur.row = _Row(m.end())
+
+    def on_macro(self, m: re.Match[str]) -> None:
+        name = m[0][1:]
+        if name in self.aliases:
+            for op, arg in self.aliases[name]:
+                self.operate(op, arg, m)
+        elif name in self.effects:
+            self.apply(self.effects[name])
+        elif name in self.hard or (name in self.soft and self.cur is not None):
+            self.poison(f"the macro \\{name} hides part of an equation")
+
+    def apply(self, body: str) -> None:
+        """What a macro does to the counters, read from its text where it is used. The macro uses
+        that are read in the whole document are bounded (``self.budget``): a macro that uses a
+        macro that uses a macro, many times each, would grow with the depth of the nesting."""
+        if self.nested >= _NESTING_MAX:
+            self.poison("macros that use each other too deeply")
+            return
+        self.budget -= 1 + len(body) // 64
+        if self.budget < 0:
+            self.poison("macros that expand too much")
+            return
+        saved, self.text, self.nested = self.text, body, self.nested + 1
+        try:
+            events: list[tuple[int, str, object]] = [
+                (m.start(), "token", m)
+                for m in _eq_token(self.effect_names).finditer(body)
+                if m.lastgroup in ("section", "appendix", "counter", "macro", "matter")
+            ]
+            events += ((d.start, "format", d) for d in _format_definitions(body))
+            for _, kind, item in sorted(events, key=lambda e: e[0]):
+                self.budget -= 1
+                if kind == "format":
+                    self.formats(item)  # type: ignore[arg-type]
+                else:
+                    getattr(self, f"on_{item.lastgroup}")(item)  # type: ignore[attr-defined]
+        finally:
+            self.text, self.nested = saved, self.nested - 1
+
+    def operate(self, op: str, arg: str, m: re.Match[str]) -> None:
+        if op == "begin":
+            self.begin(arg, m)
+        elif op == "end":
+            self.end(arg, m)
+        elif op == "word":
+            if arg == "tag":
+                self.poison("a macro that holds a \\tag")
+            else:
+                self.on_nonumber(m)
+        else:
+            self.on_rowend(m)
+
+    def on_begin(self, m: re.Match[str]) -> None:
+        self.begin(m["benv"], m)
+
+    def on_end(self, m: re.Match[str]) -> None:
+        self.end(m["eenv"], m)
+
+    def begin(self, name: str, m: re.Match[str]) -> None:
+        name = self.env_aliases.get(name, name)
+        base = name.removesuffix("*")
+        starred = name.endswith("*")
+        if name in self.hard_envs:
+            self.poison(f"the environment {name} hides part of an equation")
+        elif self.cur is not None:
+            if not starred and base in _HARD_ENVS:
+                self.poison(f"{base} inside {self.cur.name}")
+            self.cur.inner += 1
+        elif starred:
+            return
+        elif base in _NUMBERED:
+            self.cur = _Open(base, _Row(m.end()))
+        elif base in _UNMODELLED:
+            self.poison(f"the environment {base}")
+        elif base == "subequations":
+            self.begin_group(m)
+        elif base in ("appendix", "appendices"):
+            self.appendix(starred=False)
+        elif base in self.sharing:
+            self.n["equation"] += 1  # a theorem numbered like an equation
+            if self.sub is not None:
+                self.poison("a theorem counted with the equations inside subequations")
+
+    def end(self, name: str, m: re.Match[str]) -> None:
+        name = self.env_aliases.get(name, name)
+        cur = self.cur
+        if cur is None:
+            if name == "subequations" and self.sub is not None:
+                self.n["equation"] = self.sub.parent
+                self.sub = None
+            return
+        if name == cur.name and cur.inner == 0:
+            self.finish(cur, m.start())
+        elif name != cur.name and cur.inner > 0:
+            cur.inner -= 1
+        else:
+            self.poison(f"\\end{{{name}}} inside {cur.name}")
+            self.cur = None
+
+    # -- counters
+    def current(self) -> str | None:
+        """What ``\\theequation`` shows now."""
+        if self.sub is not None:
+            letter = _style(self.n["equation"], "alph")
+            return self.sub.prefix + letter if letter else None
+        return self.render(self.fmt["equation"], 0)
+
+    def render(self, parts: _Format | None, depth: int) -> str | None:
+        if parts is None or depth > _NESTING_MAX:
+            return None
+        out = ""
+        for part in parts:
+            if part[0] == "text":
+                out += part[1]
+            elif part[0] == "chapter_prefix":
+                if self.n["chapter"] > 0:
+                    shown = self.render(self.fmt["chapter"], depth + 1)
+                    if shown is None:
+                        return None
+                    out += shown + "."
+            elif part[0] == "the":
+                shown = self.render(self.fmt[part[1]], depth + 1)
+                if shown is None:
+                    return None
+                out += shown
+            else:
+                value = self.n.get(part[1])
+                shown = None if value is None else _style(value, part[2])
+                if shown is None:
+                    return None
+                out += shown
+        return out
+
+    def begin_group(self, m: re.Match[str]) -> None:
+        """``subequations``: the group takes one number, its equations are 3a, 3b, ..."""
+        if self.sub is not None:
+            self.poison("nested subequations")
+            return
+        self.n["equation"] += 1
+        prefix = self.current()
+        if prefix is None:
+            self.poison("a number that cannot be shown")
+            return
+        self.sub = _Sub(prefix, self.n["equation"], m.end())
+        self.n["equation"] = 0
+
+    def step(self, counter: str) -> None:
+        self.n[counter] += 1
+        for below in _BELOW[counter]:
+            self.n[below] = 0
+        if self.parent == counter or self.parent in _BELOW[counter]:
+            self.n["equation"] = 0
+
+    def on_section(self, m: re.Match[str]) -> None:
+        if m["starred"]:
+            return
+        if self.family == "book" and not self.matter:  # the front and back matter of a book
+            if m["level"] != "chapter":
+                self.poison("a section in the front or back matter of a book")
+            return  # its chapters have no number
+        self.step(m["level"])
+
+    def on_matter(self, m: re.Match[str]) -> None:
+        self.matter = m[0] == "\\mainmatter"
+
+    def on_appendix(self, m: re.Match[str]) -> None:
+        self.appendix(starred=bool(m["astar"]))
+
+    def appendix(self, *, starred: bool) -> None:
+        """Sections are lettered from here on. REVTeX also resets the equations at each section
+        and numbers them A1, A2, ... (A.1 after ``\\appendix*``) unless the paper has its own
+        ``\\theequation``."""
+        if self.family is None or (starred and self.family != "revtex"):
+            self.poison("an appendix in a class whose numbering is not modelled")
+            return
+        self.appendix_seen = True
+        top = "chapter" if self.family == "book" else "section"
+        self.n[top] = 0
+        for below in _BELOW[top]:
+            self.n[below] = 0
+        self.fmt[top] = [("counter", top, "Alph")]
+        if self.family == "revtex":
+            if self.prl:  # the prl style does not do what \appendix does in the others (seen)
+                self.poison("an appendix in a REVTeX paper with the prl option")
+                return
+            if self.own_format:
+                self.poison("an appendix in a REVTeX paper that sets \\theequation itself")
+                return
+            self.parent = "section"
+            self.fmt["equation"] = (
+                [("text", "A."), ("counter", "equation", "arabic")]
+                if starred
+                else [("the", "section"), ("counter", "equation", "arabic")]
+            )
+
+    def on_counter(self, m: re.Match[str]) -> None:
+        cmd = m["cmd"]
+        two = cmd not in ("stepcounter", "refstepcounter")
+        args = (_TWO_ARGUMENTS if two else _ONE_ARGUMENT).match(self.text, m.end())
+        head = _ONE_ARGUMENT.match(self.text, m.end()) if args is None and two else None
+        if head is not None and head[1] in self.n and cmd in ("setcounter", "addtocounter"):
+            self.poison(f"\\{cmd}{{{head[1]}}} set to something that is not a number")
+        if args is None or self.stop is not None:
+            return
+        name = args[1]
+        if cmd in ("setcounter", "addtocounter"):
+            if name not in self.n:
+                return
+            if not _INTEGER.match(args[2]):
+                self.poison(f"\\{cmd}{{{name}}} set to something that is not a number")
+                return
+            value = int(args[2])
+            self.n[name] = value if cmd == "setcounter" else self.n[name] + value
+        elif not two:
+            if name == "equation":
+                self.n["equation"] += 1
+            elif name in _BELOW:
+                self.step(name)
+        elif name == "equation":
+            self.within(cmd, args[2])
+
+    def within(self, cmd: str, parent: str) -> None:
+        if parent not in _BELOW:
+            self.poison(f"equations numbered within {parent}")
+            return
+        self.parent = parent
+        if cmd in ("numberwithin", "counterwithin"):
+            self.fmt["equation"] = _within(parent, "equation")
+
+    # -- the numbers
+    def finish(self, cur: _Open, end: int) -> None:
+        """``\\end{name}`` of ``cur`` at ``end``: number its rows."""
+        self.cur = None
+        if cur.depth != 0:
+            self.poison("unbalanced braces in an equation")
+            return
+        rows = [*cur.rows, (cur.row, end)]
+        for i, (row, stop) in enumerate(rows):
+            text = self.text[row.start : stop]
+            if i:  # the options of the row end before it: ``\\[2pt]``, ``\\*``
+                text = _ROW_TAIL.sub("", text, count=1)
+            self.number(row, stop, write=bool(text.replace("%", "").strip()))
+
+    def number(self, row: _Row, at: int, *, write: bool) -> None:
+        if self.stop is not None:
+            return
+        if row.tagged:  # a ``\tag`` takes the place of the number and does not count
+            shown = row.tag
+        elif row.unnumbered:
+            shown = None
+        else:
+            self.n["equation"] += 1
+            shown = self.current()
+            if shown is None or not _NUMBER_SHOWN.fullmatch(shown):
+                self.poison("a number that cannot be shown")
+                return
+            if write:
+                own_line = self.text[at - 1 : at] == "\n"  # keep the line break before \end
+                self.edits.append(
+                    (at, at, f"\\tag{{{shown}}}\n" if own_line else f" \\tag{{{shown}}} ")
+                )
+                self.written.append(shown)
+            else:
+                self.empty.append(shown)
+        if shown is not None:
+            for key in row.labels:
+                self.labels[key] = shown
+
+
+@functools.lru_cache(maxsize=512)
+def _format_definitions(body: str) -> tuple[MacroDef, ...]:
+    """The redefinitions of ``\\theequation`` and its kin in the text of a macro."""
+    return tuple(d for d in macro_definitions(body) if d.name in _FORMATTED)
+
+
+def _within(top: str, counter: str) -> _Format:
+    """``\\thechapter.\\arabic{equation}``: what ``\\numberwithin{equation}{chapter}`` shows."""
+    return [("the", top), ("text", "."), ("counter", counter, "arabic")]
+
+
+def _hides(body: str) -> bool:
+    """Whether ``body`` begins or ends an environment of the numbering."""
+    return any(
+        m["env"] and not m["env"].endswith("*") and m["env"] in _HARD_ENVS
+        for m in _EQ_INTERESTING.finditer(body)
+    )
+
+
+def _operation(m: re.Match[str]) -> tuple[str, str]:
+    if m["rowend"]:
+        return ("rowend", "")
+    if m["word"]:
+        return ("word", m["word"])
+    kind = "begin" if m[0].startswith("\\begin") else "end"
+    return (kind, m["env"])
+
+
+_EQ_ANY = re.compile(rf"\\begin\s*\{{(?:{'|'.join(sorted(_NUMBERED))})\}}")
+
+
+def number_equations(text: str) -> EquationNumbers:
+    """Write the number LaTeX gives each display equation into it as ``\\tag{n}`` and replace
+    ``\\eqref{key}`` by ``(n)`` and ``\\ref{key}`` by ``n`` when ``key`` labels one.
+
+    Counted: ``equation`` and ``multline`` once, ``align``, ``alignat``, ``xalignat``,
+    ``flalign``, ``gather`` and ``eqnarray`` per row, unless the environment is starred or the
+    row has ``\\nonumber`` or ``\\notag``; a ``\\tag`` is the number of its row and does not
+    count. ``subequations`` gives 3a, 3b; ``\\numberwithin``, ``\\setcounter``, ``\\appendix``,
+    a ``\\theequation`` made of counters and text, and the macros of the paper that stand for
+    ``\\begin{equation}`` and ``\\nonumber`` are followed. Where the count cannot be known (an
+    environment of a package that is not modelled, a macro that hides part of an equation, a
+    class whose rules are not modelled, a counter set to something that is not a number) the
+    numbering stops there, the equations before it keep their numbers, and no later equation
+    gets one. Verbatim text, macro definitions and ``\\iffalse`` blocks are not read.
+    """
+    if not _EQ_ANY.search(text):
+        return EquationNumbers(text, (), None, 0, 0)
+    return _Numberer(text).run()
+
+
 def prepare_for_pandoc(text: str) -> tuple[str, list[str]]:
     """Source rewrites that make pandoc's output complete and its run bounded."""
     text, restore = _hide_listings(protect_circuits(text))
@@ -1074,7 +1997,8 @@ def prepare_for_pandoc(text: str) -> tuple[str, list[str]]:
     # NeurIPS/ICLR styles separate authors with \And / \AND: pandoc only knows \and.
     text = re.sub(rf"\\(?:And|AND){_NOT_LETTER}", r"\\and", text)
     text = re.sub(rf"\\today{_NOT_LETTER}", "", text)  # sandboxed pandoc prints 1970-01-01
-    text = restore(simplify_layout(sanitize_citation_keys(shim_at_macros(text))))
+    text = simplify_layout(sanitize_citation_keys(shim_at_macros(text)))
+    text = restore(number_equations(text).text)
     warnings = []
     if dropped:
         names = ", ".join(sorted({f"\\{n}" for n in dropped}))

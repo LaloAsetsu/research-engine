@@ -710,7 +710,25 @@ def test_a_lost_list_next_to_a_lost_one_in_the_same_segment(tmp_path):
         ("1.  [@a] a\n\n1.  [@b] restarts\n", (1, "1.  [@a] a\n")),
         ("2.  [@a] starts at two\n", (0, "")),
         ("1.  a plain item\n\n2.  another\n", (0, "")),
-        ("1.  [@a] a\n\n2.  not an entry\n", (1, "1.  [@a] a\n")),
+        ("1.  [@a] a\n\n2.  no key\n", (1, "1.  [@a] a\n\n2.  no key\n")),
+        (
+            "1.  [@a] a\n\n2.  no key\n    wraps\n\n3.  [@c] c\n\nAfter.",
+            (2, "1.  [@a] a\n\n2.  no key\n    wraps\n\n3.  [@c] c\n"),
+        ),
+        ("1.  [@a] a\n\n2.\n\n3.  [@c] c\n", (2, "1.  [@a] a\n\n2.\n\n3.  [@c] c\n")),
+        (
+            "1.  [@a] a\n\n2.  no key\n\n1.  restarts: the paper's own\n",
+            (1, "1.  [@a] a\n\n2.  no key\n"),
+        ),
+        ("1.  [@a] a\n\n3.  skips two\n", (1, "1.  [@a] a\n")),
+        ("1.  no key\n\n2.  [@b] b\n", (1, "1.  no key\n\n2.  [@b] b\n")),
+        (
+            "1.  no key\n    wraps\n\n2.  no key\n\n3.  [@c] c\n\nAfter.",
+            (1, "1.  no key\n    wraps\n\n2.  no key\n\n3.  [@c] c\n"),
+        ),
+        ("1.  no key\n\n2.  no key either\n", (0, "")),
+        ("1.  no key\n    wraps\n\nAfter.", (0, "")),
+        ("1.  [@a] a\n2.5 GHz\n", (1, "1.  [@a] a\n")),
         ("", (0, "")),
     ],
 )
@@ -907,6 +925,98 @@ def test_four_items_of_the_papers_own_do_not_hide_a_lost_list(tmp_path):
     conv = run(stub, sections("Intro", "Results", bib=BIB + items), tmp_path)
     assert len(stub.calls) == 2 and "kept 0 of 4" in conv.warnings[0]
     assert "4.  fourth step" in "\n".join(s.text for s in conv.segments)
+
+
+def bib10(keyless: int) -> str:
+    """Ten entries; the one numbered ``keyless`` is a ``\\bibitem{}``."""
+    return (
+        "\\begin{thebibliography}{10}\n"
+        + "".join(
+            f"\\bibitem{{{'' if i == keyless else f'k{i}'}}} Author {i}, Title {i} ({2000 + i}).\n"
+            for i in range(1, 11)
+        )
+        + "\\end{thebibliography}"
+    )
+
+
+def test_a_keyless_entry_in_the_middle_does_not_end_the_list(tmp_path):
+    stub = StubPandoc()
+    conv = run(stub, sections("Intro", "Results", bib=bib10(5)), tmp_path)
+    assert len(stub.calls) == 1 and conv.warnings == []
+    everything = "\n".join(s.text for s in conv.segments)
+    for i in range(1, 11):
+        assert everything.count(f"Title {i} ") == 1  # no entry twice
+    assert re.search(r"^5\.\s+Author 5", everything, re.M)
+
+
+@pytest.mark.parametrize("keyless", [(1,), (1, 2), (2, 3, 4)])
+def test_keyless_entries_at_the_start_do_not_hide_the_list(tmp_path, keyless):
+    bib = bib10(keyless[0])
+    for i in keyless[1:]:
+        bib = bib.replace(f"\\bibitem{{k{i}}}", "\\bibitem{}")
+    stub = StubPandoc()
+    conv = run(stub, sections("Intro", "Results", bib=bib), tmp_path)
+    assert len(stub.calls) == 1 and conv.warnings == []
+    everything = "\n".join(s.text for s in conv.segments)
+    for i in range(1, 11):
+        assert everything.count(f"Title {i} ") == 1  # no entry twice
+
+
+def test_a_list_that_starts_keyless_is_found_among_two_lists(tmp_path):
+    bib = bib10(1) + "\n\\section{Supplement}\n" + LONG + BIB2
+    stub = StubPandoc()
+    conv = run(stub, sections("Intro", "Results", bib=bib), tmp_path)
+    assert len(stub.calls) == 1 and conv.warnings == []
+    everything = "\n".join(s.text for s in conv.segments)
+    for i in range(1, 11):  # entries 1 and 2 are also the two entries of the second list
+        assert everything.count(f"Title {i} ") == (2 if i < 3 else 1)
+    assert len(re.findall(r"^\d+\.\s+\[@m", everything, re.M)) == 2
+
+
+def test_a_keyless_last_entry_is_part_of_the_list(tmp_path):
+    stub = StubPandoc()
+    conv = run(stub, with_end_matter("Intro", "Results", bib=bib10(10)), tmp_path)
+    assert len(stub.calls) == 1 and conv.warnings == []
+    refs = conv.segments[-1]
+    assert re.search(r"^10\.\s+Author 10", refs.text, re.M) and refs.text.endswith(AFTER)
+
+
+def test_keyless_entries_do_not_count_as_kept(tmp_path):
+    # Twenty entries, two without a key: 18 are expected, 16.2 are needed. pandoc keeps 15
+    # of them and both keyless ones, 17 items in all, which is still too few.
+    bib = (
+        "\\begin{thebibliography}{20}\n"
+        + "".join(
+            f"\\bibitem{{{'' if i in (3, 4) else f'k{i}'}}} Author {i}.\n" for i in range(1, 21)
+        )
+        + "\\end{thebibliography}"
+    )
+
+    class Short(StubPandoc):
+        def markdown(self, latex, drop_list):
+            md = super().markdown(latex, drop_list)
+            if "\\section{Intro}" in latex:
+                for i in range(18, 21):
+                    md = md.replace(f"{i}.  [@k{i}]", "")
+            return md
+
+    conv = run(Short(), sections("Intro", "Results", bib=bib), tmp_path)
+    assert "pandoc kept 15 of 18 reference entries" in conv.warnings[0]
+
+
+def test_a_keyless_entry_in_a_cut_short_list_does_not_swallow_the_papers_own_list(tmp_path):
+    bib = BIB.replace("\\bibitem{k3}", "\\bibitem{}") + ENUMERATE + "\\end{enumerate}\n"
+
+    class Cut(StubPandoc):
+        def markdown(self, latex, drop_list):
+            md = super().markdown(latex, drop_list)
+            return md.replace("4.  [@k4]", "") if "\\section{Intro}" in latex else md
+
+    conv = run(Cut(), sections("Intro", "Results", bib=bib), tmp_path)
+    assert "pandoc kept 2 of 3 reference entries" in conv.warnings[0]
+    everything = "\n".join(s.text for s in conv.segments)
+    for item in ["1.  first step", "2.  second step", "3.  third step"]:
+        assert everything.count(item) == 1
 
 
 def test_an_entry_without_a_key_is_not_expected(tmp_path):
