@@ -88,10 +88,12 @@ flowchart LR
 |---|---|
 | `test_arxiv.py` | `ArxivCrawler` against a fake transport and a fake clock: feed parsing, id normalisation, query parameters, retries, source format detection. No network, no real sleeping |
 | `test_arxiv_fixes.py` | Regression tests for the arXiv crawler, same fakes |
+| `test_ask_gate_lists.py` | `AskService` with `circuit_lists` on fakes: the list right after a block in the chunk that holds it, the whole block's list in a chunk that holds only its end, none for a block the chunk cuts, none for display math, the chunks unchanged with the switch off or for other papers, the Markdown read once per paper and only for a chunk with a fence, a changed document left alone, a chunk that starts where a block ends, a failing Markdown or reader that leaves the chunks as they are and warns once per paper, and that `Container.ask` turns it on with `[qa] skip_summary` |
 | `test_ask_retrieval.py` | `AskService` with fakes: the plain path unchanged, the two-stage retrieval (one query embedding, `candidates`, rerank by a stable sort, `contexts`, no reranker), the keyword override, the errors for an empty, uncommitted or foreign index, the warnings, and that the index is closed |
 | `test_bench_fixes.py` | Benchmark regressions: clustered statistics, the OCR retry ladder in telemetry, page furniture and LaTeX / `<img>` normalisation, stale saved scores. The MLX adapter runs against stub modules, never a model |
 | `test_benchmark.py` | `BenchmarkRunner`, score persistence and report aggregation on an in-memory suite (`MemSuite`) |
 | `test_bootstrap.py` | `REGISTRY` defaults, unknown adapter names, `Container` overrides, entry-point plugins including broken ones, the `none` retrieval adapters and the `[index]`, `[embedder]` and `[reranker]` tables reaching a plugin |
+| `test_circuits.py` | `domain.circuits`: the exact gate list of each construct (invented circuits: gates, controls and targets, swaps, measurements, multi-wire gates, labels, macros that must be `unparsed`), code-block finding and `add_gate_lists`, that no input raises and every item is a known operation or `unparsed`, and the linear-time ratio tests |
 | `test_chunking.py` | `domain.chunking.chunk_pages`: chunk names and page ranges, overlap, page breaks, invalid settings |
 | `test_core_fixes.py` | Regressions: config loading, the pipeline version against `pyproject.toml` and `uv.lock`, QA LLM parameters, metadata refresh and degraded results through the real `FilesystemStore` |
 | `test_domain_models.py` | `SourceMetadata` citation formatting |
@@ -142,6 +144,7 @@ flowchart LR
 | `test_index_on_ingest.py` | `ingest --index` and `crawl --index`: off by default, only the papers of the run, checked before any work, a failing update keeps the papers |
 | `test_magic_detector.py` | `MagicBytesDetector` on real files |
 | `test_openai_ocr.py` | `OpenAICompatibleOcr` against a scripted local OpenAI-compatible server: request shape, retries, the retry ladder (stricter retries, more room for a dense page, a server that refuses it), authentication |
+| `test_ask_gate_lists_paperqa.py` | The whole ask path with a mocked LLM and the real `PaperQAAnswerer`: the answer prompt holds the gate list after the block with `skip_summary` and no request holds one without it |
 | `test_pandoc_latex_circuits.py` | Circuits through the real pandoc and pylatexenc: each encoding with its caption, boxes, subfigures, a table cell, math not doubled, and the same block from the whole-paper, section-fallback and plain-text paths |
 | `test_pandoc_latex_equations.py` | Equation numbers through the real pandoc and pylatexenc: the numbers and the references in the Markdown, subequations, appendix and `\numberwithin`, an own `\tag`, a circuit next to an equation, and the same numbers from the whole-paper, section-fallback and plain-text paths |
 | `test_pandoc_latex_sections.py` | A paper with one broken section (that section is plain text, the others pandoc), page records, malformed and slow input, a reference list pandoc drops (real pandoc and pylatexenc) |

@@ -15,6 +15,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 - [text.py](#textpy)
 - [Text-layer structure](#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy)
 - [chunking.py](#chunkingpy)
+- [circuits.py](#circuitspy)
 - [errors.py](#errorspy)
 - [Changing the domain safely](#changing-the-domain-safely)
 
@@ -31,6 +32,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 | `headings.py` | `line_style`, `page_styles`, `level`, `is_marker`, `is_caption` | `structure.py` |
 | `structure.py` | `structure_pages` (text-layer pages of a document to Markdown) | `IngestService` for the text-layer pages of a PDF |
 | `chunking.py` | `Chunk`, `chunk_pages`, `CHUNKER_VERSION`, `CHUNK_CHARS`, `OVERLAP` | `ports` (`Chunk` is re-exported there); the chunk index and `AskService` use it through those |
+| `circuits.py` | `gate_list`, `GateList`, `circuit_code_blocks`, `CodeBlock`, `add_gate_lists`, `MAX_STEPS` | `AskService` (a gate list after each circuit code block of the retrieved chunks) |
 | `errors.py` | `DocingestError` and its subclasses | adapters raise them, application and entrypoints handle them |
 
 ## How domain objects flow through an ingestion
@@ -640,6 +642,33 @@ print([(c.name, c.start, len(c.text)) for c in chunks])
 # [('abababababababab pages 1-2', 0, 900), ('abababababababab pages 2-2', 800, 204)]
 ```
 
+## circuits.py
+
+`circuits.py` writes a plain-text gate list from the LaTeX source of a quantum circuit, as a pure function (standard library only). The LaTeX converter keeps each circuit as a fenced `latex` code block with the author's code; `AskService` uses this module at answer time to add a list after the block (the block, the stored Markdown and the index are never changed). Why it exists and what it fixed: an answer model misreads the wire-and-column grid (two control dots joined by a wire read as a CNOT); the list says `controlled-Z on wires 1 and 2 (control dots on both, symmetric: no target)`.
+
+| Name | Meaning |
+|---|---|
+| `gate_list(source)` | The list of the circuits in `source`, the body of one code block, as a `GateList`: `status` (`"parsed"` all circuits fully read, `"partial"` some part written as `unparsed`, `"unparsed"` nothing readable), `text` (empty when nothing could be read) and `n_circuits`. Reads `quantikz`, `\Qcircuit`, `yquant` and `tikzcd` drawn as a circuit. |
+| `circuit_code_blocks(markdown)` | The fenced `latex` blocks of a Markdown text as `CodeBlock(start, end, source)` (`text[start:end]` is both fences and the source). Other fenced blocks are skipped whole and a block that never closes is left out. One pass over the lines. |
+| `add_gate_lists(text, start, document, blocks)` | `text` (a chunk found at `start` of `document`) with `gate_list` of every block whose closing fence lies inside the chunk, as a paragraph right after that fence (`"\n\n" + list + "\n"`). A block that began in the chunk before is read whole from `document`; a block cut by the end of the chunk gets nothing, and a block whose closing fence ends exactly where the chunk starts belongs to the chunk before; a chunk that is not where `start` says is returned as it is. `document` is the page texts joined as `chunk_pages` joins them. |
+| `MAX_STEPS` | 60: a longer circuit is listed up to there, then `... N more lines not listed`. |
+
+```text
+Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):
+Wires: 1 = \ket{a}; 2 = \ket{b}
+Step 1: H on wire 1
+Step 2: CNOT: control wire 1, target wire 2
+Step 3: measure wire 2
+```
+
+Rules of the reader:
+
+- **Drawing order.** Grid columns (`&`) are the steps and rows (`\\`) the wires. A column with only wires is skipped, a row that draws nothing is not numbered (a quantikz row with as many cells as the widest row is a wire even when empty, as its manual draws with `&&&&& \\ &&&&&`; a Qcircuit row is a wire when a cell draws one, `\qw`, `\cw`, a bundle, a gate or `\ghost`, or holds an `\lstick`, and a row of text only, of barriers or of nothing is not), a row of dots is listed once. Text on a row that is not a wire is left out. It is not a schedule: gates in different columns may commute. A `\gate[n]`, `\lstick[wires=n]` or `\rstick[n]` that reaches past the last row gives its wires to those empty rows; a spacer row between two drawn rows is not a wire.
+- **Joined operations.** In one column, operations a vertical wire (`\ctrl{n}`, `\swap{n}`, `\qwx`, `\vqw`, `\wire`, `\sgate`) or a multi-wire gate joins are one item: CNOT, Toffoli, n-controlled X, open controls, controlled-U, controlled-Z (dots only, no target), a labelled dot gate (`\dstick`), SWAP, controlled-SWAP, multi-wire gates, a measurement that classically controls a gate (a classical wire, `\cwx`, `\vcw`, `\wire[d][1]{c}` or `\ctrl[vertical wire=c]`, marks the group "classically controlled"; a measurement group with anything else in it is unparsed). A gate whose cell draws a classical wire to a row with nothing in that column (a teleportation correction in a later column than its measurement) is written `X on wire 3, classically controlled by wire 1`; a quantum wire to such a row leaves the gate unparsed. `\meter[n]{}` is one measurement over n wires, like `\gate[n]`. Two controls and two targets in one group (CNOTs drawn over one another) are unparsed. `=`, `\equiv`, `\midstick{=}` and `\push{=}` start the right-hand side with its own step numbers. The vertical wire passes through rows between without joining them unless they hold a control, target or swap.
+- **Never guesses.** Anything else is `unparsed on wire k: <source>` at its step; a combination it does not know is `unparsed joined operation (...)`; a wire or gate that leads outside the grid, an unreadable count, a block that never closes, and a circuit made only of author macros are unparsed too. A count or offset of more than 6 digits and a `yquant` register of more than 128 wires are unparsed. Labels are copied as written. A `\label` inside the circuit goes to the header (`Gate list for \label{fig:x} (...)`); a block with several circuits has `Circuit k of n` headings.
+- **Linear time.** Every bracket is matched once, cells are read sparsely, and the vertical wires of a column are joined with a sweep (a difference array), so no source makes the work quadratic; a gate over many wires is written as a range (`wires 1 to 40`). Tests compare the time of an input with that of one four times larger.
+- Not read: circuits drawn with TikZ nodes or arrows, macros the author defined, `\gategroup` boxes, labels outside the grid, display-math circuits (the caller passes code blocks only).
+
 ## errors.py
 
 Domain errors describe expected, reportable failures. Adapters translate library exceptions into them (`raise ConversionError(...) from e`), so the application and the CLI never need to know which library failed.
@@ -744,4 +773,4 @@ The domain is small and everything depends on it, so changes ripple outward. Che
 | Different logic in `decide`, `clean_text_layer`, `collapse_dot_leaders`, `structure_pages` or `render_markdown` | Bump `PIPELINE_VERSION` in `application/ingest.py`. Code changes are not part of any adapter fingerprint, so without the bump cached results produced by the old logic would still be served. |
 | New error type | Subclass the closest existing error so that existing handlers keep working. Put adapter-specific errors in the adapter module, as `OcrServerError` does. |
 
-Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).
+Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`, `tests/unit/test_circuits.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).
