@@ -9,8 +9,11 @@ default to a pinned sentence-transformers snapshot; any PaperQA embedding string
 from __future__ import annotations
 
 import json
+import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from pathlib import Path
 
 from ...config import DEFAULT_LLM_BASE, AppConfig
@@ -163,6 +166,8 @@ def keep_chunks_verbatim(settings, contexts: list[Chunk]) -> None:
     rank: dict[str, int] = {}
     for i, chunk in enumerate(contexts):
         rank.setdefault(chunk.text, i)
+    # model_copy is shallow: `default.answer` is `settings.answer`, so a lower answer_max_sources
+    # set later (the retry in `PaperQAAnswerer.ask`) reaches the cut below.
     default = settings.model_copy(update={"custom_context_serializer": None})
 
     async def by_retrieval_rank(*, settings, contexts, question, pre_str):
@@ -173,6 +178,57 @@ def keep_chunks_verbatim(settings, contexts: list[Chunk]) -> None:
         return await default.context_serializer(ranked, question, pre_str)
 
     settings.custom_context_serializer = by_retrieval_rank
+
+
+CONTEXT_OVERFLOW = "maximum context length"
+"""The words of the HTTP 400 that an OpenAI-compatible server (vLLM 0.30) sends when the prompt and
+the reply do not fit its window: ``This model's maximum context length is 16384 tokens. However,
+you requested 1024 output tokens and your prompt contains ...``. OpenAI's own API says the same."""
+
+
+def is_context_overflow(error: BaseException) -> bool:
+    """Whether ``error``, or the error it wraps, is the server's context-length 400.
+
+    litellm raises it as a ``BadRequestError`` (a ``ContextWindowExceededError``), and PaperQA2's
+    client wraps it in ``AllModelsExhaustedError``, so the chain is followed. Any other 400 is
+    not one: it does not mention the context length, and fewer sources would not cure it."""
+    from litellm.exceptions import BadRequestError
+
+    exc: BaseException | None = error
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, BadRequestError) and CONTEXT_OVERFLOW in str(exc).lower():
+            return True
+        exc = getattr(exc, "last_exc", None) or exc.__cause__
+    return False
+
+
+_RETRY_PENDING: ContextVar[bool] = ContextVar("docingest_retry_pending", default=False)
+
+
+class _OverflowFilter(logging.Filter):
+    """Hides the overflow records of the ask that has a retry pending, and only of that ask:
+    the logger is shared by every ask in the process, the context variable is not."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        error = record.exc_info[1] if record.exc_info else None
+        return not (_RETRY_PENDING.get() and error is not None and is_context_overflow(error))
+
+
+@contextmanager
+def _overflow_is_retried() -> Iterator[None]:
+    """PaperQA2's client logs every failed request with its traceback, which would print a
+    traceback for an overflow that the retry then cures. Only that record is held back; the
+    exception itself is not touched and is raised if nothing is left to retry."""
+    log, hide = logging.getLogger("lmi.llms"), _OverflowFilter()
+    log.addFilter(hide)
+    token = _RETRY_PENDING.set(True)
+    try:
+        yield
+    finally:
+        _RETRY_PENDING.reset(token)
+        log.removeFilter(hide)
 
 
 def without_repeated_text(contexts: list[Chunk]) -> list[Chunk]:
@@ -243,8 +299,25 @@ class PaperQAAnswerer:
             settings.answer.evidence_retrieval = False  # use exactly these chunks
             if self.cfg.qa.skip_summary:
                 keep_chunks_verbatim(settings, contexts)
-        session = await docs.aquery(question, settings=settings, embedding_model=embedding_model)
-        return session.formatted_answer
+        verbatim = contexts is not None and self.cfg.qa.skip_summary
+        sources = min(settings.answer.answer_max_sources, len(contexts or ()))
+        while True:
+            try:
+                with _overflow_is_retried() if verbatim and sources > 1 else nullcontext():
+                    session = await docs.aquery(
+                        question, settings=settings, embedding_model=embedding_model
+                    )
+                return session.formatted_answer
+            except Exception as exc:
+                # Only the verbatim prompt grows with the chunks (a summary is about 100 words),
+                # and it makes no LLM call before the answer, so a retry repeats nothing.
+                if not (verbatim and sources > 1 and is_context_overflow(exc)):
+                    raise
+                sources //= 2
+                # keep_chunks_verbatim's serializer cuts to this limit, best ranked first
+                settings.answer.answer_max_sources = sources
+                noun = "source" if sources == 1 else "sources"
+                warn(f"answer prompt too long for the model; retried with {sources} {noun}")
 
     async def _docs_from_corpus(self, documents, settings, embedding_model):
         from paperqa import Docs

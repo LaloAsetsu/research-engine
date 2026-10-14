@@ -1,10 +1,13 @@
 import asyncio
+import contextlib
+import logging
 
 import pytest
 
 pytest.importorskip("paperqa")
 
 import litellm
+from lmi.exceptions import AllModelsExhaustedError
 from paperqa.docs import Docs
 
 from docingest.adapters.qa import paperqa
@@ -258,14 +261,14 @@ def prompts(llm_calls) -> list[str]:
     return [call["messages"][-1]["content"] for call in llm_calls]
 
 
-def ask_chunks(cfg, letters, texts, question="What is d(n)?"):
+def ask_chunks(cfg, letters, texts, question="What is d(n)?", warn=print):
     """Ask over one single-page chunk per letter, retrieved in the given order."""
     docs = [(stored(letter), "") for letter in letters]
     contexts = [
         chunks_of(stored(letter).manifest.doc_id, {1: text})[0]
         for letter, text in zip(letters, texts, strict=True)
     ]
-    return asyncio.run(PaperQAAnswerer(cfg).ask(question, docs, print, contexts=contexts)), contexts
+    return asyncio.run(PaperQAAnswerer(cfg).ask(question, docs, warn, contexts=contexts)), contexts
 
 
 def test_skip_summary_gives_the_answer_model_the_chunk_text_verbatim(mock_llm, llm_calls):
@@ -450,3 +453,428 @@ def test_copy_rule_goes_before_the_answer_and_nowhere_else():
 def test_copy_rule_refuses_an_answer_prompt_it_cannot_place_it_in(template):
     with pytest.raises(ValueError, match="answer prompt changed"):
         paperqa.with_copy_rule(template)
+
+
+# ------------------------------------------- a prompt the server finds too long is retried smaller
+
+SERVER_400 = (
+    "This model's maximum context length is 16384 tokens. However, you requested 1024 output "
+    "tokens and your prompt contains at least 15361 input tokens, for a total of at least 16385 "
+    "tokens. Please reduce the length of the input prompt or the number of requested output "
+    "tokens. (parameter=input_tokens, value=15361)"
+)
+
+
+def retry_warning(n: int) -> str:
+    return f"answer prompt too long for the model; retried with {n} {'source' if n == 1 else 'sources'}"
+
+
+LETTERS = "jihgfedcba"  # not in alphabetical order: the retrieval order is what is kept
+PASSAGES = [f"Passage {n} of paper {x}." for n, x in enumerate(LETTERS)]
+
+
+def context_overflow(*_):
+    return litellm.ContextWindowExceededError(
+        message=f"ContextWindowExceededError: OpenAIException - {SERVER_400}",
+        model="mock",
+        llm_provider="openai",
+    )
+
+
+def other_bad_request(*_):
+    return litellm.BadRequestError(
+        message="OpenAIException - Unsupported value for 'temperature'",
+        model="mock",
+        llm_provider="openai",
+    )
+
+
+@pytest.fixture
+def server_rejects(monkeypatch):
+    """``rejects(error, when)``: litellm raises ``error()`` for every request whose user message
+    satisfies ``when``; the other requests are answered by the mock reply."""
+    original = litellm.acompletion
+    attempts = []
+
+    def rejects(error, when=lambda prompt: True):
+        async def spy(*args, **kwargs):
+            prompt = kwargs["messages"][-1]["content"]
+            attempts.append(prompt)
+            rejects.sent.append(kwargs)
+            if when(prompt):
+                raise error()
+            return await original(*args, **kwargs)
+
+        monkeypatch.setattr(litellm, "acompletion", spy)
+        return attempts
+
+    rejects.sent = []  # the keyword arguments of every request
+    return rejects
+
+
+def fails_while(n: int):
+    """A ``when`` for ``rejects``: true for the first ``n`` requests."""
+    seen = []
+    return lambda prompt: len(seen.append(prompt) or seen) <= n
+
+
+def test_a_context_length_400_is_retried_with_half_the_sources(mock_llm, server_rejects):
+    attempts = server_rejects(context_overflow, fails_while(1))
+    warnings: list[str] = []
+    answer, _ = ask_chunks(
+        skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES, warn=warnings.append
+    )
+    assert len(attempts) == 2
+    assert all(t in attempts[0] for t in PASSAGES)  # the first request carries the 10 sources
+    assert [t in attempts[1] for t in PASSAGES] == [True] * 5 + [False] * 5
+    assert warnings == [retry_warning(5)]
+    assert answer.startswith("Question: What is d(n)?")  # the retried request is answered
+
+
+def test_the_retry_keeps_the_best_ranked_sources_in_rank_order(mock_llm, server_rejects):
+    attempts = server_rejects(context_overflow, fails_while(2))
+    warnings: list[str] = []
+    ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES, warn=warnings.append)
+    assert warnings == [retry_warning(5), retry_warning(2)]
+    third = attempts[2]
+    assert [t in third for t in PASSAGES] == [True, True] + [False] * 8  # not "ih" by name
+    assert third.index(PASSAGES[0]) < third.index(PASSAGES[1])
+    keys = third.split("Valid Keys: ")[1].split("\n")[0].split(", ")
+    assert len(keys) == 2
+
+
+def test_the_sources_halve_down_to_one_and_the_last_error_is_raised(mock_llm, server_rejects):
+    attempts = server_rejects(context_overflow)
+    warnings: list[str] = []
+    with pytest.raises(AllModelsExhaustedError) as caught:
+        ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES, warn=warnings.append)
+    assert [sum(t in p for t in PASSAGES) for p in attempts] == [10, 5, 2, 1]
+    assert warnings == [retry_warning(n) for n in (5, 2, 1)]
+    assert paperqa.is_context_overflow(caught.value)
+    assert SERVER_400 in str(caught.value)  # the server's own message, not a new one
+    assert isinstance(caught.value.last_exc, litellm.ContextWindowExceededError)
+
+
+def test_one_source_is_not_retried(mock_llm, server_rejects):
+    attempts = server_rejects(context_overflow)
+    warnings: list[str] = []
+    with pytest.raises(Exception, match="maximum context length"):
+        ask_chunks(skip_cfg(True, answer_max_sources=1), LETTERS, PASSAGES, warn=warnings.append)
+    assert len(attempts) == 1 and warnings == []
+
+
+def test_the_first_retry_uses_the_sources_there_are_not_the_setting(mock_llm, server_rejects):
+    # 4 chunks under a limit of 10: halving 10 would resend the same prompt of 4.
+    attempts = server_rejects(context_overflow, fails_while(1))
+    warnings: list[str] = []
+    ask_chunks(skip_cfg(True, answer_max_sources=10), "jihg", PASSAGES[:4], warn=warnings.append)
+    assert [sum(t in p for t in PASSAGES) for p in attempts] == [4, 2]
+    assert warnings == [retry_warning(2)]
+
+
+def test_a_repeated_text_does_not_count_as_a_source_for_the_retry(mock_llm, server_rejects):
+    attempts = server_rejects(context_overflow, fails_while(1))
+    texts = [PASSAGES[0], PASSAGES[0], PASSAGES[1], PASSAGES[1]]  # 2 distinct texts
+    warnings: list[str] = []
+    ask_chunks(skip_cfg(True, answer_max_sources=10), "jihg", texts, warn=warnings.append)
+    assert [sum(t in p for t in PASSAGES[:2]) for p in attempts] == [2, 1]
+    assert warnings == [retry_warning(1)]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "OpenAIException - Unsupported value for 'temperature'",
+        "OpenAIException - Invalid request: the context field is required",
+        "OpenAIException - Invalid value: the context length must be an integer",
+        "OpenAIException - 'max_tokens' is too large: 1024. Please reduce the number of tokens",
+    ],
+)
+def test_other_400_errors_are_not_retried(mock_llm, server_rejects, message):
+    attempts = server_rejects(
+        lambda: litellm.BadRequestError(message=message, model="mock", llm_provider="openai")
+    )
+    warnings: list[str] = []
+    with pytest.raises(litellm.BadRequestError, match="OpenAIException"):
+        ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES, warn=warnings.append)
+    assert len(attempts) == 1 and warnings == []
+
+
+def test_another_error_is_not_retried_even_when_it_says_context_length(mock_llm, server_rejects):
+    attempts = server_rejects(lambda: RuntimeError(SERVER_400))  # not a 400 of the client
+    with pytest.raises(RuntimeError, match="maximum context length"):
+        ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES)
+    assert len(attempts) == 1
+
+
+def test_with_summaries_the_answer_prompt_is_not_retried(mock_llm, server_rejects, caplog):
+    # The answer reads about 100 words per chunk, and a retry would summarize every chunk again.
+    attempts = server_rejects(context_overflow, lambda prompt: "Valid Keys: " in prompt)
+    warnings: list[str] = []
+    with caplog.at_level(logging.ERROR), pytest.raises(Exception, match="maximum context length"):
+        ask_chunks(skip_cfg(False, answer_max_sources=10), "ab", PASSAGES[:2], warn=warnings.append)
+    assert len(attempts) == 3 and warnings == []  # two summaries, then the answer, once
+    assert len(failed_requests(caplog)) == 1  # nothing is retried here, so nothing is hidden
+
+
+def test_without_an_overflow_one_request_is_sent_and_nothing_is_warned(mock_llm, llm_calls):
+    warnings: list[str] = []
+    ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES, warn=warnings.append)
+    assert len(llm_calls) == 1 and warnings == []
+    assert all(t in prompts(llm_calls)[0] for t in PASSAGES)
+
+
+def test_the_retry_is_the_same_request_with_fewer_sources(mock_llm, server_rejects):
+    server_rejects(context_overflow, fails_while(1))
+    ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES)
+    first, second = server_rejects.sent
+    assert {k: v for k, v in first.items() if k != "messages"} == {
+        k: v for k, v in second.items() if k != "messages"
+    }
+    assert first["messages"][0] == second["messages"][0]  # the system prompt
+    a, b = (call["messages"][-1]["content"] for call in (first, second))
+    assert RULE in a and RULE in b
+    assert a.count("From Paper") == 10 and b.count("From Paper") == 5
+
+
+def failed_requests(caplog) -> list[str]:
+    """What PaperQA2's client logged as a failed request (with the traceback)."""
+    return [r.getMessage() for r in caplog.records if r.name == "lmi.llms" and r.exc_info]
+
+
+def test_an_overflow_that_the_retry_cures_leaves_no_traceback_in_the_log(
+    mock_llm, server_rejects, caplog
+):
+    server_rejects(context_overflow, fails_while(2))
+    with caplog.at_level(logging.ERROR):
+        ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES, warn=lambda w: None)
+    assert failed_requests(caplog) == []
+    assert logging.getLogger("lmi.llms").filters == []  # put back
+
+
+def test_the_overflow_that_ends_the_retries_is_logged_as_before(mock_llm, server_rejects, caplog):
+    server_rejects(context_overflow)
+    with caplog.at_level(logging.ERROR), pytest.raises(AllModelsExhaustedError):
+        ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES, warn=lambda w: None)
+    assert len(failed_requests(caplog)) == 1  # the 1-source request; 10, 5 and 2 were retried
+    assert logging.getLogger("lmi.llms").filters == []
+
+
+def test_other_failures_are_still_logged(mock_llm, server_rejects, caplog):
+    server_rejects(other_bad_request)
+    with caplog.at_level(logging.ERROR), pytest.raises(litellm.BadRequestError):
+        ask_chunks(skip_cfg(True, answer_max_sources=10), LETTERS, PASSAGES)
+    assert len(failed_requests(caplog)) == 1
+    assert logging.getLogger("lmi.llms").filters == []
+
+
+def test_a_retry_pending_in_one_ask_does_not_hide_the_failure_of_another(
+    mock_llm, monkeypatch, caplog
+):
+    async def spy(*args, **kwargs):
+        if "Passage 1 of paper i" in kwargs["messages"][-1]["content"]:  # ask A, 10 sources
+            await asyncio.sleep(0.2)  # still inside its attempt when ask B fails
+        raise context_overflow()
+
+    monkeypatch.setattr(litellm, "acompletion", spy)
+
+    async def ask(max_sources, letters, texts):
+        cfg = skip_cfg(True, answer_max_sources=max_sources)
+        docs = [(stored(letter), "") for letter in letters]
+        contexts = [
+            chunks_of(stored(letter).manifest.doc_id, {1: text})[0]
+            for letter, text in zip(letters, texts, strict=True)
+        ]
+        return await PaperQAAnswerer(cfg).ask("Q?", docs, lambda w: None, contexts=contexts)
+
+    async def both():
+        return await asyncio.gather(
+            ask(10, LETTERS, PASSAGES), ask(1, "b", ["Alone."]), return_exceptions=True
+        )
+
+    with caplog.at_level(logging.ERROR):
+        results = asyncio.run(both())
+    assert all(isinstance(r, AllModelsExhaustedError) for r in results)
+    # B's only failure and A's last one (1 source); A's first three were retried
+    assert len(failed_requests(caplog)) == 2
+
+
+def test_the_pending_retry_is_forgotten_when_the_attempt_ends():
+    log = logging.getLogger("lmi.llms")
+    with contextlib.suppress(RuntimeError), paperqa._overflow_is_retried():
+        assert paperqa._RETRY_PENDING.get() and len(log.filters) == 1
+        raise RuntimeError("the attempt failed")
+    assert not paperqa._RETRY_PENDING.get() and log.filters == []
+
+
+# ------------------------------------------------------------------ is_context_overflow
+
+
+def test_is_context_overflow_reads_the_error_the_client_wraps():
+    overflow = context_overflow()
+    wrapped = AllModelsExhaustedError(overflow)
+    assert paperqa.is_context_overflow(overflow)
+    assert paperqa.is_context_overflow(wrapped)  # last_exc
+    assert not paperqa.is_context_overflow(AllModelsExhaustedError(other_bad_request()))
+    assert not paperqa.is_context_overflow(AllModelsExhaustedError(None))
+    chained = RuntimeError("failed")
+    chained.__cause__ = overflow
+    assert paperqa.is_context_overflow(chained)
+
+
+def test_is_context_overflow_needs_the_400_of_the_client_and_its_words():
+    plain = litellm.BadRequestError(
+        message="The Maximum Context Length is 4096", model="m", llm_provider="openai"
+    )
+    assert paperqa.is_context_overflow(plain)  # litellm's own words differ in case only
+    assert not paperqa.is_context_overflow(other_bad_request())
+    assert not paperqa.is_context_overflow(RuntimeError(SERVER_400))
+    assert not paperqa.is_context_overflow(ValueError("maximum context length"))
+
+
+def test_is_context_overflow_stops_on_a_cycle():
+    import threading
+
+    a, b = RuntimeError("a"), RuntimeError("b")
+    a.__cause__, b.__cause__ = b, a
+    result: list[bool] = []
+    # A loop without the guard never ends: fail instead of hanging the run.
+    worker = threading.Thread(target=lambda: result.append(paperqa.is_context_overflow(a)))
+    worker.daemon = True
+    worker.start()
+    worker.join(timeout=5)
+    assert result == [False]
+
+
+# ------------------------------------------------ the same, over HTTP against a stub server
+
+
+class Window:
+    """An OpenAI-compatible server that answers the way vLLM 0.30 does: HTTP 400 with the
+    context-length message when the prompt is over ``limit`` characters, else a completion."""
+
+    def __init__(self, limit: int):
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        self.limit, self.prompts = limit, []
+        window = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                prompt = request["messages"][-1]["content"]
+                window.prompts.append(prompt)
+                if len(prompt) > window.limit:
+                    status, body = (
+                        400,
+                        {
+                            "error": {
+                                "message": SERVER_400,
+                                "type": "BadRequestError",
+                                "param": "input_tokens",
+                                "code": 400,
+                            }
+                        },
+                    )
+                else:
+                    status, body = (
+                        200,
+                        {
+                            "id": "x",
+                            "object": "chat.completion",
+                            "model": request["model"],
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "finish_reason": "stop",
+                                    "message": {"role": "assistant", "content": REPLY},
+                                }
+                            ],
+                            "usage": {
+                                "prompt_tokens": 1,
+                                "completion_tokens": 1,
+                                "total_tokens": 2,
+                            },
+                        },
+                    )
+                data = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(
+            target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        ).start()
+
+    @property
+    def base(self) -> str:
+        return f"http://127.0.0.1:{self.server.server_port}/v1"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def window(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)  # the placeholder key goes to the stub
+    monkeypatch.delenv("DOCINGEST_LLM", raising=False)
+    servers = []
+
+    def start(limit: int) -> Window:
+        servers.append(Window(limit))
+        return servers[-1]
+
+    yield start
+    for server in servers:
+        server.close()
+
+
+def test_the_servers_own_400_is_caught_and_the_question_answered_with_fewer_sources(window):
+    long_passages = [f"{p} " + "word " * 120 for p in PASSAGES]  # 600 characters each
+    server = window(limit=4_000)
+    cfg = AppConfig.model_validate(
+        {
+            "qa": {
+                "llm": "openai/stub",
+                "llm_base": server.base,
+                "embedding": "sparse",
+                "skip_summary": True,
+                "answer_max_sources": 10,
+            }
+        }
+    )
+    warnings: list[str] = []
+    answer, _ = ask_chunks(cfg, LETTERS, long_passages, warn=warnings.append)
+    assert answer.startswith("Question: What is d(n)?")
+    counts = [sum(t in p for t in PASSAGES) for p in server.prompts]
+    assert counts[0] == 10 and counts[-1] < 10 and counts == sorted(counts, reverse=True)
+    assert len(server.prompts[-1]) <= 4_000 < len(server.prompts[-2])
+    assert warnings == [retry_warning(n) for n in counts[1:]]
+    assert all(t in server.prompts[-1] for t in PASSAGES[: counts[-1]])  # the best ranked
+
+
+def test_the_servers_400_for_one_source_reaches_the_caller(window):
+    server = window(limit=10)  # nothing fits
+    cfg = AppConfig.model_validate(
+        {
+            "qa": {
+                "llm": "openai/stub",
+                "llm_base": server.base,
+                "embedding": "sparse",
+                "skip_summary": True,
+                "answer_max_sources": 4,
+            }
+        }
+    )
+    with pytest.raises(Exception, match="maximum context length"):
+        ask_chunks(cfg, "jihg", PASSAGES[:4], warn=lambda w: None)
+    assert [sum(t in p for t in PASSAGES) for p in server.prompts] == [4, 2, 1]
