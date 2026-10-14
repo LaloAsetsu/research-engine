@@ -684,7 +684,7 @@ Each page is measured by the PDF adapter and judged by the pure function `domain
 
 ```mermaid
 flowchart TD
-    PG["PdfPage"] --> SG["signals(): n_chars, n_images, image_coverage, garbage_ratio, alpha_ratio, plus raw text"]
+    PG["PdfPage"] --> SG["signals(): n_chars, n_images, image_coverage, garbage_ratio, alpha_ratio, eq_signs, math_density, plus raw text"]
     SG --> DEC["decide(signals, RoutingPolicy, force_ocr)"]
     DEC --> Q{"any reason recorded?"}
     Q -->|"yes"| RND["render(ocr.dpi) and OcrEngine.transcribe"]
@@ -703,9 +703,10 @@ A page goes to OCR when at least one rule fires. The thresholds come from Marker
 | Broken glyphs | `garbage_ratio > max_garbage_ratio` | `max_garbage_ratio = 0.10` |
 | Mostly non-letters | `n_chars >= min_chars` and `alpha_ratio < min_alpha_ratio` | `min_alpha_ratio = 0.5` |
 | Scan with an OCR text layer | `scan_layer_to_ocr` and `n_chars >= min_chars` and `image_coverage >= scan_image_cover` | `scan_layer_to_ocr = true`, `scan_image_cover = 0.8` |
+| Math page (off by default) | `math_to_ocr` and `n_chars >= min_chars` and (`eq_signs >= math_min_equals` or `math_density >= math_min_density`) | `math_to_ocr = false`, `math_min_equals = 5`, `math_min_density = 0.04` |
 | Forced | `--ocr-all` and no other rule fired | none |
 
-The signals are measured by `PdfiumPage.signals`: `n_chars` counts non-whitespace characters of the embedded text, `image_coverage` is the share of the visible page box covered by image objects (their rectangles measured in page space, including nested Form XObjects, and united so that overlaps count once), `garbage_ratio` is the share of replacement, control, private-use and `(cid:N)` glyphs, and `alpha_ratio` is the share of letters. Every reason is recorded in the page's `probe.reasons`, so the manifest explains each decision. See [ADR 0002](adr/0002-per-page-routing-and-content-addressed-cache.md).
+The signals are measured by `PdfiumPage.signals`: `n_chars` counts non-whitespace characters of the embedded text, `image_coverage` is the share of the visible page box covered by image objects (their rectangles measured in page space, including nested Form XObjects, and united so that overlaps count once), `garbage_ratio` is the share of replacement, control, private-use and `(cid:N)` glyphs, `alpha_ratio` is the share of letters, `eq_signs` is the number of `=` and `math_density` the share of math-symbol characters. Every reason is recorded in the page's `probe.reasons`, so the manifest explains each decision. See [ADR 0002](adr/0002-per-page-routing-and-content-addressed-cache.md).
 
 Text-layer structuring runs after all pages are read, because two of its rules need the whole document. `domain.structure.structure_pages` receives the layout of every kept text-layer page (the lines with font size, weight and position, from `PdfPage.layout()`) and returns Markdown for each:
 
@@ -831,7 +832,7 @@ Consequences of this layout:
 A call to `ingest` processes the input instead of returning a stored result when any of these holds:
 
 1. The bytes changed, which gives a new `doc_id`.
-2. A part of the key for its kind changed: `PIPELINE_VERSION`, any `[routing]` threshold (PDFs), the pypdfium2 version or the version of the adapter's measurements (PDFs), the OCR fingerprint (PDFs and images), the image source fingerprint (images), or the converter fingerprint (LaTeX, office, text).
+2. A part of the key for its kind changed: `PIPELINE_VERSION`, any `[routing]` threshold (PDFs; the three math keys only while `math_to_ocr` is on), the pypdfium2 version or the version of the adapter's measurements (PDFs), the OCR fingerprint (PDFs and images), the image source fingerprint (images), or the converter fingerprint (LaTeX, office, text).
 3. `--force` was given. The lookup is skipped, and the new result is saved over the stored result with the same run shape (a degraded result still goes to `_degraded/` and replaces nothing).
 4. The stored manifest is missing, unreadable or from an incompatible schema.
 5. The only stored result is degraded.
@@ -895,6 +896,8 @@ classDiagram
         +float image_coverage
         +float garbage_ratio
         +float alpha_ratio
+        +int eq_signs
+        +float math_density
     }
     class PageProbe {
         +bool needs_ocr

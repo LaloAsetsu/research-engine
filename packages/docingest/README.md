@@ -137,22 +137,24 @@ Step by step:
 
 ### Per-page PDF routing
 
-Each PDF page is measured by `PdfPage.signals()` (pypdfium2) and judged by the pure function `domain.routing.decide`. The diagram shows the decision for one page. All five rules are evaluated, every rule that matches is recorded in the manifest as a reason, and the page goes to OCR when at least one matches or when `--ocr-all` is set. A page that goes to OCR for lack of text is first checked for ink in the image that was rendered for OCR: with no text layer to speak of and no ink it is a blank page, recorded with `method = blank` and not transcribed.
+Each PDF page is measured by `PdfPage.signals()` (pypdfium2) and judged by the pure function `domain.routing.decide`. The diagram shows the decision for one page. All six rules are evaluated, every rule that matches is recorded in the manifest as a reason, and the page goes to OCR when at least one matches or when `--ocr-all` is set. A page that goes to OCR for lack of text is first checked for ink in the image that was rendered for OCR: with no text layer to speak of and no ink it is a blank page, recorded with `method = blank` and not transcribed.
 
 ```mermaid
 flowchart TD
-    PAGE["PDF page i"] --> SIG["PdfPage.signals: n_chars, n_images, image_coverage, garbage_ratio, alpha_ratio, raw text"]
-    SIG --> DEC["domain.routing.decide evaluates all five rules"]
+    PAGE["PDF page i"] --> SIG["PdfPage.signals: n_chars, n_images, image_coverage, garbage_ratio, alpha_ratio, eq_signs, math_density, raw text"]
+    SIG --> DEC["domain.routing.decide evaluates all six rules"]
     DEC --> T1["Rule 1: n_chars below min_chars = 50"]
     DEC --> T2["Rule 2: image_coverage at least 0.6 and n_chars below 400"]
     DEC --> T3["Rule 3: garbage_ratio above 0.10"]
     DEC --> T4["Rule 4: n_chars at least 50 and alpha_ratio below 0.5"]
     DEC --> T5["Rule 5: n_chars at least 50 and image_coverage at least 0.8 (scan with a text layer)"]
+    DEC --> T6["Rule 6, off by default: n_chars at least 50 and eq_signs at least 5 or math_density at least 0.04 (math page)"]
     T1 --> ANY{"Did any rule match?"}
     T2 --> ANY
     T3 --> ANY
     T4 --> ANY
     T5 --> ANY
+    T6 --> ANY
     ANY -->|"yes"| OCR["needs_ocr, every matching rule kept as a reason"]
     ANY -->|"no"| FORCED{"ocr_all option set?"}
     FORCED -->|"yes"| FR["needs_ocr, reason: forced"]
@@ -185,16 +187,22 @@ The thresholds live in `[routing]` of [`config/pipeline.toml`](config/README.md)
 | `blank_dark_page` | `128` | (a page with a median grey below this is not paper: all ink) | the constant of the first version, not measured separately |
 | `scan_layer_to_ocr` | `true` | it is a scan (images cover at least `scan_image_cover` of it) and has at least `min_chars` characters of text layer; `false` keeps the layer | reference corpus: 593 scan pages in 17 documents (the rule fires on 595 pages in 19 documents) |
 | `scan_image_cover` | `0.8` | (the share of the page that images must cover for the rule above) | measured: the scan pages cover 0.88 to 1.0 (coverage is a union of the image rectangles); apart from one cover, no other page of the corpus reaches 0.8 |
+| `math_to_ocr` | `false` | (rule 6) it has at least `min_chars` characters of text layer and is math-heavy: at least `math_min_equals` equals signs or a math-symbol share of at least `math_min_density`; the default `false` keeps the layer | 123 reference pages: math error rate 0.122 to 0.072, with 2 of 17 routed pages worse; about 12.4 GPU hours for the reference corpus |
+| `math_min_equals` | `5` | (the equals signs of the rule above) | measured: 5 drops 5 pages that 3 keeps, among them the worst one |
+| `math_min_density` | `0.04` | (the math-symbol share of the rule above) | measured: on the sample every page with a share of 0.02 or more also has 3 or more equals signs, so the equals signs decide |
 
 How the signals are measured (`adapters/pdf/pdfium.py`, `domain/text.py`):
 
 - `image_coverage` is the share of the page covered by image objects: their rectangles are measured in page space (including nested Form XObjects and rotated or offset page boxes), clipped to the visible page box, and united, so overlapping images count once (exact for one image, on a 200 by 200 grid for several). The PDF reader fingerprint carries a version of this measurement.
 - `garbage_ratio` counts U+FFFD replacement characters, control characters, private-use characters and `(cid:N)` sequences among the non-space characters. pdfium's soft-hyphen marker (U+0002) is not counted.
 - `alpha_ratio` is the share of letters among the non-space characters.
+- `eq_signs` is the number of `=` in the text layer; `math_density` is the share of math-symbol characters (Greek, arrows, mathematical operators, brackets, mathematical alphabets and a few signs such as `± × √ ∑ ∫`) among the non-space characters, 4 decimals. Both are recorded in the probe of every page. The reader's version of its measurements was not raised for them, since no routing decision used them before rule 6.
 
 - Ink is measured on the image the engine would be given (`application/ink.py`): the share of pixels darker than the median grey by `blank_ink_contrast` levels after a 3x3 median filter, so paper tint, grey paper, scanner noise and show-through are not ink, and a uniformly dark page counts as all ink. Only pages with at most `blank_max_chars` characters are measured, and the image is reused for OCR when the page turns out not to be blank. The measured values and the reasoning are in [config/README.md](config/README.md#routing). Before this rule the model was asked to transcribe blank pages and invented text for most of them.
 
 **Scans with an OCR text layer (rule 5).** Such a page is one image over the page with, hidden under or over it, the output of an old OCR program. The layer was trusted before unless it was short, garbled or mostly non-letters. On 47 such pages of the reference corpus the model read plain text with a character error rate of 0.011 where the layer had 0.068, and math with 0.03 where the layer had 0.43 (40 pages better, 1 worse). The model needs about 29 seconds per page on the lab GPU server (p90 44 s, up to 70 s), so a large scanned collection takes hours where the layers took seconds ([run guide](../../docs/run-guide.md#5-get-papers-in)). The text layer stays as the fallback if the OCR output is rejected, and `scan_layer_to_ocr = false` keeps the layers. Known limit: a born-digital page drawn over one full-page background image (slide, poster, cover) with a long visible text is read by OCR too. Details and measurements: [config/README.md](config/README.md#routing).
+
+**Math pages (rule 6, off by default).** The text layer of a page full of formulas loses their structure; the model keeps most of it. With `math_to_ocr = true` a page whose layer has at least 5 equals signs or at least 4% math-symbol characters is read by the model. On 123 reference pages that lowered the math error rate from 0.122 to 0.072 and the plain-text error rate from 0.056 to 0.045, for about 31 seconds per routed page (about 12.4 GPU hours for the reference corpus). The cost is a quiet risk: on 3 of the 17 pages the defaults route (about 1 in 6) the model changed a symbol or an index in a way that still reads as math. The text layer stays as the fallback if the OCR output is rejected. The three keys are in the PDF cache key only while the rule is on. Measurements and the table of thresholds: [config/README.md](config/README.md#routing).
 
 When `--ocr-all` is set and no rule matched, the recorded reason is `forced (--ocr-all)`. Text-layer pages are structured after the whole document has been read ([below](#text-layer-structure)).
 
