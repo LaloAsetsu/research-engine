@@ -4,7 +4,8 @@ This package holds the **driving adapters**: the code that turns a user action i
 
 | File | What it contains |
 |---|---|
-| `cli.py` | The Typer application `app`, installed as the `docingest` console script (`[project.scripts] docingest = "docingest.entrypoints.cli:app"` in `pyproject.toml`). Commands: `ingest`, `crawl`, `make-scan`, `eval-ocr`, `ask`, `adapters`, `model-path`. Mounts `bench` and `index`. |
+| `cli.py` | The Typer application `app`, installed as the `docingest` console script (`[project.scripts] docingest = "docingest.entrypoints.cli:app"` in `pyproject.toml`). Commands: `ingest`, `crawl`, `make-scan`, `eval-ocr`, `ask`, `adapters`, `model-path`, and `interactive`. Mounts `bench` and `index`. |
+| `interactive.py` | Testable terminal controller for `docingest interactive`. It provides a focused document-ingestion launcher and the quantum linear-algebra menus without changing the automation commands. |
 | `bench_cli.py` | The Typer sub-application `bench_app`, mounted as `docingest bench`. It is also the benchmark's composition root: it reads `config/benchmark.toml`, builds the suite adapters and builds each candidate's OCR engine through `bootstrap.build("ocr", ...)`. |
 | `index_cli.py` | The Typer sub-application `index_app`, mounted as `docingest index`: `build`, `status`, `remove`. It builds `Container.index_service` and prints its reports; an expected failure is a one-line message and exit code 1. |
 | `paperqa_hook.py` | `parse_pdf_to_pages`, a drop-in for PaperQA2's `settings.parsing.parse_pdf`. |
@@ -53,6 +54,7 @@ flowchart LR
     root --> ask["ask QUESTION"]
     root --> adapters["adapters"]
     root --> modelpath["model-path [ROLE]"]
+    root --> interactive["interactive"]
     root --> index["index"]
     index --> ibuild["build"]
     index --> istatus["status"]
@@ -64,6 +66,64 @@ flowchart LR
     bench --> report["report --run-id ID"]
     bench --> candidates["candidates"]
 ```
+
+### Interactive controller
+
+Run:
+
+```bash
+uv run docingest interactive
+```
+
+The controller presents:
+
+```text
+1 Document Ingestion
+2 Quantum Linear Algebra Engine
+0 Exit
+```
+
+The quantum menu provides single-qubit gates, tensor products, Bell-state
+circuits, overlap and measurement probabilities, and a documented
+teleportation limitation. Inputs are parsed into the `quantum-agent` domain;
+they are never evaluated as Python.
+
+The input flow is:
+
+```text
+menu choice
+  -> operation-specific prompt
+  -> scalar/vector/matrix parser
+  -> dimension + normalization + unitarity validation
+  -> typed quantum operation
+  -> transformation + final state + Dirac/probability summary
+  -> return to quantum menu
+```
+
+The controller flow is:
+
+```mermaid
+flowchart TD
+    START["docingest interactive"] --> MAIN{"Main menu"}
+    MAIN -->|Document ingestion| ING["Prompt path -> existing IngestService"]
+    MAIN -->|Quantum engine| QM{"Quantum submenu"}
+    MAIN -->|Exit| DONE["Clean exit"]
+    QM -->|Single gate| GATE["Parse state + gate -> validate -> apply"]
+    QM -->|Tensor product| TENSOR["Parse operands -> validate -> kron"]
+    QM -->|Circuit| CIRCUIT["Build circuit -> execute -> trace"]
+    QM -->|Measurement| MEASURE["Parse states -> overlap/probabilities"]
+    GATE --> RENDER["Render math + result"]
+    TENSOR --> RENDER
+    CIRCUIT --> RENDER
+    MEASURE --> RENDER
+    RENDER --> QM
+    QM -->|Back| MAIN
+    ING --> MAIN
+```
+
+Expected mathematical errors are printed and return to the same submenu.
+EOF/Ctrl-C exits interactive mode cleanly. Existing commands such as
+`docingest ingest` remain the preferred scriptable interface.
 
 Every top-level command except `make-scan` and `bench` reads `config/pipeline.toml` (or the file given with `--config`); `make-scan` reads no configuration. The `bench` sub-commands read `config/benchmark.toml`, which in turn names a pipeline configuration for the OCR adapters. Both files are described in [../../../config/README.md](../../../config/README.md).
 
