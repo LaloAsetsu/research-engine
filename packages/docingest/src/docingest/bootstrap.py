@@ -222,6 +222,8 @@ class Container:
             store=self.adapter("store"),
             qa=self.adapter("qa"),
             retrieval=self._retrieval if self.configured("index") else None,
+            # a summary would not keep a gate list, so only an answer from the chunks has them
+            circuit_lists=self.cfg.qa.skip_summary,
         )
 
     def _retrieval(self) -> Retrieval:
