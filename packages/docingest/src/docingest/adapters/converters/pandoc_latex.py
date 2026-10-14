@@ -58,7 +58,7 @@ from .latex_source import (
     verbatim_parts,
 )
 
-REVISION = 5  # bump when this adapter's output changes for the same pandoc / pylatexenc
+REVISION = 6  # bump when this adapter's output changes for the same pandoc / pylatexenc
 # Markdown that keeps $math$, $$display$$, pipe tables and [@citations], without raw
 # HTML/TeX or attribute syntax (gfm would drop the citations).
 _DISABLED = (
@@ -558,27 +558,33 @@ class _ListFound:
     remainder: str
 
 
-_ITEM_LINE = re.compile(r"(\d+)\.[ \t]+\[@")  # an entry starts with its citation key
+# A numbered item; group 2 is set when it starts with its citation key.
+_ITEM_LINE = re.compile(r"(\d+)\.(?:[ \t]+(\[@)?|[ \t]*$)")
 _HEADING_RUN = re.compile(r"(?:#{1,6}[ \t]+\S[^\n]*(?:\n+|\Z))+")
 _REFERENCES_LINE = re.compile(r"^#{1,6}[ \t]+References[ \t]*$", re.M)
 
 
 def _numbered_list(text: str) -> tuple[int, int]:
     """``(entries, end offset)`` of the reference list that opens ``text``: items numbered
-    1, 2, ... that start with ``[@key]``, their indented lines and the blank lines between
-    them. Any other numbered item ends it: it is the paper's own list, not an entry."""
-    count = end = offset = 0
+    1, 2, ..., their indented lines and the blank lines between them. An item that
+    continues the numbering belongs to the list whether it has a key or not (an entry
+    written without ``\\cite`` has none), but only the ones that start with ``[@key]`` are
+    counted as entries. The end moves only once a keyed item has been seen, so numbered items
+    without a single key are the paper's own list, not entries. Any other numbered item ends
+    it: it restarts at 1, so it is the paper's own list."""
+    items = keyed = end = offset = 0
     for line in text.split("\n"):
         nxt = offset + len(line) + 1
         m = _ITEM_LINE.match(line)
-        if m and int(m[1]) == count + 1:
-            count, end = count + 1, nxt
-        elif line.strip() and (count == 0 or not line[0].isspace()):
+        if m and int(m[1]) == items + 1:
+            items, keyed = items + 1, keyed + bool(m[2])
+            end = nxt if keyed else end
+        elif line.strip() and (items == 0 or not line[0].isspace()):
             break
-        elif line.strip():
+        elif line.strip() and keyed:
             end = nxt
         offset = nxt
-    return count, min(end, len(text))
+    return keyed, min(end, len(text))
 
 
 def _reference_lists(segments: Sequence[Segment]) -> list[_ListFound]:

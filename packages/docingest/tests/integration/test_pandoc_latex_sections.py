@@ -227,6 +227,24 @@ def test_a_list_of_the_papers_own_after_a_dropped_list_stays(tmp_path, monkeypat
 
 
 @needs_pandoc
+@pytest.mark.parametrize("keyless", [(1,), (1, 2), (5,), (10,)])
+def test_a_keyless_entry_does_not_make_a_complete_list_look_cut_short(tmp_path, keyless):
+    entries = "".join(
+        f"\\bibitem{{{'' if i in keyless else f'quill{i}'}}} Author {i}, Tidal wicks {i}, "
+        f"Basin Letters \\textbf{{{i}}}, 7 (20{i:02d}).\n"
+        for i in range(1, 11)
+    )
+    paper = re.sub(r"\\bibitem\{quill31\}.*\n", lambda _: entries, PAPER)
+    (tmp_path / "main.tex").write_text(paper.replace(BROKEN, "wrapped words"))
+    conv = CONVERTER.convert(tmp_path / "main.tex")
+
+    assert conv.method == PageMethod.LATEX and conv.warnings == []
+    assert all(s.method is None for s in conv.segments)
+    for i in range(1, 11):
+        assert text_of(conv).count(f"Tidal wicks {i},") == 1  # none of them twice
+
+
+@needs_pandoc
 def test_with_the_rewrite_in_place_the_guard_does_nothing():
     conv = CONVERTER.convert(REVTEX / "main.tex")
     assert conv.warnings == [] and all(s.method is None for s in conv.segments)
