@@ -7,7 +7,18 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
-from .domain import Circuit, DimensionMismatchError, Gate, ParseError, StateVector, gates, phase
+from .domain import (
+    Circuit,
+    ConditionalOperation,
+    DimensionMismatchError,
+    Gate,
+    MeasurementOperation,
+    Operation,
+    ParseError,
+    StateVector,
+    gates,
+    phase,
+)
 
 
 def parse_dirac(text: str) -> StateVector:
@@ -52,15 +63,31 @@ def parse_circuit(spec: Mapping[str, object]) -> Circuit:
     for raw in raw_operations:
         if not isinstance(raw, Mapping):
             raise ParseError("each operation must be an object")
+        if "measure" in raw:
+            qubits = tuple(int(q) for q in raw.get("measure", ()))
+            key = str(raw.get("key", ""))
+            operations.append(MeasurementOperation(qubits, key))
+            continue
         name = str(raw.get("gate", "")).upper()
         if name not in gates and not name.startswith("PHASE("):
             raise ParseError(f"unsupported gate {name!r}")
         gate = phase(float(name[6:-1])) if name.startswith("PHASE(") else gates[name]
         qubits = tuple(int(q) for q in raw.get("qubits", ()))
         controls = tuple(int(q) for q in raw.get("controls", ()))
-        from .domain import Operation
-
-        operations.append(Operation(gate, qubits, controls))
+        operation = Operation(gate, qubits, controls)
+        condition = raw.get("condition")
+        if condition is not None:
+            if not isinstance(condition, Mapping):
+                raise ParseError("operation condition must be an object")
+            operations.append(
+                ConditionalOperation(
+                    operation,
+                    str(condition.get("key", "")),
+                    str(condition.get("equals", "")),
+                )
+            )
+        else:
+            operations.append(operation)
     return Circuit(num_qubits, tuple(operations))
 
 

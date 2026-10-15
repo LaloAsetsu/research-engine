@@ -9,8 +9,10 @@ agent/CLI -> parsing/use cases -> domain values -> NumPy simulator
 ```
 
 The native path is intentionally limited to pure statevectors and
-computational-basis measurement. This makes every result inspectable and keeps
-the package local and deterministic. Optional Qiskit, Cirq, and PennyLane
+computational-basis measurement. Measurement operations collapse the
+statevector and can drive later operations through explicit classical keys;
+outcomes may be supplied for deterministic branch execution. This makes every
+result inspectable and keeps the package local and deterministic. Optional Qiskit, Cirq, and PennyLane
 adapters should implement import/export or oracle protocols without entering
 the domain layer.
 
@@ -48,7 +50,5 @@ requests rather than return a success-shaped fallback.
 
 The required baseline includes `H|0>`, Pauli/Hadamard identities, Bell-state
 creation and measurement, Toffoli truth-table behavior, tensor ordering,
-seeded sampling, invalid dimensions, non-unitary gates, and teleportation
-branch checks. Teleportation should be added as the next integration test once
-classical measurement-conditioned operations are represented in the circuit
-schema.
+seeded sampling, invalid dimensions, non-unitary gates, measurement-conditioned
+operations, and teleportation branch checks.

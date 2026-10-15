@@ -1,7 +1,14 @@
 import numpy as np
 import pytest
 
-from quantum_agent import Circuit, Operation, StatevectorSimulator, gates, solve_quantum_problem
+from quantum_agent import (
+    Circuit,
+    Operation,
+    StatevectorSimulator,
+    gates,
+    solve_quantum_problem,
+    teleportation_circuit,
+)
 from quantum_agent.domain import Gate, InvalidStateError, NonUnitaryGateError, StateVector
 from quantum_agent.parsing import parse_circuit, parse_dirac
 
@@ -51,3 +58,30 @@ def test_agent_entrypoint_requires_an_explicit_mode():
     assert solution.interpretation == "Dirac state with 1 qubits"
     with pytest.raises(ValueError, match="mode"):
         solve_quantum_problem("|0>", mode="automatic")
+
+
+@pytest.mark.parametrize("branch", ["00", "01", "10", "11"])
+def test_teleportation_transfers_state_on_every_measurement_branch(branch):
+    input_state = StateVector(np.array([1, 1j], dtype=np.complex128) / np.sqrt(2), 1)
+    circuit = teleportation_circuit(input_state)
+    state = StatevectorSimulator().run(
+        circuit,
+        measurement_outcomes={"m0": branch[0], "m1": branch[1]},
+    )
+    receiver = state.amplitudes[int(branch, 2) * 2 : int(branch, 2) * 2 + 2]
+    assert np.allclose(abs(np.vdot(input_state.amplitudes, receiver)), 1)
+
+
+def test_circuit_parser_accepts_measurements_and_conditions():
+    circuit = parse_circuit(
+        {
+            "num_qubits": 2,
+            "operations": [
+                {"gate": "H", "qubits": [0]},
+                {"measure": [0], "key": "m"},
+                {"gate": "X", "qubits": [1], "condition": {"key": "m", "equals": "1"}},
+            ],
+        }
+    )
+    state = StatevectorSimulator().run(circuit, measurement_outcomes={"m": "1"})
+    assert np.argmax(abs(state.amplitudes)) == 3

@@ -10,7 +10,14 @@ from typing import Protocol
 import numpy as np
 from rich.console import Console
 
-from quantum_agent import Circuit, Operation, StateVector, StatevectorSimulator, gates
+from quantum_agent import (
+    Circuit,
+    Operation,
+    StateVector,
+    StatevectorSimulator,
+    gates,
+    teleportation_circuit,
+)
 from quantum_agent.domain import QuantumError, phase
 from quantum_agent.interactive import (
     dirac_terms,
@@ -145,10 +152,18 @@ class InteractiveController:
     def _circuits(self) -> None:
         choice = self.io.ask("Algorithm [Bell, Teleportation]:").strip().lower()
         if choice.startswith("tele"):
-            self.io.write(
-                "Teleportation requires conditional measurement operations; "
-                "not supported in v1."
+            input_state = parse_vector(self.io.ask("Input state to teleport:"))
+            outcome = self.io.ask("Measurement branch m0m1 [00, 01, 10, 11]:").strip()
+            if outcome not in {"00", "01", "10", "11"}:
+                raise ValueError("measurement branch must be 00, 01, 10, or 11")
+            circuit = teleportation_circuit(input_state)
+            state = self.simulator.run(
+                circuit,
+                measurement_outcomes={"m0": outcome[0], "m1": outcome[1]},
             )
+            self.io.write(f"Teleportation branch {outcome}: {dirac_terms(state)}")
+            receiver_start = int(outcome, 2) * 2
+            self.io.write(f"Receiver state: {state.amplitudes[receiver_start : receiver_start + 2]}")
             return
         if choice != "bell":
             raise ValueError("choose Bell or Teleportation")

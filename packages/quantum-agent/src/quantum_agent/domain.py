@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from math import log2
-from typing import Final
+from typing import Final, Union
 
 import numpy as np
 from numpy.typing import NDArray
@@ -130,9 +130,37 @@ class Operation:
 
 
 @dataclass(frozen=True)
+class MeasurementOperation:
+    qubits: tuple[int, ...]
+    key: str
+
+    def __post_init__(self) -> None:
+        if not self.qubits or len(set(self.qubits)) != len(self.qubits):
+            raise InvalidQubitError("measurement qubits must be non-empty and unique")
+        if not self.key.strip():
+            raise QuantumError("measurement key cannot be empty")
+
+
+@dataclass(frozen=True)
+class ConditionalOperation:
+    operation: Operation
+    key: str
+    value: str
+
+    def __post_init__(self) -> None:
+        if not self.key.strip():
+            raise QuantumError("conditional measurement key cannot be empty")
+        if not self.value or any(bit not in "01" for bit in self.value):
+            raise QuantumError("conditional measurement value must be a bit string")
+
+
+CircuitOperation = Union[Operation, MeasurementOperation, ConditionalOperation]
+
+
+@dataclass(frozen=True)
 class Circuit:
     num_qubits: int
-    operations: tuple[Operation, ...] = ()
+    operations: tuple[CircuitOperation, ...] = ()
     initial_state: StateVector | None = None
 
     def __post_init__(self) -> None:
@@ -142,7 +170,12 @@ class Circuit:
         if initial.num_qubits != self.num_qubits:
             raise DimensionMismatchError("initial state and circuit have different qubit counts")
         for operation in self.operations:
-            operands = (*operation.qubits, *operation.controls)
+            if isinstance(operation, MeasurementOperation):
+                operands = operation.qubits
+            elif isinstance(operation, ConditionalOperation):
+                operands = (*operation.operation.qubits, *operation.operation.controls)
+            else:
+                operands = (*operation.qubits, *operation.controls)
             if any(qubit < 0 or qubit >= self.num_qubits for qubit in operands):
                 raise InvalidQubitError("operation references a qubit outside the circuit")
 

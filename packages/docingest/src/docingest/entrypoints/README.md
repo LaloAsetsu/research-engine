@@ -84,8 +84,8 @@ The controller presents:
 ```
 
 The quantum menu provides single-qubit gates, tensor products, Bell-state
-circuits, overlap and measurement probabilities, and a documented
-teleportation limitation. Inputs are parsed into the `quantum-agent` domain;
+circuits, overlap and measurement probabilities, and deterministic-branch
+quantum teleportation. Inputs are parsed into the `quantum-agent` domain;
 they are never evaluated as Python.
 
 The input flow is:

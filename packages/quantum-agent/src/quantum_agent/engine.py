@@ -6,7 +6,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .domain import Circuit, DimensionMismatchError, MeasurementResult, Operation, StateVector
+from .domain import (
+    Circuit,
+    ConditionalOperation,
+    DimensionMismatchError,
+    MeasurementOperation,
+    MeasurementResult,
+    Operation,
+    StateVector,
+)
 
 
 @dataclass(frozen=True)
@@ -82,12 +90,67 @@ class StatevectorSimulator:
                     result[index], result[partner] = result[partner], result[index]
         return StateVector(result, state.num_qubits)
 
-    def run(self, circuit: Circuit) -> StateVector:
+    def run(
+        self,
+        circuit: Circuit,
+        *,
+        measurement_outcomes: dict[str, str] | None = None,
+        seed: int | None = None,
+    ) -> StateVector:
         self._validate_size(circuit.num_qubits)
         state = circuit.initial_state or StateVector.zero(circuit.num_qubits)
+        outcomes: dict[str, str] = {}
+        requested = measurement_outcomes or {}
+        rng = np.random.default_rng(seed)
         for operation in circuit.operations:
-            state = self.apply_operation(state, operation)
+            if isinstance(operation, MeasurementOperation):
+                state, outcome = self._measure_qubits(
+                    state, operation.qubits, requested.get(operation.key), rng
+                )
+                outcomes[operation.key] = outcome
+            elif isinstance(operation, ConditionalOperation):
+                if operation.key not in outcomes:
+                    raise ValueError(
+                        "conditional operation references unavailable "
+                        f"measurement {operation.key!r}"
+                    )
+                if outcomes[operation.key] == operation.value:
+                    state = self.apply_operation(state, operation.operation)
+            else:
+                state = self.apply_operation(state, operation)
         return state
+
+    def _measure_qubits(
+        self,
+        state: StateVector,
+        qubits: tuple[int, ...],
+        requested: str | None,
+        rng: np.random.Generator,
+    ) -> tuple[StateVector, str]:
+        labels = [
+            "".join(str(bit) for bit in _bits(index, state.num_qubits))
+            for index in range(state.amplitudes.size)
+        ]
+        probabilities: dict[str, float] = {}
+        for label, probability in zip(labels, state.probabilities()):
+            outcome = "".join(label[qubit] for qubit in qubits)
+            probabilities[outcome] = probabilities.get(outcome, 0.0) + float(probability)
+        if requested is None:
+            outcomes = list(probabilities)
+            requested = outcomes[
+                int(rng.choice(len(outcomes), p=[probabilities[key] for key in outcomes]))
+            ]
+        if requested not in probabilities or probabilities[requested] <= self.limits.display_threshold:
+            raise ValueError(f"measurement outcome {requested!r} has zero probability")
+        collapsed = np.array(
+            [
+                amplitude if "".join(label[qubit] for qubit in qubits) == requested else 0
+                for label, amplitude in zip(labels, state.amplitudes)
+            ],
+            dtype=np.complex128,
+        )
+        collapsed /= np.sqrt(probabilities[requested])
+        return StateVector(collapsed, state.num_qubits), requested
 
     def measure(self, state: StateVector, *, shots: int = 0, seed: int | None = None) -> MeasurementResult:
         if shots < 0:
