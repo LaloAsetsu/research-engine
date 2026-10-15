@@ -130,12 +130,15 @@ COPY_RULE = (
     "and copy it exactly, keeping its LaTeX. "
     "Keep each one with the paper it comes from: do not move a gate or a term from one "
     "paper's circuit or equation into another's. "
+    "An equation number belongs to the paper it is printed in: for a question about the "
+    "Eq. (n) of one paper, do not use the Eq. (n) of another. "
     "If the context does not show a gate or a term, say so instead of guessing."
 )
 """Added to PaperQA2's answer prompt when the model reads raw chunks. A summary is written by a
 model; a raw circuit or equation is not, and an answer model that reads the circuits of several
-papers at once may lend a gate from one to another. The text is pinned here and must hold no
-curly brace: PaperQA2 fills the prompt with ``str.format``."""
+papers at once may lend a gate from one to another, or answer a question about a paper's Eq. (n)
+with the Eq. (n) of another. The text is pinned here and must hold no curly brace: PaperQA2 fills
+the prompt with ``str.format``."""
 
 _RULE_ANCHOR = "{prior_answer_prompt}"
 

@@ -443,6 +443,21 @@ class FakeIndex:
         return sorted(hits, key=lambda h: -h.score)[:k]  # stable: ties keep insertion order
 
 
+class FixedIndex(FakeIndex):
+    """A ``FakeIndex`` whose searches return exactly the chunks in ``answer``, best first: the
+    retrieval order of a test is then chosen, not computed."""
+
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self.answer: list[Chunk] = []
+
+    def search(
+        self, question: str, vector: Vector, k: int, *, keywords: KeywordMode | None = None
+    ) -> list[Hit]:
+        self.keywords.append(keywords)
+        return [Hit(c, 1.0 - i / 100) for i, c in enumerate(self.answer)][:k]
+
+
 class FakeReranker:
     """Scores a chunk by the share of the question's words it contains."""
 

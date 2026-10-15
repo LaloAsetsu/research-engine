@@ -370,6 +370,8 @@ RULE = (
     "and copy it exactly, keeping its LaTeX. "
     "Keep each one with the paper it comes from: do not move a gate or a term from one "
     "paper's circuit or equation into another's. "
+    "An equation number belongs to the paper it is printed in: for a question about the "
+    "Eq. (n) of one paper, do not use the Eq. (n) of another. "
     "If the context does not show a gate or a term, say so instead of guessing."
 )
 CIRCUIT = "\\begin{quantikz} \\lstick{$q_0$} & \\gate{H} & \\ctrl{1} & \\qw \\\\ & & \\gate{Z} & \\qw \\end{quantikz}"

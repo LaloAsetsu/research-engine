@@ -17,7 +17,7 @@ from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .application.ask import AskService, Retrieval
+from .application.ask import AskService, EquationLookup, Retrieval
 from .application.crawl import CrawlService
 from .application.index import IndexService
 from .application.ingest import IngestService, Log
@@ -224,6 +224,12 @@ class Container:
             retrieval=self._retrieval if self.configured("index") else None,
             # a summary would not keep a gate list, so only an answer from the chunks has them
             circuit_lists=self.cfg.qa.skip_summary,
+            # the same for the chunk of an equation number the question names
+            equation_lookup=EquationLookup(
+                self.cfg.qa.chunk_chars, self.cfg.qa.overlap, self.cfg.qa.answer_max_sources
+            )
+            if self.cfg.qa.skip_summary
+            else None,
         )
 
     def _retrieval(self) -> Retrieval:

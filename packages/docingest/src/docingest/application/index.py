@@ -34,6 +34,24 @@ def content_key(pages: Mapping[int, str]) -> str:
     return digest.hexdigest()
 
 
+def document_chunks(
+    doc: StoredDocument, pages: Mapping[int, str], chunk_chars: int, overlap: int
+) -> list[Chunk]:
+    """The chunks the index holds for ``doc``: ``chunk_pages`` with ``is_reference`` set from the
+    section titles of the pages a chunk touches. ``ask`` uses it to cut a paper like the index
+    did."""
+    titles = {p.index + 1: p.title or "" for p in doc.manifest.pages}
+    chunks = chunk_pages(doc.manifest.doc_id, pages, chunk_chars=chunk_chars, overlap=overlap)
+    return [
+        replace(c, is_reference=True)
+        if any(
+            _REFERENCE_TITLE.search(titles.get(n, "")) for n in range(c.first_page, c.last_page + 1)
+        )
+        else c
+        for c in chunks
+    ]
+
+
 @dataclass(frozen=True)
 class IndexStatus:
     stats: IndexStats
@@ -239,19 +257,7 @@ class IndexService:
             report.committed = True
 
     def _chunks(self, doc: StoredDocument, pages: Mapping[int, str]) -> list[Chunk]:
-        titles = {p.index + 1: p.title or "" for p in doc.manifest.pages}
-        chunks = chunk_pages(
-            doc.manifest.doc_id, pages, chunk_chars=self.chunk_chars, overlap=self.overlap
-        )
-        return [
-            replace(c, is_reference=True)
-            if any(
-                _REFERENCE_TITLE.search(titles.get(n, ""))
-                for n in range(c.first_page, c.last_page + 1)
-            )
-            else c
-            for c in chunks
-        ]
+        return document_chunks(doc, pages, self.chunk_chars, self.overlap)
 
     def _flush(self, batch: list[_Pending]) -> int:
         """Embed the chunks of several documents in one call and store each document."""
