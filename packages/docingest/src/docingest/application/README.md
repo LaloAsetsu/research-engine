@@ -33,8 +33,8 @@ case.
 |---|---|---|---|
 | `ingest.py` | `IngestService`, `IngestOptions`, `PIPELINE_VERSION`, `SIDECAR_SUFFIX`, `sha256_file`, `read_sidecar`, `retitle_markdown`, `Log` | Turn one file (PDF, image, office, LaTeX, text) into Markdown plus a `DocumentManifest`, with a content-addressed cache | `bootstrap.Container.ingest`, `docingest ingest`, `docingest eval-ocr`, the PaperQA2 hook, `CrawlService` |
 | `crawl.py` | `CrawlService`, `CrawlReport` | Search a remote source, download each record, write a metadata sidecar, ingest it | `bootstrap.Container.crawl`, `docingest crawl` |
-| `ask.py` | `AskService`, `Retrieval`, `retrieve`, `cap_per_paper`, `with_gate_lists` | Answer a question over every stored document, or from the chunk index when one is configured | `bootstrap.Container.ask`, `docingest ask` |
-| `index.py` | `IndexService`, `IndexStatus`, `BuildReport`, `content_key`, `BATCH_CHUNKS` | Chunk every stored document like `ask` does, embed the new and changed ones, drop the vanished ones, and report the state of the index | `bootstrap.Container.index_service`, `docingest index` |
+| `ask.py` | `AskService`, `Retrieval`, `EquationLookup`, `retrieve`, `cap_per_paper`, `with_gate_lists`, `with_equation_lookup`, `with_equation_headers`, `MAX_PER_NUMBER`, `MAX_ADDED` | Answer a question over every stored document, or from the chunk index when one is configured | `bootstrap.Container.ask`, `docingest ask` |
+| `index.py` | `IndexService`, `IndexStatus`, `BuildReport`, `content_key`, `document_chunks`, `BATCH_CHUNKS` | Chunk every stored document like `ask` does, embed the new and changed ones, drop the vanished ones, and report the state of the index | `bootstrap.Container.index_service`, `docingest index` |
 | `benchmark.py` | `BenchmarkRunner`, `CandidateRun`, `RunMismatchError`, `score_run`, `needs_scoring`, `load_scores`, `rank`, `compare`, `throughput`, `build_summary`, `render_report`, `write_report`, `read_manifest`, `read_telemetry`, `telemetry_path`, `telemetry_stamp`, `latest_by_sample`, `machine_info`, `library_versions` | Transcribe benchmark samples with each OCR candidate (resumable), record telemetry, score, and write `summary.json` and `report.md` | `docingest bench run`, `bench score`, `bench report` (in `entrypoints/bench_cli.py`); `scripts/bench_docs.py` reads `load_scores` and `compare` |
 | `metrics.py` | `score`, `normalize`, `plain_text`, `latex_to_text`, `word_f1`, `char3_f1`, `running_lines`, `strip_furniture`, `bootstrap_ci`, `FURNITURE_ZONE` | Format-neutral text comparison: CER, WER, word F1, character 3-gram F1 | the synthetic benchmark suite, `docingest eval-ocr` |
 | `stats.py` | `cluster_bootstrap_ci`, `paired_bootstrap`, `PairedResult`, `quantile`, `MIN_CLUSTERS`, `bootstrap_ci` (re-exported) | Confidence intervals that resample clusters, and a paired sign-flip test | both benchmark suites, `benchmark.py` |
@@ -854,7 +854,7 @@ for key, error in report.failures:
 
 ## `ask.py`: question answering over the corpus
 
-`AskService(*, store, qa, retrieval=None, circuit_lists=False)` has one coroutine and one property. `circuit_lists` is not a setting of its own: `Container.ask` passes `[qa] skip_summary`.
+`AskService(*, store, qa, retrieval=None, circuit_lists=False, equation_lookup=None)` has one coroutine and one property. `circuit_lists` and `equation_lookup` are not settings of their own: `Container.ask` passes `[qa] skip_summary` and, for the lookup, an `EquationLookup(chunk_chars, overlap, sources)` made from `[qa] chunk_chars`, `overlap` and `answer_max_sources` (`None` when `skip_summary` is false).
 
 `async ask(question, warn=print, *, use_index=True, keywords=None) -> str`
 
@@ -870,8 +870,9 @@ for key, error in report.failures:
    `qa.ask(question, [(document, markdown), ...], warn)`. `keywords` is then a `ValueError`: it
    belongs to the index.
 4. **With an index** it calls `retrieval()` and `retrieve(...)`, closes the index in a
-   `finally`, and, when `circuit_lists` is true, replaces the chunks by `with_gate_lists(...)`
-   (below). It then awaits `qa.ask(question, [(document, "")...], warn, contexts=chunks)` with
+   `finally`, and, when `equation_lookup` is set, replaces the chunks by
+   `with_equation_lookup(...)`, then, when `circuit_lists` is true, by `with_gate_lists(...)`
+   (both below), then puts the headers of the lookup on with `with_equation_headers(...)`. It then awaits `qa.ask(question, [(document, "")...], warn, contexts=chunks)` with
    the manifests of the papers the chunks come from (in order of first appearance) and no
    Markdown: the corpus text is not read for the answerer.
 5. It returns the answerer's text unchanged.
@@ -890,6 +891,16 @@ answerer will read as they are (`[qa] skip_summary`; with summaries a list would
 3. The list never stops an answer: any exception for a chunk (`store.markdown` failing, a reader bug) keeps the chunk as it is and calls `warn` once for that paper (`gate list skipped for <doc id prefix>: <error>`); `domain/circuits.py` itself has no `try`.
 4. Only `text` changes (`dataclasses.replace`); name, pages and `start` stay, so citations are the
    same, and the order of the chunks is kept. Nothing is written and no cache or index key changes.
+
+`with_equation_lookup(contexts, sources, question, store, warn, *, lookup)` adds the chunk of each equation number the question names, for the same answerer (`[qa] skip_summary`). It returns the chunks and the labels for the headers (`(doc id, chunk start)` to an `EquationLabel`: the numbers the chunk holds, and those whose equation starts before it):
+
+1. `domain.equations.equation_references` reads the numbers from the question ("Eq. (2)", "Equations 3 and 4", "ecuación (A.1)"), at most four. None: the chunks are returned as they are (the same list), and nothing is read.
+2. The papers searched are those of the first `lookup.sources` chunks (`[qa] answer_max_sources`, the chunks the answer prompt carries), in the order of their best chunk, and only those whose title shares at least `MIN_TITLE_WORDS` (4) content words with the question (`_Papers.named`, `domain.equations.title_overlap`; a paper that fails is not read and gives nothing, and when none passes the contexts come back as they are). A paper's Markdown is read once, when a number first needs it (`store.markdown`, `split_pages`), `domain.equations.find_equations` finds the first `\tag` of each asked number, and the paper is cut with `index.document_chunks` (the function the index uses, so the chunk is the index's chunk, `is_reference` included); `chunk_for` takes the chunk that holds the tag whole and most of its equation. The chunk is started at the sentence before the equation (`lead_sentence_start`) when that sentence begins at most `lookup.chunk_chars` before the chunk, else, if the equation starts before the chunk, at the start of the equation (a new `Chunk` with the text from the paper's Markdown, `start`, `first_page` and `name` of where it now starts) when the gap is at most `lookup.chunk_chars`; otherwise the chunk is kept and its number is labelled partial.
+3. For each number, in rounds, the next paper that tags it gives one pick, `MAX_PER_NUMBER` (2) picks per number and `MAX_ADDED` (4) chunks added in all, the first pick of every number before the second of any. A retrieved chunk of the prompt that holds the whole equation (`covers`) and whose text is still the paper's text at its offset (`_Paper.holds`; the index may be older than the Markdown) is a pick that adds nothing and only gets a label. A retrieved chunk with an old text is not that; if an added chunk has its offset, the old one is replaced by it. A retrieved chunk that is the same chunk as the pick but holds only the end of the equation gets a partial label. Papers are read only until the numbers have their picks.
+4. The prompt keeps its size: an added chunk is placed right behind the best chunk of its paper and takes the place of a chunk of the first `lookup.sources`, or a free place when the prompt has fewer chunks than places. The chunk is never the first one and never a labelled one; it is the lowest-ranked one whose paper keeps another chunk (counted again after each pick), and only when there is none, the lowest-ranked one (`_lowest_ranked`). A pick with no place is dropped with its label. The chunks beyond the prompt are appended as they were.
+5. It never stops an answer: any exception for a paper (the Markdown cannot be read, a chunker bug) adds nothing for it and calls `warn` once for that paper (`equation lookup skipped for <doc id prefix>: <error>`).
+
+`with_equation_headers(contexts, labels, sources)` puts `equation_header(...)` and a blank line before the text of each labelled chunk (the title is the paper's title, else its file name). It runs after the gate lists, because those read a chunk by its `start` offset and a header would move the text. Only `text` changes; name, pages and `start` stay.
 
 `retrieve(retrieval, question, documents, warn, keywords)` is the two-stage retrieval:
 

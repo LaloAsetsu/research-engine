@@ -16,6 +16,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 - [Text-layer structure](#text-layer-structure-layoutpy-furniturepy-headingspy-structurepy)
 - [chunking.py](#chunkingpy)
 - [circuits.py](#circuitspy)
+- [equations.py](#equationspy)
 - [errors.py](#errorspy)
 - [Changing the domain safely](#changing-the-domain-safely)
 
@@ -33,6 +34,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 | `structure.py` | `structure_pages` (text-layer pages of a document to Markdown) | `IngestService` for the text-layer pages of a PDF |
 | `chunking.py` | `Chunk`, `chunk_pages`, `CHUNKER_VERSION`, `CHUNK_CHARS`, `OVERLAP` | `ports` (`Chunk` is re-exported there); the chunk index and `AskService` use it through those |
 | `circuits.py` | `gate_list`, `GateList`, `circuit_code_blocks`, `CodeBlock`, `add_gate_lists`, `MAX_STEPS` | `AskService` (a gate list after each circuit code block of the retrieved chunks) |
+| `equations.py` | `equation_references`, `canonical`, `find_equations`, `EquationSpan`, `chunk_for`, `covers`, `equation_header`, `content_words`, `title_overlap`, `lead_sentence_start`, `MAX_REFERENCES`, `MIN_TITLE_WORDS`, `LOOK_BACK`, `TITLE_LENGTH` | `AskService` (the chunk of an equation number the question names) |
 | `errors.py` | `DocingestError` and its subclasses | adapters raise them, application and entrypoints handle them |
 
 ## How domain objects flow through an ingestion
@@ -669,6 +671,22 @@ Rules of the reader:
 - **Linear time.** Every bracket is matched once, cells are read sparsely, and the vertical wires of a column are joined with a sweep (a difference array), so no source makes the work quadratic; a gate over many wires is written as a range (`wires 1 to 40`). Tests compare the time of an input with that of one four times larger.
 - Not read: circuits drawn with TikZ nodes or arrows, macros the author defined, `\gategroup` boxes, labels outside the grid, display-math circuits (the caller passes code blocks only).
 
+## equations.py
+
+`equations.py` reads equation numbers, as pure functions on text (standard library only). The LaTeX converter writes the number LaTeX gives a display equation into its math as `\tag{n}`; a question that asks what "Eq. (2)" states gives no word a search can weigh, because every paper has an Eq. (2). `AskService` therefore uses this module at answer time to find the equation inside a paper that retrieval has already found:
+
+| Name | Meaning |
+|---|---|
+| `equation_references(question)` | The numbers the question names, in order, without repeats, at most `MAX_REFERENCES` (4), as written: `Eq. (2)`, `Eqs. (2) and (3)`, `Eq (A.1)`, `equation (7)`, `Equation 7`, `Equation no. 3`, `ecuación (4)`, `Ec. 3a`, `ecuaciones (2) y (3)`. A number is 1 to 3 digits with an optional lowercase suffix, a `.` part (`2.3`) or a letter prefix (`A1`, `A.1`, `S5`). In parentheses a number is read after the word at once; bare, it must have an upper-case prefix and a suffix from a to e and may not run into more letters or digits (`2D`, `2019`) nor be followed by a unit or a counted noun in English or Spanish (`3 times`, `5 MHz`, `10 photons`, `3 veces`). The acronym `EC` in capitals is not `Ec.`. A space, a tab, a no-break space or a LaTeX tie may stand between the word and the number. Joiners are `,`, `and`, `or`, `&`, `-`, `--`, the en and em dash, `to`, `through`, `y`, `e`, `o`; a range gives its two ends. |
+| `canonical(number)` | The spelling used to compare numbers: lower case, no dot or dash between a leading letter and the digits (`A.1` is `A1`, `2.3` stays). |
+| `find_equations(document, numbers)` | `{number: EquationSpan}` for the asked numbers (canonical) that the text tags: the first `\tag{...}` or `\tag*{...}` whose text is a number. `EquationSpan` has the tag as written, `start` of its display equation (the nearest `$$` before it, however far back, when it opens a block: an odd number of `$$` come before the tag, or no blank line lies between that `$$` and the tag; else the nearest `\[` or `\begin{` within `LOOK_BACK` = 1,500 characters, else the tag; a start that is too early only makes the chunk say it holds the end of the equation), `tag_start` and `end`. One regular-expression pass that ends when every number is found. |
+| `chunk_for(chunks, span)` | The chunk that holds the whole tag and most of the equation (the earlier one of two equal), or `None`. `covers(chunk, span)` says whether a chunk holds the whole equation. |
+| `content_words(text)`, `title_overlap(question, title)`, `MIN_TITLE_WORDS` | The words of a text that say what it is about (lower case, accents removed, English and Spanish stop words and words of one or two letters dropped, plurals and endings such as `-ing`, `-ion`, `-ed` folded) and how many two texts share. `AskService` adds the chunk of a paper only when `title_overlap(question, title) >= MIN_TITLE_WORDS` (4). |
+| `lead_sentence_start(document, start, limit)` | Where the sentence before the display equation at `start` begins: the last sentence of the paragraph before (or of the same paragraph), at most `limit` characters back; `start` itself when the text before ends in another display, there is no break within `limit`, or nothing precedes. |
+| `equation_header(tags, doc_id, title, partial=())` | `Equation (2) of paper <doc id[:16]>, <title>:`, or `Equations (2) and (3) of ...`; for a number in `partial` (its equation starts before the chunk) `The end of Equation (2) of paper ..., <title> (the start of the cut equation is in the text before this chunk):`; the title is cut at `TITLE_LENGTH` (100) characters with its whitespace made one space, and left out when empty. |
+
+Limits: a range is not expanded; a second tag with the same text in a paper (a restart after the numbering stopped) is not looked at; a tag whose text is not a plain number (`\tag{\ref{x}}`) is not found. The module reads, it never writes: nothing here is stored.
+
 ## errors.py
 
 Domain errors describe expected, reportable failures. Adapters translate library exceptions into them (`raise ConversionError(...) from e`), so the application and the CLI never need to know which library failed.
@@ -773,4 +791,4 @@ The domain is small and everything depends on it, so changes ripple outward. Che
 | Different logic in `decide`, `clean_text_layer`, `collapse_dot_leaders`, `structure_pages` or `render_markdown` | Bump `PIPELINE_VERSION` in `application/ingest.py`. Code changes are not part of any adapter fingerprint, so without the bump cached results produced by the old logic would still be served. |
 | New error type | Subclass the closest existing error so that existing handlers keep working. Put adapter-specific errors in the adapter module, as `OcrServerError` does. |
 
-Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`, `tests/unit/test_circuits.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).
+Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`, `tests/unit/test_circuits.py`, `tests/unit/test_equations.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).
