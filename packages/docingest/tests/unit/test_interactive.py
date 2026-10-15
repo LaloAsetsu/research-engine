@@ -34,6 +34,14 @@ def test_invalid_main_menu_choice_is_recoverable():
     io = ScriptedTerminal(["invalid", "0"])
     InteractiveController(io, StatevectorSimulator()).run()
     assert any("Invalid choice" in message for message in io.output)
+    assert any("Document paths may be absolute or relative" in message for message in io.output)
+
+
+def test_quantum_menu_prints_input_quick_guide():
+    io = ScriptedTerminal(["2", "0", "0"])
+    InteractiveController(io, StatevectorSimulator()).run()
+    assert any("vectors as `1,0` or `|0>`" in message for message in io.output)
+    assert any("branch `00`, `01`, `10`, or `11`" in message for message in io.output)
 
 
 def test_single_qubit_custom_gate_reports_validation_error():

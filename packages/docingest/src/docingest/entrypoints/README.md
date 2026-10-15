@@ -100,6 +100,24 @@ menu choice
   -> return to quantum menu
 ```
 
+#### Interactive quick guide
+
+Every menu accepts the number shown next to an option.
+
+| Option | How to use it | Expected input |
+| --- | --- | --- |
+| `1 Document Ingestion` | Enter a document path, then answer the normal ingestion prompts. Leave the path blank to cancel. | Absolute or relative file path |
+| `2 Quantum Linear Algebra Engine` | Opens the quantum submenu. | No additional input at the main menu |
+| `0 Exit` | Closes interactive mode. | `0` |
+| `1 Single-Qubit & Gate Operations` | Enter a normalized vector, then select a built-in gate, a phase angle, or a custom unitary. | Vector: `1,0` or `|0>`; custom matrix: `1,0;0,1`; phase: radians |
+| `2 Multi-Qubit Systems & Tensor Products` | Enter two operands and choose whether they are vectors or matrices. | Two vectors/matrices; answer `v` for vectors or `m` for matrices |
+| `3 Quantum Circuits & Algorithms` | Choose Bell for the Bell-state trace, or Teleportation and provide the state and a measurement branch. | `Bell`; or `Teleportation`, a one-qubit state, and branch `00`, `01`, `10`, or `11` |
+| `4 State Measurement & Probability Vectors` | Enter two same-dimension states to calculate overlap, then inspect computational-basis probabilities for the first state. | Two normalized vectors, such as `|0>` and `1/sqrt(2),1/sqrt(2)` |
+| `0 Back / Main Menu` | Return from the quantum submenu to the main menu. | `0` |
+
+Invalid values are reported as recoverable errors and return to the relevant
+menu. `Ctrl-C` or `EOF` exits interactive mode cleanly.
+
 The controller flow is:
 
 ```mermaid

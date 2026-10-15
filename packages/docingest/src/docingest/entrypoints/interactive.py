@@ -65,6 +65,15 @@ class InteractiveController:
 
     def run(self) -> None:
         while True:
+            self.io.write(
+                "\nQuick guide: choose an option by entering its number. "
+                "Document paths may be absolute or relative; use 0 to exit."
+            )
+            self.io.write(
+                "1 Document Ingestion: enter a file path, or leave it blank to cancel. "
+                "2 Quantum Engine: open the quantum operations submenu. "
+                "0 Exit: close interactive mode."
+            )
             choice = self.io.choose(
                 "\nResearch Engine",
                 ("1 Document Ingestion", "2 Quantum Linear Algebra Engine", "0 Exit"),
@@ -96,6 +105,16 @@ class InteractiveController:
             "4": self._measurement,
         }
         while True:
+            self.io.write(
+                "\nQuantum quick guide: enter vectors as `1,0` or `|0>`; "
+                "enter matrices as rows separated by `;`, for example `1,0;0,1`."
+            )
+            self.io.write(
+                "1 Single-qubit gate: state + H/X/Y/Z/S/Phase/custom gate. "
+                "2 Tensor product: two vectors or matrices + `v` or `m`. "
+                "3 Algorithms: `Bell`, or a teleportation state plus branch `00`, `01`, `10`, or `11`. "
+                "4 Measurement: two same-size states. 0 Back: return to the main menu."
+            )
             choice = self.io.choose(
                 "\nQuantum Linear Algebra Engine",
                 (
