@@ -34,7 +34,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 | `headings.py` | `line_style`, `page_styles`, `level`, `is_marker`, `is_caption` | `structure.py` |
 | `structure.py` | `structure_pages` (text-layer pages of a document to Markdown) | `IngestService` for the text-layer pages of a PDF |
 | `chunking.py` | `Chunk`, `chunk_pages`, `CHUNKER_VERSION`, `CHUNK_CHARS`, `OVERLAP` | `ports` (`Chunk` is re-exported there); the chunk index and `AskService` use it through those |
-| `circuits.py` | `gate_list`, `GateList`, `circuit_code_blocks`, `CodeBlock`, `add_gate_lists`, `MAX_STEPS` | `AskService` (a gate list after each circuit code block of the retrieved chunks) |
+| `circuits.py` | `gate_list`, `GateList`, `GateOp`, `CircuitSteps`, `circuit_code_blocks`, `CodeBlock`, `add_gate_lists`, `MAX_STEPS`, `MAX_GATE_WIRES`, `CIRCUIT_FORMAT` | `AskService` (the text of a gate list after each circuit code block of the retrieved chunks); `GateList.circuits` is for callers that must compute with a circuit (nothing in this package reads it yet) |
 | `equations.py` | `equation_references`, `canonical`, `find_equations`, `EquationSpan`, `chunk_for`, `covers`, `equation_header`, `content_words`, `title_overlap`, `lead_sentence_start`, `MAX_REFERENCES`, `MIN_TITLE_WORDS`, `LOOK_BACK`, `TITLE_LENGTH` | `AskService` (the chunk of an equation number the question names) |
 | `blocks.py` | `find_blocks`, `attach_captions`, `whole_blocks`, `Block`, `Whole`, `complete`, `Completion`, `partial_note`, `BLOCK_MAX` | `AskService` (the rest of a display equation, code block or table that a retrieved chunk cuts) |
 | `errors.py` | `DocingestError` and its subclasses | adapters raise them, application and entrypoints handle them |
@@ -652,10 +652,12 @@ print([(c.name, c.start, len(c.text)) for c in chunks])
 
 | Name | Meaning |
 |---|---|
-| `gate_list(source)` | The list of the circuits in `source`, the body of one code block, as a `GateList`: `status` (`"parsed"` all circuits fully read, `"partial"` some part written as `unparsed`, `"unparsed"` nothing readable), `text` (empty when nothing could be read) and `n_circuits`. Reads `quantikz`, `\Qcircuit`, `yquant` and `tikzcd` drawn as a circuit. |
+| `gate_list(source)` | The list of the circuits in `source`, the body of one code block, as a `GateList`: `status` (`"parsed"` all circuits fully read, `"partial"` some part written as `unparsed`, `"unparsed"` nothing readable), `text` (empty when nothing could be read), `n_circuits` and `circuits` (the same reading as data, see [The steps as data](#the-steps-as-data)). Reads `quantikz`, `\Qcircuit`, `yquant` and `tikzcd` drawn as a circuit. |
 | `circuit_code_blocks(markdown)` | The fenced `latex` blocks of a Markdown text as `CodeBlock(start, end, source)` (`text[start:end]` is both fences and the source). Other fenced blocks are skipped whole and a block that never closes is left out. One pass over the lines. |
 | `add_gate_lists(text, start, document, blocks)` | `text` (a chunk found at `start` of `document`) with `gate_list` of every block whose closing fence lies inside the chunk, as a paragraph right after that fence (`"\n\n" + list + "\n"`). A block that began in the chunk before is read whole from `document`; a block cut by the end of the chunk gets nothing, and a block whose closing fence ends exactly where the chunk starts belongs to the chunk before; a chunk that is not where `start` says is returned as it is. `document` is the page texts joined as `chunk_pages` joins them. |
-| `MAX_STEPS` | 60: a longer circuit is listed up to there, then `... N more lines not listed`. |
+| `MAX_STEPS` | 60: a longer circuit is listed up to there, then `... N more lines not listed`. The data in `GateList.circuits` is not cut. |
+| `GateOp`, `CircuitSteps` | The steps as data: frozen dataclasses, in memory only (see below). |
+| `MAX_GATE_WIRES`, `CIRCUIT_FORMAT` | 128: a gate over more wires is `unparsed_op` as data (its text line is unchanged); `"circuit/1"`: the `format` of `CircuitSteps.to_dict()`. |
 
 ```text
 Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):
@@ -669,9 +671,59 @@ Rules of the reader:
 
 - **Drawing order.** Grid columns (`&`) are the steps and rows (`\\`) the wires. A column with only wires is skipped, a row that draws nothing is not numbered (a quantikz row with as many cells as the widest row is a wire even when empty, as its manual draws with `&&&&& \\ &&&&&`; a Qcircuit row is a wire when a cell draws one, `\qw`, `\cw`, a bundle, a gate or `\ghost`, or holds an `\lstick`, and a row of text only, of barriers or of nothing is not), a row of dots is listed once. Text on a row that is not a wire is left out. It is not a schedule: gates in different columns may commute. A `\gate[n]`, `\lstick[wires=n]` or `\rstick[n]` that reaches past the last row gives its wires to those empty rows; a spacer row between two drawn rows is not a wire.
 - **Joined operations.** In one column, operations a vertical wire (`\ctrl{n}`, `\swap{n}`, `\qwx`, `\vqw`, `\wire`, `\sgate`) or a multi-wire gate joins are one item: CNOT, Toffoli, n-controlled X, open controls, controlled-U, controlled-Z (dots only, no target), a labelled dot gate (`\dstick`), SWAP, controlled-SWAP, multi-wire gates, a measurement that classically controls a gate (a classical wire, `\cwx`, `\vcw`, `\wire[d][1]{c}` or `\ctrl[vertical wire=c]`, marks the group "classically controlled"; a measurement group with anything else in it is unparsed). A gate whose cell draws a classical wire to a row with nothing in that column (a teleportation correction in a later column than its measurement) is written `X on wire 3, classically controlled by wire 1`; a quantum wire to such a row leaves the gate unparsed. `\meter[n]{}` is one measurement over n wires, like `\gate[n]`. Two controls and two targets in one group (CNOTs drawn over one another) are unparsed. `=`, `\equiv`, `\midstick{=}` and `\push{=}` start the right-hand side with its own step numbers. The vertical wire passes through rows between without joining them unless they hold a control, target or swap.
-- **Never guesses.** Anything else is `unparsed on wire k: <source>` at its step; a combination it does not know is `unparsed joined operation (...)`; a wire or gate that leads outside the grid, an unreadable count, a block that never closes, and a circuit made only of author macros are unparsed too. A count or offset of more than 6 digits and a `yquant` register of more than 128 wires are unparsed. Labels are copied as written. A `\label` inside the circuit goes to the header (`Gate list for \label{fig:x} (...)`); a block with several circuits has `Circuit k of n` headings.
-- **Linear time.** Every bracket is matched once, cells are read sparsely, and the vertical wires of a column are joined with a sweep (a difference array), so no source makes the work quadratic; a gate over many wires is written as a range (`wires 1 to 40`). Tests compare the time of an input with that of one four times larger.
+- **Never guesses.** Anything else is `unparsed on wire k: <source>` at its step; a combination it does not know is `unparsed joined operation (...)`; a wire or gate that leads outside the grid, an unreadable count, a block that never closes, and a circuit made only of author macros are unparsed too. A count or offset of more than 6 digits and a `yquant` register of more than 128 wires are unparsed. So are a cell that holds several operations and a vertical wire (the wire joins them to something the list cannot name), a `yquant` statement with no target, and a `yquant` `swap` of other than two wires. Labels are copied as written. A `\label` inside the circuit goes to the header (`Gate list for \label{fig:x} (...)`); a block with several circuits has `Circuit k of n` headings.
+- **Linear time.** Every bracket is matched once, cells are read sparsely, and the vertical wires of a column are joined with a sweep (a difference array), so no source makes the work quadratic; a gate over many wires is written as a range (`wires 1 to 40`), and as data it holds at most `MAX_GATE_WIRES` wires, so the data is linear in the source too. Tests compare the time of an input with that of one four times larger.
 - Not read: circuits drawn with TikZ nodes or arrows, macros the author defined, `\gategroup` boxes, labels outside the grid, display-math circuits (the caller passes code blocks only).
+
+### The steps as data
+
+`GateList.circuits` holds one `CircuitSteps` for each circuit found (`n_circuits` of them, the unreadable ones included). It is made in the same pass as the text, from the same operations: each item of a step line (the parts joined with `; `) is built together with the `GateOp` that says the same thing, so the two cannot drift. The text of a gate list does not change, the data is never stored, and no key, revision or index depends on it.
+
+| Type | Fields |
+|---|---|
+| `GateOp` | `kind`, `label` (as the author wrote it, LaTeX included), `targets` (1-based wires, top to bottom, the numbers of the `Wires:` line), `controls`, `open_controls`, `classical` (classically controlled), `source` |
+| `CircuitSteps` | `kind` (`quantikz`, `qcircuit`, `tikzcd`, `yquant`), `status` (`parsed`, `partial`, `unparsed`), `label` (the `\label` inside the circuit), `wires` (the legends of the `Wires:` line), `parts` (the sides of the drawn equalities, each a tuple of steps, each step a tuple of `GateOp`) |
+
+A part that a drawn equality opens starts with a step that holds one `sep` item, the sign as drawn (`=`, `\equiv`, `\to`, ...), so a reader can tell an equivalence from an arrow. The wires, labels and controls keep the order and the repeats of the drawing. An unreadable circuit has no wires and no parts. The kinds:
+
+| `kind` | Meaning | Fields used |
+|---|---|---|
+| `gate` | A named gate, alone or controlled | `label`, `targets` (all the wires of a multi-wire gate), `controls`, `open_controls` |
+| `x` | An X drawn as a target (`\targ`, `cnot`); the label is `X` | as `gate` |
+| `z_dots` | Control dots only: a controlled-Z with no target; the label is `Z` | `controls`, `open_controls` |
+| `phase` | `\phase{label}` alone or joined to dots | `label`, `targets`, `controls`, `open_controls` |
+| `dots_gate` | Dots that carry a label (Qcircuit `\dstick`): a symmetric two-qubit gate | `label`, `targets` |
+| `swap` | A swap, controlled or not | `targets` (the two wires), `controls`, `open_controls` |
+| `measure` | A measurement | `label` (its option, often empty), `targets` |
+| `control` | A control dot with nothing joined to it | `controls` |
+| `barrier`, `discard`, `dots`, `text`, `sign` | Marks and text on a wire, not gates | `label`, `targets` |
+| `sep` | A drawn equality between two circuits | `label` |
+| `unparsed`, `unparsed_op`, `unparsed_group`, `unparsed_outside` | What the reader did not understand; `source` keeps what it saw. A gate over more than `MAX_GATE_WIRES` wires is `unparsed_op` | `source` |
+
+`classical` is True for an item that a classical wire or a measurement result controls; `controls` then holds the wire that does, when the drawing names one. In `yquant` it is True when a control is a `cbit` wire or a wire measured earlier in the circuit (the text does not say so; only the data does). A measurement that drives a gate is two items, the `measure` and the gate with `classical` and `controls` equal to the measured wires. `source` is also where a label drawn next to a gate (`\dstick`) goes, because a reader of the data must not ignore it. A reader of this data must refuse every `kind` it does not know.
+
+What a reader of the data (a simulator, say) must know, because the fields do not say it:
+
+- **Several targets.** A one-qubit gate on `k` targets is its `k`-fold tensor product: the same gate on each wire. This is how `yquant` `h a, b` is stored. A grid gate drawn over `k` wires (`\gate[2]{U}`) has the same fields and is one gate over those wires, so a reader must know the label (and refuse one it does not know) before it applies this rule. The wires of an item, `yquant` included, are in wire order, top to bottom, with repeats kept; `box {U} b, a` and `box {U} a, b` are the same item.
+- **Wire facts are in the legends only.** `wires` holds them as text: a bundle (`\qwbundle`), a row of dots, a register label such as `\ket{0}^{\otimes n}`, a Qcircuit `{/^n}` (a `text` item), a classical wire (`\cw`, `\setwiretype{c}`, a `yquant` `cbit`). A reader must refuse a circuit whose legends or `text` and `sign` items show one of these, and any item of a kind it does not know.
+- **Several controls, one classical.** When a group has a quantum control and a classical wire, every control is in `controls` and `classical` is True for the item; which control is the classical one is not kept. A reader that refuses `classical` items is safe.
+- **Joined phase labels.** A `phase` item over dots and phases with different labels holds them joined in `label` with `", "` (`\alpha, \beta`); a reader must refuse a label that contains `", "`.
+- **`status` describes the text.** A gate over more than `MAX_GATE_WIRES` wires is `unparsed_op` in the data and is not counted as unparsed in the text, so `status` can be `parsed` while an item is not understood: check every item, not only the status.
+- **A label next to an item** (Qcircuit `\dstick`) is in the `source` of the last operation of that item only.
+- **`wires` in the dict** is a count (`len(wires)`), while `CircuitSteps.wires` is the tuple of legends; the legends are `wire_labels` in `to_dict()`.
+
+`CircuitSteps.to_dict()` returns plain dicts and lists, the `circuit/1` format, so that a package that must not import `docingest` can read it:
+
+```json
+{"format": "circuit/1", "kind": "quantikz", "status": "parsed", "label": "", "wires": 2,
+ "wire_labels": ["1 = \\ket{a}", "2 = \\ket{b}"],
+ "parts": [[[{"kind": "gate", "label": "H", "targets": [1], "controls": [], "open_controls": [],
+              "classical": false, "source": ""}],
+            [{"kind": "x", "label": "X", "targets": [2], "controls": [1], "open_controls": [],
+              "classical": false, "source": ""}]]]}
+```
+
+`parts` is a list of parts, each a list of steps, each a list of items. Tests (`tests/unit/test_circuit_steps.py`) write the text again from the data alone and compare it with `gate_list(...).text` on every construct of the text tests, their prefixes, and random mixes and edits. Two wordings of the text say the same thing and have the same fields, a classical control drawn as dots in the column (`controlled-X (classically controlled): control wire 1, target wire 2`) and as a wire from a row with nothing in the column (`X on wire 2, classically controlled by wire 1`), so for those the test accepts either wording; the third, the result of a measurement (`measure wire 1; its result classically controls X on wire 2`), is the `measure` item followed by the gate.
 
 ## equations.py
 

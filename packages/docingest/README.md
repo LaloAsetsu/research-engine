@@ -914,7 +914,7 @@ pytest runs with `--strict-markers`; the markers are `model`, `network` and `slo
 - **After 0.4.1 (not released: `pyproject.toml` still says 0.4.1):**
   - LaTeX: source rewrites for the constructs that stop pandoc 3.9 (the `@`-named helper macros of REVTeX and natbib bibliographies, `\href` reference entries, odd citation keys, a few layout forms); conversion section by section, so that only the sections pandoc cannot read go to plain text, with recovery of a reference list that pandoc dropped; quantum circuits as exact `latex` code blocks; equation numbers as `\tag{n}` with `\eqref` and `\ref` resolved; a keyless reference entry stays in the reference list; and the converter revision in the cache key went from 2 to 7, so cached LaTeX papers are converted again once.
   - Routing: the math-page rule, `[routing] math_to_ocr`, off by default.
-  - `ask`: BM25 on the LaTeX of a question in any language; `[qa] skip_summary` with a copy rule in the answer prompt; gate lists after circuit blocks; the Eq. (n) lookup; a retry with fewer sources when the answer prompt is too long for the model; `[qa] whole_blocks`, off by default.
+  - `ask`: BM25 on the LaTeX of a question in any language; `[qa] skip_summary` with a copy rule in the answer prompt; gate lists after circuit blocks (also returned as data, `GateList.circuits`, in the `circuit/1` format of `CircuitSteps.to_dict()`); the Eq. (n) lookup; a retry with fewer sources when the answer prompt is too long for the model; `[qa] whole_blocks`, off by default.
 
 ## License
 
