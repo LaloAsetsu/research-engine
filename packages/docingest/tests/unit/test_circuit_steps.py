@@ -567,11 +567,78 @@ def test_an_item_that_names_a_wire_twice_is_never_in_the_data():
 
 
 def test_a_yquant_gate_that_names_a_target_twice_is_unparsed_with_or_without_controls():
-    for item in ("h a, a", "x a, a", "z a, a, a", "box {U} a, a", "cnot a, a", "h a, a | b"):
+    for item in (
+        "h a, a",
+        "x a, a",
+        "z a, a, a",
+        "box {U} a, a",
+        "cnot a, a",
+        "h a, a | b",
+        "measure a, a",
+        "barrier a, a",
+        "discard a, a",
+    ):
         source = yq(item, "h b")
         step = ops(source)[0]
         assert [o[0] for o in step] == ["unparsed"], item
         assert gate_list(source).status == "partial", item
+
+
+def test_a_refused_yquant_measure_still_leaves_its_targets_measured():
+    for item in ("measure a, a", "measure a | a"):
+        source = yq(item, "x b | a")
+        assert [o[0] for step in ops(source) for o in step] == ["unparsed", "gate"], item
+        assert ops(source)[1] == [("gate", "X", (2,), (1,), (), True, "")], item
+    source = yq("barrier a, a", "x b | a")
+    assert ops(source)[1] == [("gate", "X", (2,), (1,), (), False, "")]
+
+
+def yquant(body: str) -> str:
+    return f"\\begin{{yquant}}{body}\\end{{yquant}}"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "qubit a; qubit a; h a;",
+        "qubit b[2]; qubit b[2]; qubit a; h b[0]; h b[1]; h a;",
+        "qubit a; qubit b; qubit a; cnot b | a; h a;",
+        "qubit b[2]; qubit b[2]; qubit a; h a, b[0];",
+        "qubit a; cbit a; h a;",
+        "qubit b; qubit b[2]; h b[0];",
+        "qubit b[2]; qubit b[1]; h b[0];",
+        "qubit a; qubit b; h a; cbit b; measure b;",
+        "qubit a; qubit a[999]; h a;",
+        "qubit a[999]; qubit a; h a;",
+        "qubit a; qubit a[1234567]; h a;",
+    ],
+)
+def test_a_yquant_name_declared_twice_leaves_the_circuit_unparsed_in_text_and_data(body):
+    source = yquant(body)
+    result = gate_list(source)
+    assert result.text == "" and result.status == "unparsed" and result.n_circuits == 1
+    [circuit] = result.circuits
+    assert (circuit.kind, circuit.status) == ("yquant", "unparsed")
+    assert circuit.wires == () and circuit.parts == ()
+    assert circuit.to_dict()["wires"] == 0
+    assert_text_from_data(source)
+
+
+def test_yquant_names_that_differ_are_not_a_redeclaration():
+    source = yquant("qubit a; qubit b[2]; qubit c[1]; h a; h b[1]; h c; cnot b[0] | a;")
+    result = gate_list(source)
+    assert result.status == "parsed"
+    assert "Wires: 1 = a; 2 = b[0]; 3 = b[1]; 4 = c" in result.text
+    assert [o[0][2] for o in ops(source)] == [(1,), (3,), (4,), (2,)]
+
+
+def test_a_yquant_name_declared_twice_does_not_affect_the_other_circuits_of_the_block():
+    source = yquant("qubit a; qubit a; h a;") + "\n" + yquant("qubit a; qubit b; h b;")
+    result = gate_list(source)
+    first, second = result.circuits
+    assert (first.status, second.status) == ("unparsed", "parsed")
+    assert "Step 1: H on wire 2" in result.text
+    assert_text_from_data(source)
 
 
 def test_a_yquant_measure_barrier_or_discard_keeps_its_label():

@@ -1458,11 +1458,21 @@ _YQ_REGISTER = re.compile(
 )
 
 
+class _NameDeclaredTwice(Exception):
+    """A ``yquant`` name that a second ``qubit`` or ``cbit`` statement declares again."""
+
+
 def _yq_register(
-    m: re.Match[str], names: dict[str, int], classical: set[int], circ: Circuit
+    m: re.Match[str], names: dict[str, int], classical: set[int], circ: Circuit, bases: set[str]
 ) -> bool:
     """Declare the wires of a ``qubit`` or ``cbit`` statement; False when it is too large. The
-    wires of a ``cbit`` are added to ``classical``."""
+    wires of a ``cbit`` are added to ``classical``. Raises ``_NameDeclaredTwice`` when the name
+    (in ``bases``) is already declared, whatever its size: which wire a later statement means,
+    and the number of every wire after it, would be a guess. The name counts as declared even
+    when the register is too large."""
+    if m.group("name") in bases:
+        raise _NameDeclaredTwice
+    bases.add(m.group("name"))
     count = m.group("n")
     if count and len(count) > MAX_NUMBER:
         return False
@@ -1518,10 +1528,10 @@ def _yq_operation(
     )
     controlled_by_result = any(names[x] in classical for x in (*cs, *open_cs))
     step = _yq_text(m.group("g"), lab, ctrl, (tw, cnot), numbers, classical=controlled_by_result)
+    if step and m.group("g") == "measure":
+        classical.update(names[x] for x in tg)  # also when the statement is refused below
     if step and _meets_itself(step[1]):
         return None
-    if step and m.group("g") == "measure":
-        classical.update(names[x] for x in tg)
     return step
 
 
@@ -1558,6 +1568,7 @@ def _yq_text(
 def yquant_circuit(body: str) -> Circuit:
     circ = Circuit("yquant")
     names: dict[str, int] = {}
+    bases: set[str] = set()  # the names declared, a register under its name without the index
     classical: set[int] = set()
     steps: list[str] = []
     data: list[tuple[GateOp, ...]] = []
@@ -1566,7 +1577,11 @@ def yquant_circuit(body: str) -> Circuit:
         items += 1
         m = _YQ_REGISTER.match(stmt)
         if m:
-            if not _yq_register(m, names, classical, circ):
+            try:
+                registered = _yq_register(m, names, classical, circ, bases)
+            except _NameDeclaredTwice:
+                return Circuit("yquant", "unparsed", "a name is declared twice")
+            if not registered:
                 unparsed += 1
                 steps.append(f"unparsed: {_one_line(stmt)[:80]}")
                 data.append((GateOp("unparsed", source=_one_line(stmt)[:80]),))
