@@ -508,6 +508,115 @@ def test_several_operations_in_a_cell_with_a_vertical_wire_are_not_read_as_uncon
     assert gate_list(source).status == "partial"
 
 
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "\\gate{H} \\meter \\cwx[1]",
+        "\\control{} \\targ{} \\qwx[1]",
+        "\\targX{} \\targX{} \\qwx[1]",
+        "\\control{} \\control{} \\qwx[1]",
+        "\\gate{H} \\octrl{1}",
+        "\\ctrl{1} \\ctrl{1}",
+    ],
+)
+def test_several_operations_of_one_cell_and_a_vertical_wire_are_one_unparsed_group(cell):
+    source = qcircuit(f"& {cell} & \\gate{{Y}} & \\qw", "& \\qw & \\qw & \\qw")
+    steps = ops(source)
+    assert [[o[0] for o in step] for step in steps] == [["unparsed_group"], ["gate"]]
+    assert steps[0][0][2] == (1,)
+    assert gate_list(source).status == "partial"
+    assert "unparsed joined operation" in gate_list(source).text
+
+
+def test_the_wire_of_a_one_row_cell_does_not_make_a_gate_out_of_its_operations_in_quantikz():
+    source = quantikz("\\gate{H}\\meter{}\\wire[d][1]{c} & \\gate{Y}", "\\qw & \\qw")
+    assert [[o[0] for o in step] for step in ops(source)] == [["unparsed_group"], ["gate"]]
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        ("\\ctrl{-1} \\ctrl{1} \\ctrl{1}", "\\targ"),
+        ("\\targ \\ctrl{-1}", "\\qw"),
+        ("\\ghost{W} \\control \\qwx[1]", "\\targ"),
+    ],
+)
+def test_an_item_whose_controls_repeat_or_meet_its_targets_is_an_unparsed_group(rows):
+    source = qcircuit(
+        "& \\multigate{1}{W} & \\gate{Y} & \\qw",
+        f"& {rows[0]} & \\qw & \\qw",
+        f"& {rows[1]} & \\qw & \\qw",
+    )
+    items = [o for step in ops(source) for o in step]
+    assert [o[0] for o in items] == ["unparsed_group", "gate"]
+    assert gate_list(source).status == "partial"
+
+
+def test_an_item_that_names_a_wire_twice_is_never_in_the_data():
+    for item in (
+        "x a | a",
+        "cnot a | a, a",
+        "box {U} a | ~a",
+        "swap a, a",
+        "swap a, a | b",
+        "box {U} a, b | b",
+    ):
+        step = ops(yq(item, "h b"))[0]
+        assert [o[0] for o in step] == ["unparsed"]
+        assert gate_list(yq(item, "h b")).status == "partial"
+
+
+def test_a_yquant_gate_that_repeats_a_target_without_controls_is_kept_as_drawn():
+    assert [o[2] for step in ops(yq("h a, a", "box {U} b, b")) for o in step] == [(1, 1), (2, 2)]
+
+
+def test_a_yquant_measure_barrier_or_discard_keeps_its_label():
+    source = yq("measure {$z$} a", "barrier {x} b", "discard {d} c", "measure a")
+    assert [(o[0], o[1]) for step in ops(source) for o in step] == [
+        ("measure", "z"),
+        ("barrier", "x"),
+        ("discard", "d"),
+        ("measure", ""),
+    ]
+    assert "Step 1: measure wire 1" in gate_list(source).text
+
+
+CELL_COMMANDS = [
+    "\\gate{H}", "\\gate{X}", "\\meter", "\\ctrl{1}", "\\ctrl{-1}", "\\octrl{1}", "\\targ",
+    "\\targX", "\\control", "\\qswap", "\\qwx[1]", "\\qwx[-1]", "\\cwx[1]", "\\cwx[-1]",
+    "\\swap{1}", "\\phase{a}", "\\dstick{t}", "\\ghost{U}", "\\qw",
+]  # fmt: skip
+
+
+def meets_itself(o: dict) -> bool:
+    """An item of the data that a gate cannot be: a wire named twice among the controls, or a
+    control on a target, or a swap of one wire."""
+    if o["kind"].startswith("unparsed"):
+        return False
+    controls = o["controls"] + o["open_controls"]
+    named = controls or o["kind"] in ("x", "swap", "phase", "dots_gate")
+    wires = controls + (o["targets"] if named else [])
+    return len(set(wires)) != len(wires) or (o["kind"] == "swap" and len(set(o["targets"])) != 2)
+
+
+def test_random_grids_with_several_commands_in_a_cell_have_no_item_that_names_a_wire_twice():
+    rng = random.Random(20261016)
+    for _ in range(1500):
+        rows = []
+        for _r in range(rng.randint(1, 4)):
+            cells = [
+                " ".join(rng.choice(CELL_COMMANDS) for _ in range(rng.randint(0, 3)))
+                for _ in range(rng.randint(1, 4))
+            ]
+            rows.append(" & ".join(cells))
+        for source in (quantikz(*rows), qcircuit(*rows)):
+            assert_text_from_data(source)
+            for circuit in gate_list(source).circuits:
+                for part in circuit.to_dict()["parts"]:
+                    for step in part:
+                        assert not [o for o in step if meets_itself(o)], source
+
+
 def test_several_operations_in_a_cell_without_a_vertical_wire_are_still_read_in_order():
     assert ops(quantikz("& \\gate{H}\\gate{X} & \\qw")) == [
         [("gate", "H", (1,), (), (), False, ""), ("gate", "X", (1,), (), (), False, "")]

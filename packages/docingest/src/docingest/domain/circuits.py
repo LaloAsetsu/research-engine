@@ -651,10 +651,11 @@ class GateOp:
     * ``swap``: ``targets`` are the two crossed wires; ``controls`` make it a controlled swap.
     * ``measure``: a measurement of ``targets`` (``label`` is its option, often empty).
     * ``control``: a control dot with nothing joined to it (``controls`` holds its wire).
-    * ``barrier`` and ``discard`` (yquant statements, with ``targets``; in a grid a ``\\slice`` or
-      ``\\barrier`` has no wire and a ``\\trash`` is ``discard`` on its wire), ``dots`` (a row of
-      dots on ``targets``), ``text`` and ``sign`` (``label`` drawn on a wire without being a
-      gate), and ``sep`` (the drawn equality that opens a part, in a step of its own).
+    * ``barrier`` and ``discard`` (yquant statements, with ``targets`` and the statement's label;
+      in a grid a ``\\slice`` or ``\\barrier`` has no wire and a ``\\trash`` is ``discard`` on its
+      wire), ``dots`` (a row of dots on ``targets``), ``text`` and ``sign`` (``label`` drawn on a
+      wire without being a gate), and ``sep`` (the drawn equality that opens a part, in a step of
+      its own).
     * ``unparsed``, ``unparsed_op``, ``unparsed_group`` and ``unparsed_outside``: something the
       reader did not understand; ``source`` keeps what it saw. A reader of this data must refuse
       every kind it does not know, these four included.
@@ -1293,6 +1294,32 @@ def _wired_single(item: Item, joined: list[tuple[int, Op]], g: _Grid, names: Nam
     return text, (op,)
 
 
+def _meets_itself(op: GateOp) -> bool:
+    """True when an item names a wire twice where a gate cannot: a control that repeats or sits on
+    a target, or a swap of one wire with itself. Such an item is a drawing the reader misjoined,
+    not a gate a simulator could apply."""
+    if op.kind.startswith("unparsed"):
+        return False
+    controls = op.controls + op.open_controls
+    named = controls or op.kind in ("x", "swap", "phase", "dots_gate")
+    wires = controls + (op.targets if named else ())
+    return len(set(wires)) != len(wires) or (op.kind == "swap" and len(set(op.targets)) != 2)
+
+
+def _unparsed_group(
+    grp: list[tuple[int, Op]], names: Names, circ: Circuit
+) -> tuple[list[str], list[GateOp]]:
+    """The item for a group that the list does not read; the group is counted as one item that is
+    unparsed (``circ.n_items`` is counted by the caller)."""
+    circ.n_unparsed += 1
+    srcs = ", ".join(
+        f"{names.wire(r)}: {o.kind}{(' ' + o.label) if o.label else ''}" for r, o in grp
+    )
+    rows = {r for r, _ in grp}
+    group = GateOp("unparsed_group", targets=tuple(names.numbers(rows)), source=srcs)
+    return [f"unparsed joined operation ({srcs})"], [group]
+
+
 def _group_items(
     joined: list[tuple[int, Op]], g: _Grid, names: Names, circ: Circuit
 ) -> tuple[list[str], list[GateOp]]:
@@ -1324,18 +1351,17 @@ def _group_items(
             circ.n_items += 1
             circ.n_unparsed += 0 if found else 1
         return items, ops
+    circ.n_items += 1
+    if len(rows) == 1 and len(grp) > 1 and len(grp) != len(joined):
+        # several operations of one cell and a vertical wire: the wire joins them to something
+        # the list cannot name, and describing them as one group would invent a gate
+        return _unparsed_group(grp, names, circ)
     txt, found = describe_group(grp, names)
     if found and len(grp) == 1 and len(joined) > 1:
         txt, found = _wired_single((txt, found), joined, g, names)
-    circ.n_items += 1
-    if found:
+    if found and not any(_meets_itself(op) for op in found):
         return [txt], list(found)
-    circ.n_unparsed += 1
-    srcs = ", ".join(
-        f"{names.wire(r)}: {o.kind}{(' ' + o.label) if o.label else ''}" for r, o in grp
-    )
-    group = GateOp("unparsed_group", targets=tuple(names.numbers(rows)), source=srcs)
-    return [f"unparsed joined operation ({srcs})"], [group]
+    return _unparsed_group(grp, names, circ)
 
 
 def _step_items(
@@ -1492,6 +1518,8 @@ def _yq_operation(
     )
     controlled_by_result = any(names[x] in classical for x in (*cs, *open_cs))
     step = _yq_text(m.group("g"), lab, ctrl, (tw, cnot), numbers, classical=controlled_by_result)
+    if step and _meets_itself(step[1]):
+        return None
     if step and m.group("g") == "measure":
         classical.update(names[x] for x in tg)
     return step
@@ -1523,7 +1551,7 @@ def _yq_text(
         text = f"SWAP {tw}" + (f" ({ctrl[2:]})" if ctrl else "")
         return text, GateOp("swap", "", targets, closed, opened, classical)
     if g in ("measure", "barrier", "discard"):
-        return f"{g} {tw}", GateOp(g, "", targets, closed, opened, classical)
+        return f"{g} {tw}", GateOp(g, lab, targets, closed, opened, classical)
     return None
 
 
