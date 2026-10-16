@@ -30,13 +30,16 @@ served_model = "qwen-local"
 # api_key_env = "OCR_API_KEY"        # name of the environment variable that holds a key, if the server needs one
 
 [qa]
-# PaperQA2 writes the evidence summaries and the answer with the same server.
+# PaperQA2 writes the answer (and the evidence summaries, if skip_summary is false) with the same server.
 llm = "openai/qwen-local"
 llm_base = "http://127.0.0.1:8001/v1"
 evidence_k = 10
-skip_summary = false                 # true: the answer model reads the retrieved chunks, equations, circuit gate lists and the chunk of a named equation number included
-# answer_max_sources = 10            # with skip_summary = true: read all [index] contexts, not the default 3
-# whole_blocks = true                # with skip_summary = true: complete the equation, circuit or table that a chunk cuts
+# The answer model reads the retrieved chunks themselves (equations, circuits and the chunk of a
+# named equation number included) and all 10 of them, not PaperQA2's 100-word summaries of the best 3.
+# This is the setup of the measured runs in docs/run-guide.md. skip_summary = false gives the summaries.
+skip_summary = true
+answer_max_sources = 10              # how many of the [index] contexts the answer model reads; the default is 3
+# whole_blocks = true                # optional, with skip_summary = true: complete the equation, circuit or table that a chunk cuts
 max_concurrent_requests = 10
 temperature = 0.0
 

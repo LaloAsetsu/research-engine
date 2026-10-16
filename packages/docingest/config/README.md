@@ -585,7 +585,7 @@ uv run --all-extras docingest ask "What is multi-head attention?" --config confi
 
 ### `examples/lab-server.toml`
 
-A lab server that runs the three model servers of [`serving/`](../../../serving/README.md) (an answering model, an embedder and a reranker, all vLLM on 127.0.0.1) with the chunk index on. It selects the `openai-compatible` OCR, `openai-compatible` embedder, `local` index and `vllm` reranker; points `[ocr]`, `[qa]`, `[embedder]` and `[reranker]` at ports 8001 to 8003 with the served names `qwen-local`, `qwen-embed` and `qwen-rerank`; and writes the `[index]` table out with its defaults. Every URL is local and every path is relative to the folder you run docingest from.
+A lab server that runs the three model servers of [`serving/`](../../../serving/README.md) (an answering model, an embedder and a reranker, all vLLM on 127.0.0.1) with the chunk index on. It selects the `openai-compatible` OCR, `openai-compatible` embedder, `local` index and `vllm` reranker; points `[ocr]`, `[qa]`, `[embedder]` and `[reranker]` at ports 8001 to 8003 with the served names `qwen-local`, `qwen-embed` and `qwen-rerank`; writes the `[index]` table out with its defaults; and sets `[qa] skip_summary = true` and `answer_max_sources = 10`, so the answer model reads the 10 retrieved chunks themselves instead of summaries of the best 3 (the setup of the measurements in the [run guide](../../../docs/run-guide.md#equations-in-answers); `whole_blocks` is left as a commented, optional line). Every URL is local and every path is relative to the folder you run docingest from.
 
 ```bash
 uv run docingest ingest data/raw --index --config config/examples/lab-server.toml
