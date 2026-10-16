@@ -53,7 +53,7 @@ Useful consequences, all tested: S² = Z, T² = S, √X² = X, HXH = Z, HZH = X,
 
 ## Equality
 
-Two states or two unitaries are **equal up to global phase** when max |a − e^{iφ} b| < 1e-9, with φ taken from the largest entry of b (φ in (−π, π]). Exact equality (max |a − b| < 1e-9) is reported too. Two circuits are compared through their unitaries up to 10 wires; from 11 to 20 wires through the images of 8 random states with one common phase, without building a unitary.
+Two states or two unitaries are **equal up to global phase** when max |a − e^{iφ} b| < 1e-9, with φ taken from the largest entry of b (φ in (−π, π]). Exact equality (max |a − b| < 1e-9) is reported too. Two circuits are compared through their unitaries up to 10 wires; from 11 to 20 wires through the images of 8 random states (drawn with `numpy.random.default_rng(seed)`, default seed 0) with one common phase, read at the largest entry of the first image, without building a unitary.
 
 ## Measurement
 

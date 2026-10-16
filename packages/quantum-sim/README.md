@@ -2,7 +2,7 @@
 
 A small simulator of quantum circuits in NumPy: the state a circuit prepares, its unitary, outcome probabilities, and whether two circuits (or a circuit and a target) are equal up to global phase. It is meant for checking circuits, the ones a model or an agent writes and the ones docingest reads from a paper's LaTeX, and it states its conventions with every result. numpy is its only dependency; it does not import docingest, and docingest does not import it.
 
-**Status: skeleton.** The package, its conventions, its public API and its acceptance test suite are here. The gate matrices (`quantum_sim.gates.matrix`), the engine (`quantum_sim.engine`) and the circuit check (`quantum_sim.domain.validate`) are stubs that raise `NotImplementedError`; the tests that need them are marked `engine_pending` (see [Tests and checks](#tests-and-checks)). The label resolver, the JSON circuit format and the `run` and `check` commands come after the engine.
+**Status: engine built.** The gate matrices, the engine (statevector, unitary, outcome probabilities, equality up to global phase) and the circuit check are implemented against the acceptance suite. The label resolver, the JSON circuit format and the `run` and `check` commands come next.
 
 The decision and its alternatives are in [ADR 0005](../docingest/docs/adr/0005-own-numpy-circuit-simulator.md).
 
@@ -11,6 +11,7 @@ The decision and its alternatives are in [ADR 0005](../docingest/docs/adr/0005-o
 - [Use it](#use-it)
 - [Conventions](#conventions)
 - [Limits](#limits)
+- [How the engine works](#how-the-engine-works)
 - [Code map](#code-map)
 - [Tests and checks](#tests-and-checks)
 - [The reference fixture](#the-reference-fixture)
@@ -21,12 +22,12 @@ The decision and its alternatives are in [ADR 0005](../docingest/docs/adr/0005-o
 from quantum_sim import Circuit, Op, equal, probabilities, statevector, unitary
 
 bell = Circuit(2, [Op("h", (1,)), Op("x", (2,), controls=(1,))])
-statevector(bell)                 # [0.707, 0, 0, 0.707]: |00> and |11>
-probabilities(bell)               # [0.5, 0, 0, 0.5]
+statevector(bell)  # [0.707, 0, 0, 0.707]: |00> and |11>
+probabilities(bell)  # [0.5, 0, 0, 0.5]
 
 # CNOT = (I ⊗ H) CZ (I ⊗ H), compared up to global phase
 cz_form = Circuit(2, [Op("h", (2,)), Op("z", (2,), controls=(1,)), Op("h", (2,))])
-equal(cz_form, Circuit(2, [Op("x", (2,), controls=(1,))])).equal    # True
+equal(cz_form, Circuit(2, [Op("x", (2,), controls=(1,))])).equal  # True
 ```
 
 | Function | Returns |
@@ -59,13 +60,21 @@ Nielsen and Chuang throughout, written out in [docs/conventions.md](docs/convent
 
 Statevectors up to 20 wires (16 MiB), unitaries up to 10 wires (16 MiB), equality of two circuits of 11 to 20 wires through 8 random states, at most 10,000 operations. Limits are checked from the description before any array is created.
 
+The limits bound memory, not time: a unitary of 10 wires costs about 27 ms per operation, so a circuit of 10,000 operations takes about 4.5 minutes. It is working, not hung.
+
+## How the engine works
+
+The state is a tensor with one axis per wire (axis 0 is wire 1, the most significant bit). A gate is applied in place with `numpy.tensordot` over its target axes: the closed and open controls select a slice of the tensor (the control axes are fixed to 1 or 0 and disappear from the slice), the gate's matrix contracts the target axes of that slice, and the result is written back. That is O(2^n) per gate on a state; a unitary is the same code run on the identity matrix, with its columns as a trailing batch axis (O(4^n) per gate). No `2^n x 2^n` gate matrix is ever built.
+
+Equality of two circuits of 11 to 20 wires applies both to 8 random states drawn with `numpy.random.default_rng(seed)`, one state at a time, so two states are in memory and not eight. The global phase is read once, at the largest entry of the first image of the second circuit, and the deviation reported is the worst over all 8 states with that one phase.
+
 ## Code map
 
 | Module | Contains | Imports |
 |---|---|---|
-| `domain.py` | `Circuit`, `Op`, `GateSpec`, `GATES`, `CONVENTIONS`, the limits, `Equality`, the errors, `validate` (stub) | standard library only |
-| `gates.py` | `matrix(name, params)` (stub) | numpy, `domain` |
-| `engine.py` | `statevector`, `unitary`, `probabilities`, `equal` (stubs) | numpy, `domain`, `gates` |
+| `domain.py` | `Circuit`, `Op`, `GateSpec`, `GATES`, `CONVENTIONS`, the limits, `Equality`, the errors, `validate` and `check_params` | standard library only |
+| `gates.py` | `matrix(name, params)`: the exact matrix of each gate, global phase included | numpy, `domain` |
+| `engine.py` | `statevector`, `unitary`, `probabilities`, `equal` | numpy, `domain`, `gates` |
 | `entrypoints.py` | the `quantum-sim` command | `domain` |
 
 Three import-linter contracts in `pyproject.toml` keep this layering (`entrypoints`, `engine`, `gates`, `domain`), keep numpy out of `domain`, and forbid importing docingest or docingest-index. The reverse direction, docingest never importing `quantum_sim`, is a contract in docingest's `pyproject.toml`.
@@ -76,7 +85,7 @@ Three import-linter contracts in `pyproject.toml` keep this layering (`entrypoin
 ./scripts/check.sh      # ruff, ruff format, import-linter, pyright, pytest with an 85% coverage floor
 ```
 
-The acceptance suite in `tests/acceptance/` is the contract for the engine. Most of it runs twice through the `sim` fixture: once on a naive builder written inside the tests (`tests/acceptance/naive.py`: gate matrices typed in from the conventions, full Kronecker products and permutation matrices, no `tensordot`), which passes today and checks the tests themselves, and once on the engine.
+The acceptance suite in `tests/acceptance/` is the contract for the engine. Most of it runs twice through the `sim` fixture: once on a naive builder written inside the tests (`tests/acceptance/naive.py`: gate matrices typed in from the conventions, full Kronecker products and permutation matrices, no `tensordot`), which checks the tests themselves, and once on the engine.
 
 | Module | Covers |
 |---|---|
@@ -91,12 +100,12 @@ The acceptance suite in `tests/acceptance/` is the contract for the engine. Most
 | `test_equality.py` | global phase, exactness, the phase's range, tolerance, circuits against matrices, random-state equality for 11 to 20 wires |
 | `test_validation.py` | unknown names, wires out of range or repeated, wrong numbers of targets and parameters, bad angles, bad input states |
 
-`tests/test_domain.py`, `test_cli.py` and `test_packaging.py` cover the parts that exist today, including that numpy is the only dependency and that every gate is documented in `docs/conventions.md`.
+`tests/acceptance/test_engine_edges.py` pins what the suite above leaves open: argument types and the order of the errors, numpy integers as wires, an `rk` given as `3.0`, an `rk` of any size, an `atol` that is not a positive finite number, ops that are not `Op`, input states that are not vectors, circuits against matrices on either side with the phase kept in order, the exact recipe of random-state equality (8 states, one phase, the seed), and the order of a gate's own wires, which is invisible through the gate table because every two-wire gate in it is symmetric.
 
-### The `engine_pending` marker
-
-Tests that need the stubbed code carry the marker `engine_pending`. A hook in `tests/conftest.py` turns it into a strict xfail that expects `NotImplementedError`, so `check.sh` passes today while each such test still runs: a test that fails in any other way is a failure, and a test that starts to pass fails as XPASS. To see the real failures, run `uv run pytest --runxfail`. When the engine lands, remove the marker from every test (`grep -rn engine_pending tests`), the hook in `tests/conftest.py` and the marker line in `pyproject.toml`.
+`tests/test_domain.py`, `test_cli.py` and `test_packaging.py` cover the domain types, the command and the packaging, including that numpy is the only dependency and that every gate is documented in `docs/conventions.md`.
 
 ## The reference fixture
 
 `tests/fixtures/reference-circuits.json` holds 240 seeded random circuits (up to 5 wires, up to 30 operations, every gate, closed and open controls) and their unitaries as computed by Qiskit, converted to this package's wire order, with the library, its version and the seed in the header. Qiskit is not a dependency of anything in the workspace: [`tools/make_reference.py`](tools/make_reference.py) is run once in a throwaway environment outside the repository, and its docstring shows how. Regenerate the fixture only when the gate table changes.
+
+The fixture cannot tell the order of a gate's own target wires, because every two-wire gate in the table (`swap`, `iswap`, `rxx`, `ryy`, `rzz`) is symmetric; that order is pinned by a test in `tests/acceptance/test_engine_edges.py` that patches in an asymmetric gate matrix, not by Qiskit.
