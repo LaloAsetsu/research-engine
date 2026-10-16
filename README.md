@@ -8,6 +8,7 @@ A local research engine for scientific papers. It turns papers into clean Markdo
 |---|---|---|
 | [`packages/docingest/`](packages/docingest/README.md) | Document normalization: PDF, scanned PDF, LaTeX source, Office files and images become Markdown plus a provenance manifest. Also crawls arXiv and answers questions with PaperQA2. Command: `docingest`. | Available (0.4.1) |
 | [`packages/docingest-index/`](packages/docingest-index/README.md) | Embedding and reranker clients (OpenAI-compatible `/v1/embeddings`, vLLM `/rerank`) and a persistent chunk index (dense vectors plus BM25), plugged into docingest as adapters. Command: `docingest index build`. | Available (0.1.0); `docingest ask` retrieves from it when configured |
+| [`packages/quantum-sim/`](packages/quantum-sim/README.md) | A small NumPy simulator of quantum circuits (statevector, unitary, equality up to global phase) with Nielsen and Chuang conventions, for checking the circuits a model writes or docingest reads. numpy only; independent of docingest. Command: `quantum-sim`. | Skeleton (0.1.0): conventions, API and acceptance tests; the engine is next |
 | [`serving/`](serving/README.md) | Start and stop script for the local model servers (answering model, embedder, reranker), pinned model list, reranker templates, the vLLM install recipe and GPU requirements. | Available |
 | `experiments/` | Benchmark runners, a timing harness and retrieval and question-answering evaluations. | Planned |
 
@@ -62,6 +63,7 @@ uv run docingest ask "What limits T1 in transmons?" -c config/examples/lab-serve
 | Learn what docingest does, its commands and the architecture | [packages/docingest/README.md](packages/docingest/README.md) |
 | Set a configuration key or pick an example file | [packages/docingest/config/README.md](packages/docingest/config/README.md) |
 | Understand the chunk index, the embedder and the reranker | [packages/docingest-index/README.md](packages/docingest-index/README.md) and [ADR 0004](packages/docingest/docs/adr/0004-chunk-index-and-two-stage-retrieval.md) |
+| Simulate or check a quantum circuit, and its conventions | [packages/quantum-sim/README.md](packages/quantum-sim/README.md), [conventions](packages/quantum-sim/docs/conventions.md) and [ADR 0005](packages/docingest/docs/adr/0005-own-numpy-circuit-simulator.md) |
 | Change the code and open a pull request | [packages/docingest/CONTRIBUTING.md](packages/docingest/CONTRIBUTING.md) |
 | Find any other document of docingest | [packages/docingest/docs/README.md](packages/docingest/docs/README.md) |
 

@@ -1,0 +1,27 @@
+# ADR 0005: Our own NumPy circuit simulator, in a separate package, checked against a fixture
+
+**Status:** accepted, 2026-10-15
+
+## Context
+The engine will be used to write quantum circuits, and a circuit a model writes can be wrong in ways that read well: control and target swapped, the wire order reversed, a missing dagger, R_z used where a phase gate was meant. docingest already reads circuit blocks of a paper's LaTeX as gate lists, but nothing can tell what a list or a proposed circuit does. Two uses need a simulator:
+
+- a model or an agent checks a circuit it proposes (the state on a given input, the unitary up to global phase, or equal or not equal to a target) and fixes it;
+- an offline check of docingest's gate lists against what the paper states, mainly the drawn identities.
+
+The idea of a simulator in this repository came from pull request #27, which proposed one inside docingest. Its review found silent wrong answers in core paths (controlled gates other than X acting unconditionally, an extra control replacing the gate's own, a sign error in the Dirac parser), missing gates that most circuits in the corpus use (T, R_x, R_y, R_z, CZ, SWAP), per-amplitude Python loops too slow beyond about 12 qubits, and limits checked after the arrays were allocated. Fixing all of it amounted to a rewrite.
+
+Mature libraries exist. Qiskit 2.5 (Apache-2.0) adds rustworkx, stevedore and scipy, about 45 MB, to every environment, and is little-endian, the reverse of the gate list's wire order. Cirq 1.7 pins numpy, pandas and matplotlib versions that can block updates of the shared lock. In both, the conventions that cause the errors above (label to gate, wire order, R_z against P) would still be ours to get right.
+
+## Decision
+- **We build the engine**: a small statevector and unitary simulator in NumPy, gates applied with `tensordot` over their wires, limits checked from the circuit's description before any array is created (statevector at most 20 wires, unitary at most 10, equality of 11 to 20 wires through 8 random states, at most 10,000 operations).
+- **A separate workspace package**, `packages/quantum-sim` (import `quantum_sim`, command `quantum-sim`), with numpy as its only dependency. It does not import docingest and docingest does not import it, each enforced by an import-linter contract, so an agent or a notebook can use it without docingest. Inside, the layers are `domain` (circuits, the gate table, the conventions, the errors; standard library only), `gates`, `engine` and `entrypoints`. The label resolver and the JSON circuit format come in a later change; docingest's gate list will reach the package as plain dictionaries, so neither package imports the other.
+- **Nielsen and Chuang conventions, written down and printed**: wire 1 is the top wire and the most significant bit; wires are 1-based in every user-facing structure; R_a(θ) = exp(−iθσ_a/2); R_aa(θ) = exp(−iθ σ_a⊗σ_a / 2); P(θ) = diag(1, e^{iθ}), S = P(π/2), T = P(π/4); √X = (1/2)[[1+i, 1−i], [1−i, 1+i]]; the QFT's R_k = diag(1, e^{2πi/2^k}); any gate takes any number of closed and open controls; results are compared up to global phase. Gate names are a closed table and nothing is guessed. Version 1 measures at the end of a wire only. The table is in the package's `docs/conventions.md`.
+- **The tests come first** and are the acceptance contract for any engine: the gate table against literals and identities, wire-order and control cases (controlled R_z is not controlled P), textbook circuits (among them the exact Toffoli decomposition of Nielsen and Chuang Fig. 4.9), a naive second implementation inside the tests (Kronecker products and permutation matrices) compared with the engine on random circuits, limits measured with `tracemalloc`, and refusals.
+- **An independent reference through a committed fixture, not a dependency.** A generator script, run once in a throwaway environment outside the repository, has Qiskit compute the unitaries of 240 seeded random circuits (up to 5 wires, up to 30 operations, every gate, closed and open controls), converts them to our wire order and writes them with the library, its version and the seed to `tests/fixtures/reference-circuits.json`. The test compares with a tolerance of 1e-10. Qiskit never enters `uv.lock`.
+
+## Consequences
+- Nothing new at run time: numpy is already in the lock, and the package installs in every environment the workspace supports.
+- We own the correctness of the engine. The guard is the suite: the naive builder already agrees with the Qiskit fixture on all 240 circuits, so the conventions are checked before the engine exists.
+- The fixture is 1.4 MB of JSON and must be regenerated if the gate table changes; the script refuses to write if its wire-order conversion fails a CNOT check.
+- A third package means a third set of gates in CI (`package` matrix, both lanes).
+- Not in scope: noise, density matrices, qutrits, mid-circuit measurement, a Dirac-notation parser, answer-time simulation notes in docingest (that would need a port and is a separate decision).

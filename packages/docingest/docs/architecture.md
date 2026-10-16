@@ -136,7 +136,7 @@ Consequences of the rule that are visible in the code:
 
 ## 4. Import contracts
 
-The layering is enforced by six import-linter contracts in `[tool.importlinter]` of `pyproject.toml`. They run with `uv run lint-imports`, which is part of `scripts/check.sh` and of the Linux job in `.github/workflows/ci.yml`.
+The layering is enforced by seven import-linter contracts in `[tool.importlinter]` of `pyproject.toml`. They run with `uv run lint-imports`, which is part of `scripts/check.sh` and of the Linux job in `.github/workflows/ci.yml`.
 
 | # | Contract name | Type | What it enforces |
 |---|---|---|---|
@@ -146,6 +146,7 @@ The layering is enforced by six import-linter contracts in `[tool.importlinter]`
 | 4 | Application depends on ports, not on concrete libraries | `forbidden` | `docingest.application` and `docingest.ports` may not import `pypdfium2`, `mlx`, `mlx_vlm`, `paperqa`, `docling`, `pypandoc`, `huggingface_hub`, `httpx`, `typer`, `rich`. |
 | 5 | docingest never imports a plugin package (plugins are found by entry point) | `forbidden` | `docingest` may not import `docingest_index`. The plugin package has a contract of its own, in its `pyproject.toml`: it may import only `docingest.ports`, `docingest.domain` and `docingest.config`. |
 | 6 | Only the composition root and entrypoints wire concrete adapters | `protected` | Only `docingest.bootstrap`, `docingest.entrypoints` and the adapters themselves may import `docingest.adapters`. |
+| 7 | docingest never imports quantum_sim (a separate package; neither depends on the other) | `forbidden` | `docingest` may not import `quantum_sim`, the circuit simulator of `packages/quantum-sim`. That package has the reverse contract in its own `pyproject.toml` (see [ADR 0005](adr/0005-own-numpy-circuit-simulator.md)). |
 
 Global settings that matter:
 
@@ -1297,3 +1298,5 @@ All quality gates (ruff, import-linter, pyright, pytest with coverage) run with 
 | [0001: Hexagonal architecture with a plugin registry](adr/0001-hexagonal-architecture.md) | Protocol ports, a pure domain, one composition root with entry-point plugins, adapter fingerprints in the cache key, and import-linter contracts in CI. |
 | [0002: Per-page OCR routing and a content-addressed cache](adr/0002-per-page-routing-and-content-addressed-cache.md) | Route each PDF page on measured signals, record the reason, address outputs by content, and keep partial and forced-OCR runs as variants. |
 | [0003: Prefer LaTeX sources over PDFs for arXiv](adr/0003-latex-first-for-arxiv.md) | Download the source first, convert it with pandoc after safe unpacking and include flattening, fall back to plain text, and record metadata and license. |
+| [0004: A persistent chunk index and two-stage retrieval](adr/0004-chunk-index-and-two-stage-retrieval.md) | Dense and BM25 candidates fused, then a reranker; the index and its model clients in the separate `docingest-index` package; an on-disk index keyed by corpus, embedder and chunker. |
+| [0005: Our own NumPy circuit simulator, in a separate package, checked against a fixture](adr/0005-own-numpy-circuit-simulator.md) | A numpy-only `quantum-sim` workspace package that docingest does not import, Nielsen and Chuang conventions written down, tests first, and a Qiskit reference committed as a fixture instead of a dependency. |
