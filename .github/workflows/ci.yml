@@ -12,7 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package: [docingest, docingest-index]
+        package: [docingest, docingest-index, quantum-sim]
+        include:
+          - package: quantum-sim
+            lint_paths: src tests tools
     defaults:
       run:
         working-directory: packages/${{ matrix.package }}
@@ -22,8 +25,8 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run --frozen ruff check src tests
-      - run: uv run --frozen ruff format --check src tests
+      - run: uv run --frozen ruff check ${{ matrix.lint_paths || 'src tests' }}
+      - run: uv run --frozen ruff format --check ${{ matrix.lint_paths || 'src tests' }}
       - run: uv run --frozen lint-imports
       - run: uv run --frozen pytest -q --cov
 
@@ -32,7 +35,7 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        package: [docingest, docingest-index]
+        package: [docingest, docingest-index, quantum-sim]
     defaults:
       run:
         working-directory: packages/${{ matrix.package }}

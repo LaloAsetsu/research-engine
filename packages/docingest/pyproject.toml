@@ -156,6 +156,12 @@ source_modules = ["docingest"]
 forbidden_modules = ["docingest_index"]
 
 [[tool.importlinter.contracts]]
+name = "docingest never imports quantum_sim (a separate package; neither depends on the other)"
+type = "forbidden"
+source_modules = ["docingest"]
+forbidden_modules = ["quantum_sim"]
+
+[[tool.importlinter.contracts]]
 name = "Only the composition root and entrypoints wire concrete adapters"
 type = "protected"
 protected_modules = ["docingest.adapters"]

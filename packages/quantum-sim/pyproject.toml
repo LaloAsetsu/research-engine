@@ -1,0 +1,99 @@
+[project]
+name = "quantum-sim"
+version = "0.1.0"
+description = "A small NumPy simulator of quantum circuits: statevector, unitary and equality up to global phase, with stated conventions"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "etxsA", email = "93368439+etxsA@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+# numpy only: the simulator must stay usable without docingest or any quantum SDK.
+dependencies = [
+    "numpy>=2",
+]
+
+[project.scripts]
+quantum-sim = "quantum_sim.entrypoints:main"
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.168",
+    "import-linter>=2.15",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-cov>=7",
+    "ruff>=0.16",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "-ra"]
+markers = [
+    "engine_pending: needs code the engine change writes (gates, engine, domain.validate); a strict xfail that expects NotImplementedError until then (see tests/conftest.py)",
+]
+
+[tool.coverage.run]
+source = ["quantum_sim"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT", "PL", "C4"]
+ignore = [
+    "PLR2004",  # magic values are fine in tests and thresholds
+    "RUF001", "RUF002", "RUF003",  # math symbols in docstrings and tables
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR0913", "PT018", "E501"]
+
+[tool.pyright]
+include = ["src"]
+venvPath = "../.."  # the workspace root, where uv keeps the shared .venv
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+
+[tool.importlinter]
+root_packages = ["quantum_sim"]
+include_external_packages = true
+exclude_type_checking_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: entrypoints, engine, gates, domain; a module imports only the layers below it"
+type = "layers"
+layers = [
+    "quantum_sim.entrypoints",
+    "quantum_sim.engine",
+    "quantum_sim.gates",
+    "quantum_sim.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "The domain is the standard library only"
+type = "forbidden"
+source_modules = ["quantum_sim.domain"]
+forbidden_modules = ["numpy"]
+
+# The other direction (docingest never imports quantum_sim) is a contract in docingest's
+# pyproject.toml, because each package's gates run with only that package installed.
+[[tool.importlinter.contracts]]
+name = "quantum_sim never imports docingest or its plugins"
+type = "forbidden"
+source_modules = ["quantum_sim"]
+forbidden_modules = ["docingest", "docingest_index"]
