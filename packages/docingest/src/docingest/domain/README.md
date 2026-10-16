@@ -17,6 +17,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 - [chunking.py](#chunkingpy)
 - [circuits.py](#circuitspy)
 - [equations.py](#equationspy)
+- [blocks.py](#blockspy)
 - [errors.py](#errorspy)
 - [Changing the domain safely](#changing-the-domain-safely)
 
@@ -35,6 +36,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 | `chunking.py` | `Chunk`, `chunk_pages`, `CHUNKER_VERSION`, `CHUNK_CHARS`, `OVERLAP` | `ports` (`Chunk` is re-exported there); the chunk index and `AskService` use it through those |
 | `circuits.py` | `gate_list`, `GateList`, `circuit_code_blocks`, `CodeBlock`, `add_gate_lists`, `MAX_STEPS` | `AskService` (a gate list after each circuit code block of the retrieved chunks) |
 | `equations.py` | `equation_references`, `canonical`, `find_equations`, `EquationSpan`, `chunk_for`, `covers`, `equation_header`, `content_words`, `title_overlap`, `lead_sentence_start`, `MAX_REFERENCES`, `MIN_TITLE_WORDS`, `LOOK_BACK`, `TITLE_LENGTH` | `AskService` (the chunk of an equation number the question names) |
+| `blocks.py` | `find_blocks`, `attach_captions`, `whole_blocks`, `Block`, `Whole`, `complete`, `Completion`, `partial_note`, `BLOCK_MAX` | `AskService` (the rest of a display equation, code block or table that a retrieved chunk cuts) |
 | `errors.py` | `DocingestError` and its subclasses | adapters raise them, application and entrypoints handle them |
 
 ## How domain objects flow through an ingestion
@@ -687,6 +689,24 @@ Rules of the reader:
 
 Limits: a range is not expanded; a second tag with the same text in a paper (a restart after the numbering stopped) is not looked at; a tag whose text is not a plain number (`\tag{\ref{x}}`) is not found. The module reads, it never writes: nothing here is stored.
 
+## blocks.py
+
+`blocks.py` finds the blocks of a Markdown text that a chunk can cut (display equations, fenced code blocks and pipe tables) and plans how far the chunks of one paper are extended to hold the blocks they cut. Pure functions on text and offsets (standard library only). The chunker is not changed: a chunk may still start or stop inside a block, and `AskService` completes it at answer time from the paper's text, for the answerer that reads the chunks as they are (`[qa] skip_summary`), when `[qa] whole_blocks` is on (off by default).
+
+| Name | Meaning |
+|---|---|
+| `find_blocks(text)` | The blocks of `text` in order, none inside another, as `Block(start, end, kind)` with `kind` one of `display`, `code`, `table`, `inline`. `display`: `$$..$$`, `\[..\]` (not the literal brackets pandoc writes for a citation, a link text or a remark) and a raw `equation`, `align`, `gather`, `multline`, `eqnarray`, `flalign`, `alignat`, `displaymath` or `dmath` environment. `code`: a fenced block up to its closing fence (backticks or tildes, the closer at least as long). `table`: a pipe table from its header line to its last row. `inline`: `$..$` of at most `INLINE_MAX` (500) characters in one paragraph; it is found so that a `$` inside it is not read as a display delimiter. What a block holds is not scanned again. A delimiter that never closes, or closes more than `BLOCK_MAX` (50,000) characters away (`BRACKET_MAX`, 5,000, for `\[`), is plain text, so one stray `$$` cannot swallow a paper. One left-to-right pass: a closing delimiter is searched in a bounded window and a window that found nothing is not searched again. |
+| `attach_captions(text, blocks, *, caption_max)` | `blocks` with each code block, table and display circuit (`quantikz`, `yquant`, `tikzcd`, `\Qcircuit` inside the math) extended over its caption: the paragraph right after it (nothing but white space between, at most four newlines) of at most `caption_max` characters. After code or a display circuit any paragraph is a caption, because the converter writes a circuit this way only inside a figure and pandoc gives the caption no label; after a table only a paragraph that starts with a label whose number ends in `.` or `:` (`Figure 3.`, `TABLE II.`, `Table S1:`) or with pandoc's `: text` or `Table: text`. A heading, a list item, a quote, a row or a paragraph that holds another block is not a caption, and a display equation that is not a circuit has none. The inline math of a caption is dropped from the list. |
+| `whole_blocks(text, *, caption_max)` | The two together without the inline math, as `Whole(start, core, end, kind)`: `text[start:core]` is the block, `text[core:end]` its caption (`core == end` when it has none). |
+| `complete(spans, wholes, *, limit)` | For the chunks `spans` (`(start, stop)` offsets, best ranked first) of one paper, the `Completion(start, stop, partial)` of each, in the same order. A block is cut when a chunk starts or stops strictly inside it, caption included (a chunk that stops between a figure and its caption cuts it). The text that no chunk holds is added and only that, so no text appears twice: it goes to the chunk beside it, the best ranked when there is one on each side, and a chunk that is not beside a hole gets nothing for that block. A block with its caption of at most `limit` characters is completed whole; else, when the block alone fits, without its caption; else nothing is added and `partial` names the kind of the block for each chunk that holds part of it (only when some of the block is in no chunk). A chunk gets at most one block at each end. Linear in the number of blocks (a binary search finds the ones a chunk edge falls in) and quadratic only in the number of chunks, which is the handful an answer prompt carries. |
+| `partial_note(kinds)` | The line `AskService` puts before a chunk that holds part of a block too long to complete: `Note: this passage shows only part of a longer table; the rest is not in this passage.` (`display equation` and `code block` for the other kinds; several kinds are joined with `and of`). |
+
+Why it is here and not in the chunker: a chunker that keeps equations, code blocks and tables whole moves the start of every later chunk and glues neighbours together, which changed what retrieval finds and made answers worse. Completing at answer time leaves the index, the chunks and what retrieval finds as they were.
+
+Measured on 1,249 papers (95 million characters, 40,609 blocks): display equations have a median of 179 characters with their caption, 99th percentile 1,063, maximum 39,797; code blocks 511, 5,202 and 7,723; tables 735, 3,690 and 11,786. 99.6% of the blocks are at most three chunks (2,700 characters) long. The scan of the whole corpus took 11 s of CPU.
+
+Tests compare the time of an input with that of one four times larger (CPU time, a ratio), and check by property that an extension is always text of one block that no other chunk holds.
+
 ## errors.py
 
 Domain errors describe expected, reportable failures. Adapters translate library exceptions into them (`raise ConversionError(...) from e`), so the application and the CLI never need to know which library failed.
@@ -791,4 +811,4 @@ The domain is small and everything depends on it, so changes ripple outward. Che
 | Different logic in `decide`, `clean_text_layer`, `collapse_dot_leaders`, `structure_pages` or `render_markdown` | Bump `PIPELINE_VERSION` in `application/ingest.py`. Code changes are not part of any adapter fingerprint, so without the bump cached results produced by the old logic would still be served. |
 | New error type | Subclass the closest existing error so that existing handlers keep working. Put adapter-specific errors in the adapter module, as `OcrServerError` does. |
 
-Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`, `tests/unit/test_circuits.py`, `tests/unit/test_equations.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).
+Tests for this package: `tests/unit/test_domain_models.py`, `tests/unit/test_routing_policy.py`, `tests/unit/test_text.py`, `tests/unit/test_dot_leaders.py`, `tests/unit/test_chunking.py`, `tests/unit/test_circuits.py`, `tests/unit/test_equations.py`, `tests/unit/test_blocks.py`. See [tests/README.md](../../../tests/README.md) and [CONTRIBUTING.md](../../../CONTRIBUTING.md).
