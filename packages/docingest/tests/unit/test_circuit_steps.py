@@ -566,8 +566,12 @@ def test_an_item_that_names_a_wire_twice_is_never_in_the_data():
         assert gate_list(yq(item, "h b")).status == "partial"
 
 
-def test_a_yquant_gate_that_repeats_a_target_without_controls_is_kept_as_drawn():
-    assert [o[2] for step in ops(yq("h a, a", "box {U} b, b")) for o in step] == [(1, 1), (2, 2)]
+def test_a_yquant_gate_that_names_a_target_twice_is_unparsed_with_or_without_controls():
+    for item in ("h a, a", "x a, a", "z a, a, a", "box {U} a, a", "cnot a, a", "h a, a | b"):
+        source = yq(item, "h b")
+        step = ops(source)[0]
+        assert [o[0] for o in step] == ["unparsed"], item
+        assert gate_list(source).status == "partial", item
 
 
 def test_a_yquant_measure_barrier_or_discard_keeps_its_label():
@@ -657,11 +661,10 @@ def test_a_yquant_measure_barrier_or_discard_with_controls_keeps_them():
     ]
 
 
-def test_yquant_targets_and_controls_are_in_the_order_of_the_drawing_with_repeats_kept():
-    assert ops(yq("box {U} b, a", "box {U} a, b", "box {V} a, a", "cnot c | b, a")) == [
+def test_yquant_targets_and_controls_are_in_wire_order_whatever_the_order_written():
+    assert ops(yq("box {U} b, a", "box {U} a, b", "cnot c | b, a")) == [
         [("gate", "U", (1, 2), (), (), False, "")],
         [("gate", "U", (1, 2), (), (), False, "")],
-        [("gate", "V", (1, 1), (), (), False, "")],
         [("x", "X", (3,), (1, 2), (), False, "")],
     ]
 

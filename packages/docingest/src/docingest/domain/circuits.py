@@ -658,10 +658,12 @@ class GateOp:
       its own).
     * ``unparsed``, ``unparsed_op``, ``unparsed_group`` and ``unparsed_outside``: something the
       reader did not understand; ``source`` keeps what it saw. A reader of this data must refuse
-      every kind it does not know, these four included.
+      every kind it does not know, these four included, and a circuit (or a part) that holds any
+      of the four as a whole: skipping the item can leave a wrong unitary.
 
     ``targets`` and the controls are 1-based wire numbers, top to bottom, the numbering of the
-    "Wires:" line; they keep the order and the repeats of the drawing. ``classical`` is True when
+    "Wires:" line; the wires of one item are in that order and none is named twice (an item that
+    would name one twice is ``unparsed``). ``classical`` is True when
     the item is classically controlled (a classical wire, the result of a measurement, or in
     ``yquant`` a control on a ``cbit`` or on a wire measured earlier); then ``controls`` holds the
     wire that controls it when the drawing names one. ``source`` is the text
@@ -1295,14 +1297,12 @@ def _wired_single(item: Item, joined: list[tuple[int, Op]], g: _Grid, names: Nam
 
 
 def _meets_itself(op: GateOp) -> bool:
-    """True when an item names a wire twice where a gate cannot: a control that repeats or sits on
-    a target, or a swap of one wire with itself. Such an item is a drawing the reader misjoined,
-    not a gate a simulator could apply."""
+    """True when an item names a wire twice where a gate cannot: a control or a target that
+    repeats, a control that sits on a target, or a swap of one wire with itself. Such an item is
+    a drawing the reader misjoined, not a gate a simulator could apply."""
     if op.kind.startswith("unparsed"):
         return False
-    controls = op.controls + op.open_controls
-    named = controls or op.kind in ("x", "swap", "phase", "dots_gate")
-    wires = controls + (op.targets if named else ())
+    wires = op.controls + op.open_controls + op.targets
     return len(set(wires)) != len(wires) or (op.kind == "swap" and len(set(op.targets)) != 2)
 
 
