@@ -24,6 +24,13 @@ with only wires are skipped. Two gates in different columns may commute or run t
 hardware; the list does not say so. Labels drawn outside the grid (``\\gategroup`` boxes,
 captions, TikZ nodes) are not in the list.
 
+The same reading is also returned as data, :attr:`GateList.circuits`: for each circuit its wires,
+its parts (the sides of a drawn equality) and its steps, each step a tuple of :class:`GateOp`
+(kind, label as written, 1-based wires, controls, open controls). The text and the data come from
+the same operations, one item at a time, so they cannot say different things; the data is not
+shortened at ``MAX_STEPS`` and is never stored. :meth:`CircuitSteps.to_dict` writes it as plain
+dicts and lists (the ``circuit/1`` format) for callers that must not import this module.
+
 The work is linear in the size of the source: every bracket is matched once, the columns are
 read sparsely and the vertical wires of a column are joined with a sweep, so no input makes it
 quadratic. Output size is linear too: a gate over many wires is written as a range.
@@ -33,23 +40,29 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 
 __all__ = [
+    "CIRCUIT_FORMAT",
+    "MAX_GATE_WIRES",
     "MAX_STEPS",
+    "CircuitSteps",
     "CodeBlock",
     "GateList",
+    "GateOp",
     "add_gate_lists",
     "circuit_code_blocks",
     "gate_list",
 ]
 
 MAX_STEPS = 60  # a longer circuit is listed up to here, then "... N more lines not listed"
+MAX_GATE_WIRES = 128  # a gate over more wires is listed in the text, but as data it is "unparsed"
 MAX_REGISTER = 128  # wires of one yquant register that are listed; a larger one is "unparsed"
 MAX_NUMBER = 6  # digits of a count or an offset that are read; a longer number is "unparsed"
 RANGE_FROM = 12  # more consecutive wires than this are written "wires a to b"
 GRID_ENVS = ("quantikz", "tikzcd")
+CIRCUIT_FORMAT = "circuit/1"  # the "format" of CircuitSteps.to_dict()
 
 HEADER = "Gate list (from the circuit code above; wires numbered top to bottom; {unit}):"
 UNIT_GRID = "one step per drawn column, left to right"
@@ -580,7 +593,7 @@ def _r_discard(t: Tok, ops: list[Op], facts: Facts) -> None:
 
 def _r_slice(t: Tok, ops: list[Op], facts: Facts) -> None:
     lab = clean_label(t.args[-1]) if t.name == "slice" and t.args else ""
-    ops.append(Op("note", "barrier" + (f" {lab}" if lab else "")))
+    ops.append(Op("note", lab))
 
 
 def _r_permute(t: Tok, ops: list[Op], facts: Facts) -> None:
@@ -616,6 +629,96 @@ _READERS: dict[str, Callable[[Tok, list[Op], Facts], None]] = {
 }
 
 
+# ------------------------------------------------------------------ the steps as data
+
+
+@dataclass(frozen=True)
+class GateOp:
+    """One item of a step, as drawn: the data behind one ``;``-separated item of a step line.
+
+    ``kind`` says what the item is and which words its line uses:
+
+    * ``gate``: a named gate on ``targets`` (``label`` as the author wrote it, LaTeX included),
+      with ``controls`` (on |1>) and ``open_controls`` (on |0>) when it is controlled. A gate
+      drawn over several wires has all of them in ``targets``.
+    * ``x``: an X drawn as a target (``\\targ``, ``cnot``), label ``X``; fields as in ``gate``.
+    * ``z_dots``: control dots only, a controlled-Z with no target: the dots are ``controls`` and
+      ``open_controls``, label ``Z``.
+    * ``phase``: ``\\phase{label}`` on ``targets``, alone or joined to control dots (``controls``,
+      ``open_controls``); several different labels in one item are joined with ``", "``.
+    * ``dots_gate``: control dots that carry a label (Qcircuit ``\\dstick``): a symmetric two-qubit
+      gate named ``label`` on ``targets``.
+    * ``swap``: ``targets`` are the two crossed wires; ``controls`` make it a controlled swap.
+    * ``measure``: a measurement of ``targets`` (``label`` is its option, often empty).
+    * ``control``: a control dot with nothing joined to it (``controls`` holds its wire).
+    * ``barrier`` and ``discard`` (yquant statements, with ``targets``; in a grid a ``\\slice`` or
+      ``\\barrier`` has no wire and a ``\\trash`` is ``discard`` on its wire), ``dots`` (a row of
+      dots on ``targets``), ``text`` and ``sign`` (``label`` drawn on a wire without being a
+      gate), and ``sep`` (the drawn equality that opens a part, in a step of its own).
+    * ``unparsed``, ``unparsed_op``, ``unparsed_group`` and ``unparsed_outside``: something the
+      reader did not understand; ``source`` keeps what it saw. A reader of this data must refuse
+      every kind it does not know, these four included.
+
+    ``targets`` and the controls are 1-based wire numbers, top to bottom, the numbering of the
+    "Wires:" line; they keep the order and the repeats of the drawing. ``classical`` is True when
+    the item is classically controlled (a classical wire, the result of a measurement, or in
+    ``yquant`` a control on a ``cbit`` or on a wire measured earlier); then ``controls`` holds the
+    wire that controls it when the drawing names one. ``source`` is the text
+    the reading rests on and no other field holds: the code of an ``unparsed`` item, or the label
+    drawn next to a gate (``\\dstick``), which a reader of this data must not ignore. A gate over
+    more than ``MAX_GATE_WIRES`` wires is ``unparsed_op``."""
+
+    kind: str
+    label: str = ""
+    targets: tuple[int, ...] = ()
+    controls: tuple[int, ...] = ()
+    open_controls: tuple[int, ...] = ()
+    classical: bool = False
+    source: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "label": self.label,
+            "targets": list(self.targets),
+            "controls": list(self.controls),
+            "open_controls": list(self.open_controls),
+            "classical": self.classical,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class CircuitSteps:
+    """One circuit of a block as data: what its part of the gate-list text says, item by item.
+
+    ``wires`` are the legends of the "Wires:" line (``"1 = \\ket{q_0}"``; a wire without a legend
+    is ``"2"``), one per numbered wire. ``parts`` are the sides of the drawn equalities; each part
+    is a tuple of steps, each step a tuple of :class:`GateOp`. A part that a drawn equality opens
+    starts with a step that holds one ``sep`` item, the sign as drawn. The steps are all of them;
+    the text stops at ``MAX_STEPS`` lines. A circuit whose ``status`` is ``unparsed`` has no wires
+    and no parts."""
+
+    kind: str  # quantikz, qcircuit, tikzcd, yquant
+    status: str  # parsed, partial, unparsed
+    label: str  # the \label of the circuit, if any
+    wires: tuple[str, ...]
+    parts: tuple[tuple[tuple[GateOp, ...], ...], ...]
+
+    def to_dict(self) -> dict[str, object]:
+        """Plain dicts and lists, the ``circuit/1`` format: ``format``, ``kind``, ``status``,
+        ``label``, ``wires`` (how many), ``wire_labels`` and ``parts`` (parts, steps, items)."""
+        return {
+            "format": CIRCUIT_FORMAT,
+            "kind": self.kind,
+            "status": self.status,
+            "label": self.label,
+            "wires": len(self.wires),
+            "wire_labels": list(self.wires),
+            "parts": [[[op.to_dict() for op in step] for step in part] for part in self.parts],
+        }
+
+
 # ------------------------------------------------------------------ wires and their numbers
 
 
@@ -633,6 +736,10 @@ def wires_text(nums: Sequence[int]) -> str:
     return "wires " + ", ".join(names[:-1]) + " and " + names[-1]
 
 
+Item = tuple[str, tuple[GateOp, ...]]  # the words of an item, and the operations they describe
+_UNREAD: Item = ("", ())  # not a combination the list knows
+
+
 class Names:
     """Wire numbers of a grid: the rows that draw something, numbered from 1 top to bottom."""
 
@@ -646,30 +753,56 @@ class Names:
     def wire(self, r: int) -> str:
         return f"wire {self.num(r)}"
 
-    def wires(self, rows: Sequence[int]) -> str:
-        return wires_text([self.num(r) for r in sorted(set(rows))])
+    def numbers(self, rows: Iterable[int]) -> list[int]:
+        """The numbers of ``rows``, each wire once, top to bottom."""
+        return [self.num(r) for r in sorted(set(rows))]
+
+    def in_order(self, rows: Iterable[int]) -> tuple[int, ...]:
+        """The numbers of ``rows`` in the order given, repeats kept: as drawn."""
+        return tuple(self.num(r) for r in rows)
+
+    def wires(self, rows: Iterable[int]) -> str:
+        return wires_text(self.numbers(rows))
+
+    def _bounds(self, r: int, count: int) -> tuple[int, int]:
+        return bisect_left(self.drawn, r), bisect_left(self.drawn, r + count)
 
     def span(self, r: int, count: int) -> str:
         """The wires of rows ``r`` to ``r + count - 1`` that exist and are numbered."""
-        lo, hi = bisect_left(self.drawn, r), bisect_left(self.drawn, r + count)
+        lo, hi = self._bounds(r, count)
         return wires_text(range(lo + 1, hi + 1))
 
+    def span_numbers(self, r: int, count: int) -> tuple[int, ...] | None:
+        """The same wires as numbers; None when they are more than ``MAX_GATE_WIRES``."""
+        lo, hi = self._bounds(r, count)
+        return tuple(range(lo + 1, hi + 1)) if hi - lo <= MAX_GATE_WIRES else None
 
-def describe_group(items: list[tuple[int, Op]], names: Names) -> tuple[str, bool]:
+
+def _too_wide(o: Op) -> GateOp:
+    return GateOp("unparsed_op", o.label, source=f"{o.kind} over more than {MAX_GATE_WIRES} wires")
+
+
+def describe_group(items: list[tuple[int, Op]], names: Names) -> Item:
     """:func:`describe_ops` plus the labels drawn next to the operation. Dots with a label are a
     two-qubit gate of that name, not a controlled-Z."""
     tags = [o.tag for _, o in items if o.tag]
     if not tags:
         return describe_ops(items, names)
+    label = ", ".join(tags)
     ctrls = [r for r, o in items if o.kind == "ctrl"]
     if len(ctrls) == len(items) and len(ctrls) >= 2:
         return (
             f"two-qubit gate drawn as control dots on {names.wires(ctrls)} (symmetric, no "
-            f"target), labelled {', '.join(tags)}",
-            True,
+            f"target), labelled {label}",
+            (GateOp("dots_gate", label, tuple(names.numbers(ctrls))),),
         )
-    txt, ok = describe_ops(items, names)
-    return (f"{txt}, labelled {', '.join(tags)}" if ok else txt), ok
+    text, ops = describe_ops(items, names)
+    if not ops:
+        return _UNREAD
+    *head, last = ops
+    if not last.kind.startswith("unparsed"):
+        last = replace(last, source=label)
+    return f"{text}, labelled {label}", (*head, last)
 
 
 def _controls(ctrls: list[tuple[int, Op]], names: Names) -> str:
@@ -686,44 +819,69 @@ def _controls(ctrls: list[tuple[int, Op]], names: Names) -> str:
     return "; ".join(parts)
 
 
-def _measure_on(r: int, o: Op, names: Names) -> str:
+def _control_wires(
+    ctrls: list[tuple[int, Op]], names: Names
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """The closed and the open controls as wire numbers, as drawn."""
+    return (
+        names.in_order(r for r, o in ctrls if not o.open_),
+        names.in_order(r for r, o in ctrls if o.open_),
+    )
+
+
+def _measure_item(r: int, o: Op, names: Names) -> tuple[str, GateOp]:
     on = names.span(r, o.span)
     over = " (one measurement over these wires)" if o.span > 1 else ""
-    return f"measure {on}" + (f" ({o.label})" if o.label else "") + over
+    text = f"measure {on}" + (f" ({o.label})" if o.label else "") + over
+    targets = names.span_numbers(r, o.span)
+    return text, (GateOp("measure", o.label, targets) if targets is not None else _too_wide(o))
 
 
-def _measured(
-    items: list[tuple[int, Op]], meters: list[tuple[int, Op]], names: Names
-) -> tuple[str, bool]:
+def _measured(items: list[tuple[int, Op]], meters: list[tuple[int, Op]], names: Names) -> Item:
     """A measurement alone, or one whose result drives a gate through a classical wire."""
     if any(o.classical for _, o in items):
         rest = [(r, o) for r, o in items if o.kind in ("gate", "targ")]
         # anything else in the group (a quantum control, say) would be lost: not a known shape
         if len(meters) != 1 or len(rest) != 1 or len(items) != 2:
-            return "", False
+            return _UNREAD
         r, o = rest[0]
         gate = o.label if o.kind == "gate" else "X (\\targ)"
-        measured = _measure_on(*meters[0], names)
-        return (
-            f"{measured}; its result classically controls {gate} on {names.span(r, o.span)}",
-            True,
+        measured, measure = _measure_item(*meters[0], names)
+        targets = names.span_numbers(r, o.span)
+        driven = (
+            _too_wide(o)
+            if targets is None
+            else GateOp(
+                "gate" if o.kind == "gate" else "x",
+                o.label if o.kind == "gate" else "X",
+                targets,
+                controls=measure.targets,
+                classical=True,
+            )
         )
+        text = f"{measured}; its result classically controls {gate} on {names.span(r, o.span)}"
+        return text, (measure, driven)
     if len(items) == len(meters):
-        return "; ".join(_measure_on(r, o, names) for r, o in meters), True
-    return "", False
+        pairs = [_measure_item(r, o, names) for r, o in meters]
+        return "; ".join(text for text, _ in pairs), tuple(op for _, op in pairs)
+    return _UNREAD
 
 
-def _single(r: int, o: Op, names: Names) -> tuple[str, bool]:
+def _single(r: int, o: Op, names: Names) -> Item:
     if o.kind == "gate":
         on = names.span(r, o.span)
-        return f"{o.label} on {on}" + (" (one gate on these wires)" if o.span > 1 else ""), True
+        text = f"{o.label} on {on}" + (" (one gate on these wires)" if o.span > 1 else "")
+        targets = names.span_numbers(r, o.span)
+        return text, (GateOp("gate", o.label, targets) if targets is not None else _too_wide(o),)
+    wire = (names.num(r),)
     if o.kind == "targ":
-        return f"X (NOT, drawn as \\targ) on {names.wire(r)}", True
+        return f"X (NOT, drawn as \\targ) on {names.wire(r)}", (GateOp("x", "X", wire),)
     if o.kind == "phase":
-        return f"phase {o.label} on {names.wire(r)}", True
+        return f"phase {o.label} on {names.wire(r)}", (GateOp("phase", o.label, wire),)
     if o.kind == "ctrl":
-        return f"lone control dot on {names.wire(r)} (no gate joined to it in this column)", True
-    return "", False
+        text = f"lone control dot on {names.wire(r)} (no gate joined to it in this column)"
+        return text, (GateOp("control", controls=wire),)
+    return _UNREAD
 
 
 @dataclass
@@ -738,13 +896,16 @@ class _Mix:
     cl: str  # " (classically controlled)" or ""
 
 
-def _swap_text(mix: _Mix, names: Names) -> tuple[str, bool]:
+def _swap_text(mix: _Mix, names: Names) -> Item:
     if len(mix.swaps) != 2:
-        return "", False
+        return _UNREAD
+    targets = names.in_order(mix.swaps)
     if mix.ctrls:
         controls = _controls(mix.ctrls, names)
-        return f"controlled-SWAP of {names.wires(mix.swaps)} ({controls}){mix.cl}", True
-    return f"SWAP {names.wires(mix.swaps)}", True
+        closed, opened = _control_wires(mix.ctrls, names)
+        text = f"controlled-SWAP of {names.wires(mix.swaps)} ({controls}){mix.cl}"
+        return text, (GateOp("swap", "", targets, closed, opened, bool(mix.cl)),)
+    return f"SWAP {names.wires(mix.swaps)}", (GateOp("swap", "", targets),)
 
 
 def _x_name(controls: int, opened: bool) -> str:
@@ -754,45 +915,63 @@ def _x_name(controls: int, opened: bool) -> str:
     return {1: "CNOT", 2: "Toffoli (CCNOT)"}.get(controls, f"{controls}-controlled X")
 
 
-def _not_text(mix: _Mix, names: Names) -> tuple[str, bool]:
+def _not_text(mix: _Mix, names: Names) -> Item:
     """CNOT, Toffoli or an n-controlled X: controls and \\targ in one column."""
     if not mix.ctrls or (len(mix.ctrls) > 1 and len(mix.targs) > 1):
-        return "", False  # no control, or two gates drawn over one another
+        return _UNREAD  # no control, or two gates drawn over one another
     name = _x_name(len(mix.ctrls), any(o.open_ for _, o in mix.ctrls))
     tgt = ("target " if len(mix.targs) == 1 else "targets ") + names.wires(mix.targs)
-    return f"{name}{mix.cl}: {_controls(mix.ctrls, names)}, {tgt}", True
+    closed, opened = _control_wires(mix.ctrls, names)
+    text = f"{name}{mix.cl}: {_controls(mix.ctrls, names)}, {tgt}"
+    return text, (GateOp("x", "X", names.in_order(mix.targs), closed, opened, bool(mix.cl)),)
 
 
-def _controlled_gate_text(mix: _Mix, names: Names) -> tuple[str, bool]:
+def _controlled_gate_text(mix: _Mix, names: Names) -> Item:
     if len(mix.gates) != 1 or not mix.ctrls:
-        return "", False  # a gate joined to nothing, or several gates joined
+        return _UNREAD  # a gate joined to nothing, or several gates joined
     r, o = mix.gates[0]
     controls = _controls(mix.ctrls, names)
-    return f"controlled-{o.label}{mix.cl}: {controls}, target {names.span(r, o.span)}", True
+    text = f"controlled-{o.label}{mix.cl}: {controls}, target {names.span(r, o.span)}"
+    targets = names.span_numbers(r, o.span)
+    if targets is None:
+        return text, (_too_wide(o),)
+    closed, opened = _control_wires(mix.ctrls, names)
+    return text, (GateOp("gate", o.label, targets, closed, opened, bool(mix.cl)),)
 
 
-def _dots_text(mix: _Mix, names: Names) -> tuple[str, bool]:
+def _dots_text(mix: _Mix, names: Names) -> Item:
     """Control dots only: a controlled-Z, which has no target and is symmetric."""
     n = len(mix.ctrls)
     if n < 2:
-        return "", False  # one control whose wire leads nowhere: not a gate
+        return _UNREAD  # one control whose wire leads nowhere: not a gate
+    closed, opened = _control_wires(mix.ctrls, names)
+    op = GateOp("z_dots", "Z", controls=closed, open_controls=opened, classical=bool(mix.cl))
     if any(o.open_ for _, o in mix.ctrls):
         controls = _controls(mix.ctrls, names)
-        return f"controlled-Z with open controls{mix.cl}: {controls} (dots only, no target)", True
+        return f"controlled-Z with open controls{mix.cl}: {controls} (dots only, no target)", (op,)
     name = "controlled-Z" if n == 2 else f"multi-controlled Z ({n} wires)"
     both = "both" if n == 2 else "all"
     rows = names.wires([r for r, _ in mix.ctrls])
-    return f"{name}{mix.cl} on {rows} (control dots on {both}, symmetric: no target)", True
+    return f"{name}{mix.cl} on {rows} (control dots on {both}, symmetric: no target)", (op,)
 
 
-def _phase_text(mix: _Mix, names: Names) -> tuple[str, bool]:
+def _phase_text(mix: _Mix, names: Names) -> Item:
     labels = sorted({o.label for _, o in mix.phases})
     rows = names.wires([r for r, _ in mix.ctrls] + [r for r, _ in mix.phases])
-    return f"controlled-phase {', '.join(labels)}{mix.cl} on {rows} (symmetric dots)", True
+    closed, opened = _control_wires(mix.ctrls, names)
+    op = GateOp(
+        "phase",
+        ", ".join(labels),
+        names.in_order(r for r, _ in mix.phases),
+        closed,
+        opened,
+        bool(mix.cl),
+    )
+    return f"controlled-phase {', '.join(labels)}{mix.cl} on {rows} (symmetric dots)", (op,)
 
 
 # in order: the kind a group must hold, the kinds it must not, and how it is written
-_CASES: tuple[tuple[str, frozenset[str], Callable[[_Mix, Names], tuple[str, bool]]], ...] = (
+_CASES: tuple[tuple[str, frozenset[str], Callable[[_Mix, Names], Item]], ...] = (
     ("swap", frozenset({"targ", "gate", "phase"}), _swap_text),
     ("targ", frozenset({"gate", "swap", "phase"}), _not_text),
     ("gate", frozenset({"targ", "swap", "phase"}), _controlled_gate_text),
@@ -802,14 +981,14 @@ _CASES: tuple[tuple[str, frozenset[str], Callable[[_Mix, Names], tuple[str, bool
 _KNOWN_KINDS = ("ctrl", "targ", "gate", "swap", "meter", "phase", "wire")
 
 
-def describe_ops(items: list[tuple[int, Op]], names: Names) -> tuple[str, bool]:
-    """One line for the operations of one column that a vertical wire (or one gate) joins.
-    Returns ``(text, ok)``; not ok means the combination is not one the list knows."""
+def describe_ops(items: list[tuple[int, Op]], names: Names) -> Item:
+    """One line for the operations of one column that a vertical wire (or one gate) joins, and the
+    operations it names. No operations means the combination is not one the list knows."""
     kinds: dict[str, list[tuple[int, Op]]] = {}
     for r, o in items:
         kinds.setdefault(o.kind, []).append((r, o))
     if any(k not in _KNOWN_KINDS for k in kinds):
-        return "", False
+        return _UNREAD
     if "meter" in kinds:
         return _measured(items, kinds["meter"], names)
     if len(items) == 1 and not items[0][1].link:
@@ -836,7 +1015,7 @@ def describe_ops(items: list[tuple[int, Op]], names: Names) -> tuple[str, bool]:
     for need, forbidden, describe in _CASES:
         if need in present and not present & forbidden:
             return describe(mix, names)
-    return "", False
+    return _UNREAD
 
 
 class _UnionFind:
@@ -895,6 +1074,7 @@ class Circuit:
     label: str = ""  # the \label inside the circuit's source, if it has one
     wires: list[str] = field(default_factory=list)
     parts: list[list[str]] = field(default_factory=list)  # parts separated by '=', lines of steps
+    steps: list[list[tuple[GateOp, ...]]] = field(default_factory=list)  # the same, as data
     n_unparsed: int = 0
     n_items: int = 0
 
@@ -1066,89 +1246,123 @@ def _column_groups(
     return ordered, bad
 
 
-def _loose_item(r: int, o: Op, names: Names, circ: Circuit) -> str:
+def _loose_item(r: int, o: Op, names: Names, circ: Circuit) -> tuple[str, GateOp | None]:
     circ.n_items += 1
+    wire = (names.num(r),)
     if o.kind == "unparsed":
         circ.n_unparsed += 1
-        return f"unparsed on {names.wire(r)}: {_one_line(o.src)[:80]}"
+        source = _one_line(o.src)[:80]
+        return f"unparsed on {names.wire(r)}: {source}", GateOp(
+            "unparsed", targets=wire, source=source
+        )
     if o.kind == "text":
-        return f"text {o.label} on {names.wire(r)}" if o.label else ""
+        return (
+            (f"text {o.label} on {names.wire(r)}", GateOp("text", o.label, wire))
+            if o.label
+            else ("", None)
+        )
     if o.kind == "ellipsis":
-        return f"dots on {names.wire(r)}"
+        return f"dots on {names.wire(r)}", GateOp("dots", targets=wire)
     if o.kind == "discard":
-        return f"{names.wire(r)} discarded"
+        return f"{names.wire(r)} discarded", GateOp("discard", targets=wire)
     if o.kind == "note":
-        return o.label
-    return f"sign {o.label} on {names.wire(r)}"  # sep
+        return "barrier" + (f" {o.label}" if o.label else ""), GateOp("barrier", o.label)
+    return f"sign {o.label} on {names.wire(r)}", GateOp("sign", o.label, wire)  # sep
 
 
-def _wired_single(
-    text: str, joined: list[tuple[int, Op]], g: _Grid, names: Names
-) -> tuple[str, bool]:
-    """``text``, the reading of a lone operation whose cell also draws a vertical wire to a row
+def _wired_single(item: Item, joined: list[tuple[int, Op]], g: _Grid, names: Names) -> Item:
+    """``item``, the reading of a lone operation whose cell also draws a vertical wire to a row
     with nothing in this column. A classical wire is its condition (teleportation corrections are
     drawn like this, in a later column than the measurement); any other wire leaves the operation
-    unexplained, so it is not read. Any other operation keeps ``text``."""
+    unexplained, so it is not read. Any other operation keeps ``item``."""
+    text, ops = item
     [(gate_row, o)] = [(r, o) for r, o in joined if o.kind != "wire"]
     if o.kind not in ("gate", "targ", "phase"):
-        return text, True
+        return item
     classical = [(wr, w) for wr, w in joined if w.kind == "wire" and w.classical]
     if not classical:
-        return "", False
+        return _UNREAD
     wr, w = classical[0]
     # the wire may be written in the gate's cell and point away, or in the controlling row's cell
     far = wr + w.link[0] if wr == gate_row else wr
     drawn = 0 <= far < len(g.rows) and not g.blank[far]
-    return text + ", classically controlled" + (f" by {names.wire(far)}" if drawn else ""), True
+    text += ", classically controlled" + (f" by {names.wire(far)}" if drawn else "")
+    [op] = ops
+    if not op.kind.startswith("unparsed"):
+        op = replace(op, classical=True, controls=(names.num(far),) if drawn else ())
+    return text, (op,)
 
 
-def _step_items(col: list[tuple[int, Op]], g: _Grid, names: Names, circ: Circuit) -> list[str]:
-    """The items of one step: each joined operation, then the loose texts and marks."""
+def _group_items(
+    joined: list[tuple[int, Op]], g: _Grid, names: Names, circ: Circuit
+) -> tuple[list[str], list[GateOp]]:
+    """The items of one group of a column that a vertical wire or a gate joins: the words of each,
+    and the operations they describe."""
     items: list[str] = []
+    ops: list[GateOp] = []
+    # a classical wire in the group (\\cwx, \\vcw) makes what it joins classically controlled
+    classical = any(o.classical for _, o in joined)
+    grp = [
+        (r, replace(o, classical=True) if classical else o)
+        for r, o in joined
+        if o.kind != "wire" or len(joined) == 1
+    ]
+    if not grp or all(o.kind == "wire" for _, o in grp):
+        return items, ops  # a vertical wire with nothing on it in this column
+    rows = {r for r, _ in grp}
+    if len(rows) == 1 and len(grp) == len(joined) > 1 and not any(o.link for _, o in grp):
+        # several independent ops on one wire (\gate{H} \meter in one cell) in order; a vertical
+        # wire in the cell joins them to something, which this reading would drop
+        for r, o in grp:
+            txt, found = describe_group([(r, o)], names)
+            if found:
+                items.append(txt)
+                ops += found
+            else:
+                items.append(f"unparsed: {o.kind} on {names.wire(r)}")
+                ops.append(GateOp("unparsed_op", targets=(names.num(r),), source=o.kind))
+            circ.n_items += 1
+            circ.n_unparsed += 0 if found else 1
+        return items, ops
+    txt, found = describe_group(grp, names)
+    if found and len(grp) == 1 and len(joined) > 1:
+        txt, found = _wired_single((txt, found), joined, g, names)
+    circ.n_items += 1
+    if found:
+        return [txt], list(found)
+    circ.n_unparsed += 1
+    srcs = ", ".join(
+        f"{names.wire(r)}: {o.kind}{(' ' + o.label) if o.label else ''}" for r, o in grp
+    )
+    group = GateOp("unparsed_group", targets=tuple(names.numbers(rows)), source=srcs)
+    return [f"unparsed joined operation ({srcs})"], [group]
+
+
+def _step_items(
+    col: list[tuple[int, Op]], g: _Grid, names: Names, circ: Circuit
+) -> tuple[list[str], list[GateOp]]:
+    """The items of one step: each joined operation, then the loose texts and marks. The words of
+    each item, and the operations they describe."""
+    items: list[str] = []
+    ops: list[GateOp] = []
     groups, bad = _column_groups(col, len(g.rows))
     for joined in groups:
-        # a classical wire in the group (\\cwx, \\vcw) makes what it joins classically controlled
-        classical = any(o.classical for _, o in joined)
-        grp = [
-            (r, replace(o, classical=True) if classical else o)
-            for r, o in joined
-            if o.kind != "wire" or len(joined) == 1
-        ]
-        if not grp or all(o.kind == "wire" for _, o in grp):
-            continue  # a vertical wire with nothing on it in this column
-        rows = {r for r, _ in grp}
-        if len(rows) == 1 and len(grp) > 1 and not any(o.link for _, o in grp):
-            # several independent ops on one wire (\gate{H} \meter in one cell) in order
-            for r, o in grp:
-                txt, ok = describe_group([(r, o)], names)
-                items.append(txt if ok else f"unparsed: {o.kind} on {names.wire(r)}")
-                circ.n_items += 1
-                circ.n_unparsed += 0 if ok else 1
-            continue
-        txt, ok = describe_group(grp, names)
-        if ok and len(grp) == 1 and len(joined) > 1:
-            txt, ok = _wired_single(txt, joined, g, names)
-        circ.n_items += 1
-        if ok:
-            items.append(txt)
-        else:
-            circ.n_unparsed += 1
-            srcs = ", ".join(
-                f"{names.wire(r)}: {o.kind}{(' ' + o.label) if o.label else ''}" for r, o in grp
-            )
-            items.append(f"unparsed joined operation ({srcs})")
+        group_items, group_ops = _group_items(joined, g, names, circ)
+        items += group_items
+        ops += group_ops
     # text on a row that is not a wire (a caption, a layout row) is not "on a wire"
-    items += [
-        t
-        for r, o in col
-        if o.kind in _LOOSE and not (g.blank[r] and o.kind in ("text", "sep"))
-        if (t := _loose_item(r, o, names, circ))
-    ]
+    for r, o in col:
+        if o.kind in _LOOSE and not (g.blank[r] and o.kind in ("text", "sep")):
+            text, op = _loose_item(r, o, names, circ)
+            if op is not None:
+                items.append(text)
+                ops.append(op)
     if bad:
         circ.n_items += 1
         circ.n_unparsed += 1
         items.append("unparsed: a vertical wire or gate points outside the circuit")
-    return items
+        ops.append(GateOp("unparsed_outside"))
+    return items, ops
 
 
 def grid_circuit(body: str, kind: str) -> Circuit:
@@ -1171,6 +1385,7 @@ def grid_circuit(body: str, kind: str) -> Circuit:
         for c, ops in row.items():
             columns.setdefault(c, []).extend((r, o) for o in ops)
     part: list[str] = []
+    steps: list[tuple[GateOp, ...]] = []
     step = 0
     for c in sorted(columns):
         col = [
@@ -1184,15 +1399,19 @@ def grid_circuit(body: str, kind: str) -> Circuit:
             lab = next(o.label for _, o in col if o.kind == "sep")
             if part:
                 circ.parts.append(part)
+                circ.steps.append(steps)
             part = [f"[{lab}: the steps below draw the right-hand side, an equivalent circuit]"]
+            steps = [(GateOp("sep", lab),)]
             step = 0
             continue
-        items = _step_items(col, g, names, circ)
+        items, ops = _step_items(col, g, names, circ)
         if items:
             step += 1
             part.append(f"Step {step}: " + "; ".join(items))
+            steps.append(tuple(ops))
     if part:
         circ.parts.append(part)
+        circ.steps.append(steps)
     if not circ.parts:
         return Circuit(kind, "unparsed", "no operation found")
     _grade(circ)
@@ -1213,8 +1432,11 @@ _YQ_REGISTER = re.compile(
 )
 
 
-def _yq_register(m: re.Match[str], names: dict[str, int], circ: Circuit) -> bool:
-    """Declare the wires of a ``qubit`` or ``cbit`` statement; False when it is too large."""
+def _yq_register(
+    m: re.Match[str], names: dict[str, int], classical: set[int], circ: Circuit
+) -> bool:
+    """Declare the wires of a ``qubit`` or ``cbit`` statement; False when it is too large. The
+    wires of a ``cbit`` are added to ``classical``."""
     count = m.group("n")
     if count and len(count) > MAX_NUMBER:
         return False
@@ -1225,12 +1447,18 @@ def _yq_register(m: re.Match[str], names: dict[str, int], circ: Circuit) -> bool
     for k in range(n):
         nm = m.group("name") + (f"[{k}]" if n > 1 else "")
         names[nm] = len(names)
+        if m.group(1) == "cbit":
+            classical.add(names[nm])
         circ.wires.append(f"{len(names)} = {nm}" + (f" (in {lab})" if lab else ""))
     return True
 
 
-def _yq_operation(stmt: str, names: dict[str, int]) -> str | None:
-    """The step a gate statement makes, or None when it is not one the list knows."""
+def _yq_operation(
+    stmt: str, names: dict[str, int], classical: set[int]
+) -> tuple[str, GateOp] | None:
+    """The step a gate statement makes and its operation, or None when it is not one the list
+    knows. ``classical`` holds the wires that are classical at this statement (the ``cbit``
+    wires and the wires measured so far); a measurement adds its targets to it."""
     m = re.match(r"^(?P<g>[a-z]+)\s*", stmt)
     rest = stmt[m.end() :] if m else ""
     lab = ""
@@ -1246,6 +1474,8 @@ def _yq_operation(stmt: str, names: dict[str, int]) -> str | None:
     cs = [x for x in cs if not x.startswith("~")]
     if any(x not in names for x in (*tg, *cs, *open_cs)):
         return None
+    if not tg or (m.group("g") == "swap" and len(tg) != 2):
+        return None  # no target, or a swap of other than two wires
     wires = Names()
     tw = wires.wires([names[x] for x in tg]) if tg else ""
     cw = wires.wires([names[x] for x in cs]) if cs else ""
@@ -1255,48 +1485,76 @@ def _yq_operation(stmt: str, names: dict[str, int]) -> str | None:
         both = [f"control {cw}" if cs else "", f"open control {ow}" if open_cs else ""]
         ctrl = ": " + ", ".join(x for x in both if x) + f", target {tw}"
     cnot = _x_name(len(cs) + len(open_cs), bool(open_cs))
-    return _yq_text(m.group("g"), lab, ctrl, (tw, cnot))
+    numbers = (
+        tuple(sorted(names[x] + 1 for x in tg)),
+        tuple(sorted(names[x] + 1 for x in cs)),
+        tuple(sorted(names[x] + 1 for x in open_cs)),
+    )
+    controlled_by_result = any(names[x] in classical for x in (*cs, *open_cs))
+    step = _yq_text(m.group("g"), lab, ctrl, (tw, cnot), numbers, classical=controlled_by_result)
+    if step and m.group("g") == "measure":
+        classical.update(names[x] for x in tg)
+    return step
 
 
-def _yq_text(g: str, lab: str, ctrl: str, wires: tuple[str, str]) -> str | None:
-    """The words for gate ``g`` with the target wires and the name of a cnot with these controls
-    (``wires``) and the controls ``ctrl`` (": control .., target .." or empty); None for a gate the
-    list does not know."""
+def _yq_text(
+    g: str,
+    lab: str,
+    ctrl: str,
+    wires: tuple[str, str],
+    numbers: tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]],
+    *,
+    classical: bool,
+) -> tuple[str, GateOp] | None:
+    """The words and the operation for gate ``g`` with the target wires and the name of a cnot
+    with these controls (``wires``), the controls ``ctrl`` (": control .., target .." or empty) and
+    the wire numbers of the targets, controls and open controls, each top to bottom; ``classical``
+    when a control is a classical wire. None for a gate the list does not know."""
     tw, cnot = wires
+    targets, closed, opened = numbers
     if g in ("box", *YQ_GATES):
         gate = lab if g == "box" else YQ_GATES[g]
-        return f"controlled-{gate}{ctrl}" if ctrl else f"{gate} on {tw}"
+        text = f"controlled-{gate}{ctrl}" if ctrl else f"{gate} on {tw}"
+        return text, GateOp("gate", gate, targets, closed, opened, classical)
     if g == "cnot":
-        return f"{cnot}{ctrl}" if ctrl else f"X on {tw}"
+        text = f"{cnot}{ctrl}" if ctrl else f"X on {tw}"
+        return text, GateOp("x", "X", targets, closed, opened, classical)
     if g == "swap":
-        return f"SWAP {tw}" + (f" ({ctrl[2:]})" if ctrl else "")
+        text = f"SWAP {tw}" + (f" ({ctrl[2:]})" if ctrl else "")
+        return text, GateOp("swap", "", targets, closed, opened, classical)
     if g in ("measure", "barrier", "discard"):
-        return f"{g} {tw}"
+        return f"{g} {tw}", GateOp(g, "", targets, closed, opened, classical)
     return None
 
 
 def yquant_circuit(body: str) -> Circuit:
     circ = Circuit("yquant")
     names: dict[str, int] = {}
+    classical: set[int] = set()
     steps: list[str] = []
+    data: list[tuple[GateOp, ...]] = []
     unparsed = items = 0
     for stmt in [s.strip() for s in strip_comments(body).split(";") if s.strip()]:
         items += 1
         m = _YQ_REGISTER.match(stmt)
         if m:
-            if not _yq_register(m, names, circ):
+            if not _yq_register(m, names, classical, circ):
                 unparsed += 1
                 steps.append(f"unparsed: {_one_line(stmt)[:80]}")
+                data.append((GateOp("unparsed", source=_one_line(stmt)[:80]),))
             continue
-        step = _yq_operation(stmt, names)
+        step = _yq_operation(stmt, names, classical)
         if step is None:
             unparsed += 1
             steps.append(f"unparsed: {_one_line(stmt)[:80]}")
+            data.append((GateOp("unparsed", source=_one_line(stmt)[:80]),))
         else:
-            steps.append(step)
+            steps.append(step[0])
+            data.append((step[1],))
     if not steps:
         return Circuit("yquant", "unparsed", "no statement")
     circ.parts = [[f"Step {i + 1}: {s}" for i, s in enumerate(steps)]]
+    circ.steps = [data]
     circ.n_items, circ.n_unparsed = items, unparsed
     if unparsed:
         circ.status = "partial" if unparsed < len(steps) else "unparsed"
@@ -1363,11 +1621,24 @@ def find_circuits(src: str) -> list[tuple[str, str | None, str]]:
 
 @dataclass(frozen=True)
 class GateList:
-    """The gate list of one code block: ``text`` is empty when nothing could be read."""
+    """The gate list of one code block: ``text`` is empty when nothing could be read. ``circuits``
+    is the same reading as data, one :class:`CircuitSteps` per circuit found (``n_circuits`` of
+    them, those that could not be read included); it is built with the text, in memory only."""
 
     status: str  # "parsed": all circuits fully read; "partial": some part unread; "unparsed"
     text: str
     n_circuits: int = 0
+    circuits: tuple[CircuitSteps, ...] = ()
+
+
+def _steps_of(circ: Circuit) -> CircuitSteps:
+    """The data of ``circ``; a circuit that could not be read has no wires and no parts, as it
+    has no lines in the text."""
+    if circ.status == "unparsed":
+        return CircuitSteps(circ.kind, circ.status, circ.label, (), ())
+    return CircuitSteps(
+        circ.kind, circ.status, circ.label, tuple(circ.wires), tuple(tuple(p) for p in circ.steps)
+    )
 
 
 def gate_list(source: str) -> GateList:
@@ -1389,7 +1660,7 @@ def gate_list(source: str) -> GateList:
         status = "parsed"
     else:
         status = "unparsed" if statuses == {"unparsed"} else "partial"
-    return GateList(status, render(circs), len(circs))
+    return GateList(status, render(circs), len(circs), tuple(_steps_of(c) for c in circs))
 
 
 def _limited(lines: list[str]) -> list[str]:
