@@ -11,6 +11,8 @@ The guide links to the reference for each part instead of repeating it:
 | Every command and option | [packages/docingest/README.md](../packages/docingest/README.md#cli-overview) |
 | How the index works and what it stores | [packages/docingest-index/README.md](../packages/docingest-index/README.md) and [ADR 0004](../packages/docingest/docs/adr/0004-chunk-index-and-two-stage-retrieval.md) |
 
+If the three model servers already run on the machine you use, do steps 1 and 2 and skip step 3, then start at step 4; [Sharing a machine](#sharing-a-machine) shows how to check them.
+
 ## Contents
 
 - [1. Check the machine](#1-check-the-machine)
@@ -89,7 +91,7 @@ starting qwen-embed (qwen3-embedding-4b) on GPU 1 at http://127.0.0.1:8002 (pid 
 ready after 75 s
 ```
 
-The first start of each role also downloads its model, which makes it longer on a slow connection. The measured start times are in [First start](../serving/README.md#first-start): with the models already downloaded (and, for most of them, an empty compile cache), 75 to 125 s for `embed`, 80 to 100 s for `rerank` and 231 to 385 s for `llm`, so 6.5 to 10 minutes for the three. Check them:
+The first start of each role also downloads its model, which makes it longer on a slow connection. The measured start times are in [First start](../serving/README.md#first-start): with the models already downloaded (and, for most of them, an empty compile cache), 75 to 125 s for `embed`, 80 to 100 s for `rerank` and 231 to 385 s for `llm`, so 6.5 to 10 minutes for the three. Once the compile cache is filled by an earlier start, the same commands one after another took 50 s, 55 s and 160 s: all three ready after about 4 minutes (251 s). `llm` runs on the other GPU, so it can start while `embed` and `rerank` do; that took 166 s in total (put `serving/serve.sh llm start &` before the `embed` and `rerank` commands; the `ready after` figures are rounded up to a multiple of 5 s, so one can be above the total). Check them:
 
 ```bash
 serving/serve.sh embed status        # running (pid N, port 8002, model qwen3-embedding-4b)
@@ -102,7 +104,7 @@ The default GPUs are 2 for `llm` and 1 for `embed` and `rerank`. On a machine wi
 
 ## 4. Write your configuration
 
-[`lab-server.toml`](../packages/docingest/config/examples/lab-server.toml) already points at ports 8001 to 8003 and turns the index on. Copy it outside the repository and set two paths:
+[`lab-server.toml`](../packages/docingest/config/examples/lab-server.toml) already points at ports 8001 to 8003 and turns the index on. It also turns on the answer settings that the measurements in this guide use: `skip_summary = true` and `answer_max_sources = 10` in `[qa]` (the answer model reads the retrieved chunks themselves, equations included; see [Equations in answers](#equations-in-answers)). `whole_blocks` stays off, because it is optional. Copy it outside the repository and set two paths:
 
 ```bash
 cp packages/docingest/config/examples/lab-server.toml "$HOME/lab.toml"
@@ -184,19 +186,19 @@ Look at the rows `indexed`, `searchable`, `corpus` and `to add`. After a complet
 uv run docingest ask "What limits T1 in transmons?" -c "$CONFIG"
 ```
 
-`ask` checks the index first, embeds the question, takes the 50 best chunks (dense vectors plus BM25 for English questions and for questions with LaTeX), reranks them and gives the best 10 to PaperQA2, which summarizes them and writes the answer. The summaries are about 100 words each and lose most LaTeX; to let the answer model read the chunks themselves, equations included, set `skip_summary = true` and `answer_max_sources = 10` in `[qa]` (see [Equations in answers](#equations-in-answers)). The output is the answer with its sources cited inline as `(<doc id prefix> pages N-M)`, followed by a reference list with one entry per cited paper and its pages. `warning:` lines come first if the index is behind the corpus. `ask` prints no timings; measure it with `time`.
+`ask` checks the index first, embeds the question, takes the 50 best chunks (dense vectors plus BM25 for English questions and for questions with LaTeX), reranks them and gives the best 10 to PaperQA2, which writes the answer. With `skip_summary = true` and `answer_max_sources = 10` in `[qa]`, as the example configuration has them, the answer model reads the 10 chunks themselves, equations included. Without them (the default) PaperQA2 first summarizes each chunk in about 100 words, and the summaries lose most LaTeX (see [Equations in answers](#equations-in-answers)). The output is the answer with its sources cited inline as `(<doc id prefix> pages N-M)`, followed by a reference list with one entry per cited page range, so a paper cited for two ranges appears twice, and the same paper often appears two to four times in one answer. To read a cited page, see [Open a cited source](#open-a-cited-source). `warning:` lines come first if the index is behind the corpus. `ask` prints no timings; measure it with `time`.
 
 Before the answer you may also see lines that are harmless:
 
 - a `Loading weights` progress bar: the small CPU embedding model (`sentence-transformers/all-MiniLM-L6-v2`) of PaperQA2. Only `ask` without an index (or with `--no-index`) loads it; with the index, PaperQA2 gets the chunks as given and embeds nothing. It is fetched into `HF_HOME` the first time; `uv run docingest model-path embedding` fetches it ahead of time.
-- about a dozen lines `Failed to calculate cost for qwen-local`: litellm has no price for a local model.
+- `Failed to calculate cost for qwen-local` lines: litellm has no price for a local model. There is about one per summary request, so about a dozen per question with `skip_summary = false`, and one line with `skip_summary = true`.
 - on a driver that supports only CUDA 12 (such as 535), a torch `CUDA initialization: The NVIDIA driver on your system is too old` warning. The workspace's torch is a CUDA 13 build, and `ask` runs it on the CPU only. It is not related to the vLLM install.
 
 None of them affects the answer. Two options change one question: `--no-index` answers with PaperQA2's own retrieval, and `--bm25 english|always|never` overrides the keyword setting. See [Spanish questions](#spanish-questions) for when to use the second.
 
 ### Equations in answers
 
-PaperQA2 does not give the answer model the 10 chunks, it gives it a summary of about 100 words per chunk, and the summaries drop most LaTeX. For papers where the equations matter, add to the `[qa]` table of your configuration:
+By default PaperQA2 does not give the answer model the 10 chunks, it gives it a summary of about 100 words per chunk, and the summaries drop most LaTeX. For papers where the equations matter, set these keys in the `[qa]` table of your configuration. `lab-server.toml` already sets the first two:
 
 ```toml
 [qa]
@@ -213,7 +215,20 @@ A chunk can stop or start inside a display equation, a circuit code block or a t
 
 When the question names an equation number (`Eq. (2)`, `Equation 7`, `ecuación (4)`), `ask` also looks the number up in the papers it has already retrieved and adds the chunk that holds that `\tag{n}`, under a header such as `Equation (2) of paper <doc id prefix>, <title>:`, for the first two papers per number whose title shares at least four content words with the question (a question that does not name the paper in its words gets no added chunk) and at most four chunks, taking the places of the lowest-ranked chunks so the prompt keeps its size. It is made when the question is asked, with no setting and no rebuild. The details are in [config/README.md](../packages/docingest/config/README.md#equation-numbers-in-the-question).
 
-The key has no effect with `--no-index`: `ask` prints `warning: [qa] skip_summary applies to chunks from the index ...` and summarizes as before. It changes only the answer, so the corpus and the index stay valid.
+The key has no effect with `--no-index`: `ask` prints `warning: [qa] skip_summary applies to chunks from the index ...` and summarizes as before (with `lab-server.toml`, that is the warning you see for `ask --no-index`). It changes only the answer, so the corpus and the index stay valid.
+
+### Open a cited source
+
+The id in a citation, `(<doc id prefix> pages N-M)`, is the first 16 characters of the document's id: the name of its folder under `output_dir`, the same one `ingest` prints after `ok ->`. The pages are the page markers of its `document.md`. For a LaTeX paper the markers number its sections, not printed pages. With a made-up id:
+
+```bash
+ID=0123456789abcdef                                  # the 16 characters from the citation
+OUT=/path/to/work/normalized                         # your output_dir
+grep -m1 '^# ' "$OUT/$ID/document.md"                # the title
+sed -n '/^<!-- page 4 /,/^<!-- page 6 /p' "$OUT/$ID/document.md"    # pages 4 and 5; the line of page 6 ends the range
+```
+
+`$OUT/$ID/manifest.json` records where the paper came from (`source_name`, `title`, `metadata`) and, for each page, how its text was made (`method`). The reference list under the answer gives the same paper's title and authors.
 
 ## 8. Add papers later, and stop the servers
 
@@ -240,16 +255,17 @@ Each row says what it was measured with. The first block is the servers, the sec
 
 | Step | Time | Conditions |
 |---|---|---|
-| Start `embed` | 75 s and 125 s | models already downloaded; compile cache empty in the second run, not recorded for the lab run |
+| Start `embed`, `rerank`, `llm`, warm compile cache | 50 s, 55 s, 160 s (one after another: 251 s for the three); 55 s, 65 s, 170 s printed with `llm` started in parallel (166 s timed for the three) | models already downloaded, lab server |
+| Start `embed` | 75 s and 125 s | empty compile cache in the second run, not recorded for the lab run |
 | Start `rerank` | 80 s and 100 s | same |
 | Start `llm` | about 231 s and 385 s | models already downloaded, empty compile cache in both; CUDA graph capture and `torch.compile` |
-| Start `llm` with `LLM_EAGER=1` | about 90 s | no CUDA graphs; decoding about 3 times slower. A warm-cache start without eager mode was not timed |
+| Start `llm` with `LLM_EAGER=1` | about 90 s | no CUDA graphs; decoding about 3 times slower |
 | `index build`, first time | 200.3 s printed, 201.1 s with start-up | 100 papers, 9,404 chunks |
 | `index build`, nothing changed | 0.2 s printed, 0.90 s with start-up | same corpus |
 | `index build`, small corpus | 8.3 s printed, 9.4 s with start-up | 5 papers, 388 chunks |
 | `crawl --limit 5` with ingest | 32 s | 5 LaTeX sources, the 3 s spacing between requests included |
-| `ask`, the first question after the servers started | 52 s | 5 papers; includes loading the small MiniLM model (measured before the index path stopped loading it) |
-| `ask`, later questions | 30 to 35 s | 5 papers; about 7 s of it is program start-up (measured before the index path stopped loading the small MiniLM model) |
+| `ask`, one question per process | 19.0 to 24.9 s, mean 21.1 s | 9 math and circuit questions on 1,249 papers (119,564 chunks), `skip_summary = true`, `answer_max_sources = 10`, 10 chunks read; program start-up included; the first question after the servers started took 21.8 s, so there is no slow first question |
+| `index status` | 2.5 s | same corpus |
 | One question inside the evaluation harness | 18.5 s and 21.2 s (medians) | another corpus (QASPER) and the 9,404-chunk corpus; no CLI start-up, so not comparable with the rows above |
 
 The times of the commands depend on the papers and, for `crawl`, on arXiv.

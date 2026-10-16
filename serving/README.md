@@ -33,7 +33,7 @@ The defaults need two GPUs with 48 GB each: one for the answering model, one for
 | `embed` | 22,664 at `EMBED_GPU_MEM=0.45` | 8 GB | |
 | `rerank` | 21,608 at `RERANK_GPU_MEM=0.45` | 16 GB | |
 
-- **One GPU for the pair.** The embedder and the reranker together used 43,017 to 43,019 MiB (two runs). The answering model does not fit next to them on a 48 GB GPU. The GPU 1 figures (embed, rerank, pair) include about 650 MiB that another process held; it was not subtracted.
+- **One GPU for the pair.** The embedder and the reranker together used 43,017 to 43,019 MiB (two runs) and 44,635 MiB in a later run. The answering model does not fit next to them on a 48 GB GPU. The GPU 1 figures (embed, rerank, pair) include about 650 MiB that another process held; it was not subtracted.
 - **Smaller GPUs.** Lower the `*_GPU_MEM` fractions or pick a smaller model from `models.tsv`. No other size was measured.
 - **Disk.** The three models are about 44 GB. The vLLM environment ([below](#install-vllm)) is about 11 GB and the compile caches about 235 MB. uv keeps its own cache of the downloaded wheels; after the workspace and two vLLM installs it held about 21 GB (uv hard-links from it when it is on the same disk). Where each of these goes by default and how to move it is under [Configuration](#configuration).
 - **Software.** Linux with an NVIDIA driver and `nvidia-smi`, and a vLLM environment with Python 3.12.
@@ -91,15 +91,17 @@ serving/serve.sh rerank start
 serving/serve.sh llm start
 ```
 
-`start` returns when the server answers on `/health` and prints `ready after N s`. N is a multiple of 5 and can be up to 5 s above the real time. After 10 minutes `start` gives up waiting and prints the log path, but the server keeps running: follow the log and check with `status`. Times measured with the models already downloaded. The compile cache was empty in the second run and for the lab `llm` start; for the lab `embed` and `rerank` starts its state was not recorded:
+`start` returns when the server answers on `/health` and prints `ready after N s`. N is a multiple of 5 and can be up to 5 s above the real time. After 10 minutes `start` gives up waiting and prints the log path, but the server keeps running: follow the log and check with `status`. Times measured with the models already downloaded. The compile cache was empty in the second run and for the lab `llm` start; for the lab `embed` and `rerank` starts its state was not recorded. The last column is a later run on the lab server with the compile cache already filled by earlier starts, the three commands one after another:
 
-| Role | Lab run | Second run, fresh install |
-|---|---|---|
-| `embed` | 75 s | 125 s |
-| `rerank` | 80 s | 100 s |
-| `llm` | about 231 s | 385 s |
+| Role | Lab run | Second run, fresh install | Later run, warm cache |
+|---|---|---|---|
+| `embed` | 75 s | 125 s | 50 s |
+| `rerank` | 80 s | 100 s | 55 s |
+| `llm` | about 231 s | 385 s | 160 s |
 
-In the second run, `llm` spent 70 s in `torch.compile`, 105 s in the profiling warm-up and about 75 s in two CUDA graph captures. The compile results are kept in `SERVING_CACHE_DIR`, so later starts skip the compilation: `embed` started again with its cache present in 60 s. A warm-cache start of `llm` without eager mode was not timed. With `LLM_EAGER=1` (no CUDA graphs, no `torch.compile`) the start took about 90 s, but single-stream decoding was about 3 times slower. Download time comes on top of every time in the table.
+With the warm cache the three servers were ready after 251 s (4 min 11 s). `llm` uses the other GPU, so it can start at the same time as the `embed` and `rerank` commands (`serving/serve.sh llm start &`, then the other two). In one measurement with a warm cache the commands printed `ready after` 55 s (`embed`), 65 s (`rerank`) and 170 s (`llm`), and `time` gave 166 s until all three were ready, 85 s earlier; the printed figures are rounded up to a multiple of 5 s, so the largest can be above the total.
+
+In the second run, `llm` spent 70 s in `torch.compile`, 105 s in the profiling warm-up and about 75 s in two CUDA graph captures. The compile results are kept in `SERVING_CACHE_DIR`, so later starts skip the compilation: `embed` started again with its cache present in 60 s. The warm-cache start of `llm` without eager mode is the last column above. With `LLM_EAGER=1` (no CUDA graphs, no `torch.compile`) the start took about 90 s, but single-stream decoding was about 3 times slower. Download time comes on top of every time in the table.
 
 ## Configuration
 
