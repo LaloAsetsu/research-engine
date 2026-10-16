@@ -8,8 +8,10 @@ table in prose.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from numbers import Integral, Real
 from typing import Literal
 
 # --- Errors ------------------------------------------------------------------------------------
@@ -181,13 +183,92 @@ class Circuit:
         return Circuit(self.n_wires, tuple(op for op in self.ops if not op.is_measurement))
 
 
+def _is_int(value: object) -> bool:
+    return isinstance(value, Integral) and not isinstance(value, bool)
+
+
+def _is_finite_real(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an int too large for a float
+        return False
+
+
+def _short(value: object) -> str:
+    """``repr(value)`` cut to 40 characters, so a huge integer does not fill an error message."""
+    text = repr(value)
+    return text if len(text) <= 40 else text[:37] + "..."
+
+
+def check_params(name: str, params: Sequence[float]) -> None:
+    """Raise ``InvalidCircuitError`` unless ``params`` fit gate ``name`` (a key of ``GATES``).
+
+    The count must match the gate, every parameter must be a finite real number, and the ``rk``
+    parameter must be a positive integer of any size (a float with an integral value such as
+    ``3.0`` counts, since JSON does not tell them apart).
+    """
+    spec = GATES[name]
+    if len(params) != spec.n_params:
+        raise InvalidCircuitError(
+            f"gate {name!r} takes {spec.n_params} parameter(s), got {len(params)}"
+        )
+    for value in params:
+        if not (name == "rk" and _is_int(value)) and not _is_finite_real(value):
+            raise InvalidCircuitError(f"gate {name!r}: {_short(value)} is not a finite real number")
+    if name == "rk":
+        k = params[0]
+        if not (_is_int(k) or float(k).is_integer()) or k < 1:
+            raise InvalidCircuitError(f"gate 'rk' takes a positive integer k, got {_short(k)}")
+
+
+def _check_wires(op: Op, position: int, n_wires: int) -> None:
+    groups = (op.wires, op.controls, op.open_controls, op.classical_controls)
+    seen: set[int] = set()
+    for wire in (w for group in groups for w in group):
+        if not _is_int(wire) or not 1 <= wire <= n_wires:
+            raise InvalidCircuitError(
+                f"operation {position}: wire {wire!r} is not an integer from 1 to {n_wires}"
+            )
+        if wire in seen:
+            raise InvalidCircuitError(f"operation {position}: wire {wire} is used twice")
+        seen.add(wire)
+
+
+def _check_op(op: Op, position: int, n_wires: int) -> None:
+    """Everything about one op that does not depend on the other ops."""
+    if op.is_measurement:
+        if len(op.wires) != 1 or op.controls or op.open_controls or op.params:
+            raise InvalidCircuitError(
+                f"operation {position}: a measurement has one wire, no controls and no parameters"
+            )
+    elif not isinstance(op.gate, str) or op.gate not in GATES:
+        raise UnknownGateError(
+            f"operation {position}: unknown gate {op.gate!r} (names are exact and lowercase)"
+        )
+    else:
+        spec = GATES[op.gate]
+        if len(op.wires) != spec.n_targets:
+            raise InvalidCircuitError(
+                f"operation {position}: gate {op.gate!r} acts on {spec.n_targets} wire(s), "
+                f"got {len(op.wires)}"
+            )
+        try:
+            check_params(op.gate, op.params)
+        except InvalidCircuitError as error:
+            raise InvalidCircuitError(f"operation {position}: {error}") from None
+    _check_wires(op, position, n_wires)
+
+
 def validate(circuit: Circuit) -> None:
     """Raise if ``circuit`` cannot be simulated; return None if it can (size limits aside).
 
     Checks, from the description only:
 
-    - ``n_wires`` is an int of at least 1, and ``len(ops) <= MAX_OPS``
+    - ``circuit`` is a ``Circuit``, ``n_wires`` is an int of at least 1, and ``len(ops) <= MAX_OPS``
       (``InvalidCircuitError``, ``LimitExceededError``);
+    - every op is an ``Op`` (``InvalidCircuitError``);
     - each gate name is in ``GATES`` or is ``MEASURE`` (``UnknownGateError``);
     - each op has the gate's number of target wires and of parameters, every parameter is a
       finite real number, and the ``rk`` parameter is a positive integer
@@ -200,7 +281,34 @@ def validate(circuit: Circuit) -> None:
 
     The wire-count limits depend on what is asked for, so the engine checks them.
     """
-    raise NotImplementedError("quantum_sim.domain.validate is not built yet")
+    if not isinstance(circuit, Circuit):
+        raise InvalidCircuitError(f"expected a Circuit, got {type(circuit).__name__}")
+    if not _is_int(circuit.n_wires) or circuit.n_wires < 1:
+        raise InvalidCircuitError(f"a circuit needs at least 1 wire, got {circuit.n_wires!r}")
+    if len(circuit.ops) > MAX_OPS:
+        raise LimitExceededError(
+            f"{len(circuit.ops):,} operations; the limit is {MAX_OPS:,} per circuit"
+        )
+    measured: set[int] = set()
+    for position, op in enumerate(circuit.ops, start=1):
+        if not isinstance(op, Op):
+            raise InvalidCircuitError(
+                f"operation {position}: expected an Op, got {type(op).__name__}"
+            )
+        _check_op(op, position, circuit.n_wires)
+        if op.classical_controls:
+            raise UnsupportedOperationError(
+                f"operation {position}: classically controlled operations are not simulated "
+                "in version 1"
+            )
+        for wire in op.all_wires:
+            if wire in measured:
+                raise UnsupportedOperationError(
+                    f"operation {position}: wire {wire} is used after its measurement; version 1 "
+                    "measures at the end of a wire only"
+                )
+        if op.is_measurement:
+            measured.add(op.wires[0])
 
 
 # --- Results -----------------------------------------------------------------------------------
@@ -210,7 +318,8 @@ def validate(circuit: Circuit) -> None:
 class Equality:
     """The answer of ``engine.equal``. True in a boolean context when ``equal`` is.
 
-    ``phase`` is phi in (-pi, pi] with a ≈ e^{i phi} b, taken from the largest entry of b.
+    ``phase`` is phi in (-pi, pi] with a ≈ e^{i phi} b, taken from the largest entry of b (of the
+    first random state's image, for ``"random-states"``).
     ``max_deviation`` is max |a - e^{i phi} b| over the compared entries; ``equal`` is
     ``max_deviation < atol`` and ``exact`` is max |a - b| < atol. ``method`` says what was
     compared: the two arrays given, the two unitaries, or the images of ``RANDOM_STATES``

@@ -17,8 +17,6 @@ from quantum_sim import (
     validate,
 )
 
-pytestmark = pytest.mark.engine_pending
-
 
 def test_a_valid_circuit_passes():
     assert validate(circuit(3, op("h", 1), cx(1, 3), op("rzz", 2, 3, c=(1,), p=(0.2,)))) is None

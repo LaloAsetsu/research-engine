@@ -8,8 +8,6 @@ from circuits import circuit, cx, op
 
 from quantum_sim import MEASURE, Circuit, Op, UnsupportedOperationError, engine, validate
 
-pytestmark = pytest.mark.engine_pending
-
 
 def measure(wire: int) -> Op:
     return Op(MEASURE, (wire,))

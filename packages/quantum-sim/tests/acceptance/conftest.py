@@ -1,5 +1,5 @@
-"""``sim``: the same tests run on the naive builder (passes today, which checks the tests) and
-on the engine (``engine_pending`` until it is built)."""
+"""``sim``: the same tests run on the naive builder (which checks the tests) and
+on the engine."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -22,8 +22,6 @@ NAIVE = Simulator("naive", naive.literal, naive.unitary, naive.statevector)
 ENGINE = Simulator("engine", gates.matrix, engine.unitary, engine.statevector)
 
 
-@pytest.fixture(
-    params=[NAIVE, pytest.param(ENGINE, marks=pytest.mark.engine_pending)], ids=lambda s: s.name
-)
+@pytest.fixture(params=[NAIVE, ENGINE], ids=lambda s: s.name)
 def sim(request) -> Simulator:
     return request.param

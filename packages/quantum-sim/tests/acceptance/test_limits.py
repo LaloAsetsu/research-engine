@@ -13,8 +13,6 @@ from quantum_sim import (
     engine,
 )
 
-pytestmark = pytest.mark.engine_pending
-
 MiB = 2**20
 # A refusal must stay far below one statevector of 20 wires (16 MiB).
 BUDGET = 4 * MiB

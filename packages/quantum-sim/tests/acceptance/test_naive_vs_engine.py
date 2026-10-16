@@ -3,14 +3,11 @@ random targets, closed and open controls, random angles)."""
 
 import naive
 import numpy as np
-import pytest
 from circuits import random_circuits, random_states
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from quantum_sim import engine
-
-pytestmark = pytest.mark.engine_pending
 
 RANDOM = settings(max_examples=300, deadline=None)
 

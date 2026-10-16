@@ -33,9 +33,6 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "-ra"]
-markers = [
-    "engine_pending: needs code the engine change writes (gates, engine, domain.validate); a strict xfail that expects NotImplementedError until then (see tests/conftest.py)",
-]
 
 [tool.coverage.run]
 source = ["quantum_sim"]
@@ -45,7 +42,7 @@ branch = true
 show_missing = true
 fail_under = 85
 skip_covered = true
-exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]
+exclude_also = ["if TYPE_CHECKING:"]
 
 [tool.ruff]
 line-length = 100

@@ -128,14 +128,12 @@ def test_matrix_returns_a_new_array_each_call(sim):
     assert sim.matrix("x")[0, 0] == 0
 
 
-@pytest.mark.engine_pending
 @pytest.mark.parametrize("name", ["H", "cnot", "cx", "u3", "measure", "", "R_z"])
 def test_unknown_names_are_refused_not_guessed(name):
     with pytest.raises(UnknownGateError):
         gates.matrix(name, ())
 
 
-@pytest.mark.engine_pending
 @pytest.mark.parametrize(
     ("name", "params"),
     [

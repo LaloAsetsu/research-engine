@@ -9,8 +9,6 @@ from circuits import circuit, cx, cz, op
 
 from quantum_sim import Equality, InvalidCircuitError, engine
 
-pytestmark = pytest.mark.engine_pending
-
 THETA = 0.8
 
 
