@@ -17,7 +17,7 @@ from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .application.ask import AskService, EquationLookup, Retrieval
+from .application.ask import AskService, EquationLookup, Retrieval, WholeBlocks
 from .application.crawl import CrawlService
 from .application.index import IndexService
 from .application.ingest import IngestService, Log
@@ -229,6 +229,11 @@ class Container:
                 self.cfg.qa.chunk_chars, self.cfg.qa.overlap, self.cfg.qa.answer_max_sources
             )
             if self.cfg.qa.skip_summary
+            else None,
+            # and for the rest of a display equation, code block or table that a chunk cuts, which
+            # is also opt in
+            whole_blocks=WholeBlocks(self.cfg.qa.chunk_chars, self.cfg.qa.answer_max_sources)
+            if self.cfg.qa.skip_summary and self.cfg.qa.whole_blocks
             else None,
         )
 

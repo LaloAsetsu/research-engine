@@ -144,6 +144,34 @@ def test_skip_summary_is_not_in_any_cache_key(tmp_path):
     assert keys(True) == keys(False)
 
 
+def test_whole_blocks_defaults_to_false_and_parses_booleans():
+    assert AppConfig().qa.whole_blocks is False
+    assert _cfg(whole_blocks=True).qa.whole_blocks is True
+    assert load_config(DEFAULT_CONFIG).qa.whole_blocks is False
+    parsed = AppConfig.model_validate(tomllib.loads("[qa]\nwhole_blocks = true\n"))
+    assert parsed.qa.whole_blocks is True
+
+
+@pytest.mark.parametrize("value", ["maybe", 2, [True], {"on": 1}])
+def test_whole_blocks_rejects_what_is_not_a_boolean(value):
+    with pytest.raises(ValidationError, match="whole_blocks"):
+        _cfg(whole_blocks=value)
+
+
+def test_whole_blocks_is_not_in_any_cache_key(tmp_path):
+    # [qa] only changes question answering: the key of every kind is the one it had before the
+    # key existed, whatever its value, so a stored document stays a cache hit.
+    def keys(**qa: bool) -> list[str]:
+        cfg = AppConfig(output_dir=str(tmp_path / "out"), qa=qa)
+        container = Container(cfg, log=lambda _: None, overrides={"ocr": FakeOcr()})
+        return [container.ingest.config_hash(kind) for kind in SourceKind]
+
+    default = keys()
+    assert keys(whole_blocks=True) == default
+    assert keys(whole_blocks=True, skip_summary=True) == default
+    assert keys(whole_blocks=False) == default
+
+
 # ---------------------------------------------------------------- retitle_markdown
 
 

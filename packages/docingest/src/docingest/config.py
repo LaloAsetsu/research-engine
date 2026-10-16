@@ -98,6 +98,10 @@ class QaConfig(BaseModel):
     # answer model reads the summaries. True: it reads the chunks as retrieved, in retrieval order.
     # Applies to chunks given by the index, not to PaperQA2's own retrieval.
     skip_summary: bool = False
+    # True: with skip_summary, a display equation, code block or table that a retrieved chunk cuts
+    # is completed from the paper at answer time. Off by default, and without effect while
+    # skip_summary is false.
+    whole_blocks: bool = False
     max_concurrent_requests: int = 2
     temperature: float = 0.0  # sent on every LLM request: the same question gets the same answer
 

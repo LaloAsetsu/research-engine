@@ -36,6 +36,7 @@ llm_base = "http://127.0.0.1:8001/v1"
 evidence_k = 10
 skip_summary = false                 # true: the answer model reads the retrieved chunks, equations, circuit gate lists and the chunk of a named equation number included
 # answer_max_sources = 10            # with skip_summary = true: read all [index] contexts, not the default 3
+# whole_blocks = true                # with skip_summary = true: complete the equation, circuit or table that a chunk cuts
 max_concurrent_requests = 10
 temperature = 0.0
 

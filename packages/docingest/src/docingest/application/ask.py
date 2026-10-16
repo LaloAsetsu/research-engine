@@ -14,8 +14,11 @@ two stages and handed over as ``contexts``:
    evidence in the measurements.
 
 The answerer then summarizes exactly those chunks and writes the cited answer. When the answerer
-reads the chunks as they are (``circuit_lists``, set from ``[qa] skip_summary``), each circuit
-code block in a chunk gets its gate list as a paragraph right after it first (see
+reads the chunks as they are (``circuit_lists``, set from ``[qa] skip_summary``) and
+``[qa] whole_blocks`` is on (``whole_blocks``, off by default), the chunks are completed first: a
+chunk that starts or stops inside a display equation, a code block or a table gets the rest of
+that block, and the caption that follows it, from the paper's text (see ``domain.blocks``). Then
+each circuit code block in a chunk gets its gate list as a paragraph right after it (see
 ``domain.circuits``): the chunks themselves, the index and the stored Markdown are not changed.
 In the same case (``equation_lookup``), a question that names an equation number ("Eq. (2)") is
 given the chunk of each of the first papers among the retrieved ones that holds that number,
@@ -25,10 +28,12 @@ paper, and no search can weigh a number that every paper has.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
+from ..domain.blocks import Kind, complete, partial_note, whole_blocks
 from ..domain.chunking import NAME_LENGTH, PAGE_BREAK, Chunk
 from ..domain.circuits import CodeBlock, add_gate_lists, circuit_code_blocks
 from ..domain.equations import (
@@ -63,6 +68,10 @@ BUILD_HINT = "run `docingest index build`"
 # prompt that a reader of two numbers (two each) can use before they crowd out the evidence.
 MAX_PER_NUMBER = 2
 MAX_ADDED = 4
+# A cut block is completed whole when it, with its caption, is at most this many chunks long.
+# 99.6% of the 40,609 blocks of 1,249 papers are within three chunks; the rest is a very long
+# equation or table, whose remaining text would crowd out the other chunks of the prompt.
+BLOCK_CHUNKS = 3
 
 
 @dataclass(frozen=True)
@@ -97,6 +106,16 @@ class EquationLookup:
     sources: int  # [qa] answer_max_sources: the chunks the answer prompt carries at most
 
 
+@dataclass(frozen=True)
+class WholeBlocks:
+    """What the completion of cut blocks needs to bound itself and to know which chunks the
+    answer prompt carries."""
+
+    chunk_chars: int  # [qa] chunk_chars: the caption of a block is at most this long, a block
+    # is completed up to ``BLOCK_CHUNKS`` times this
+    sources: int  # [qa] answer_max_sources: only these first chunks are completed
+
+
 class AskService:
     def __init__(
         self,
@@ -106,18 +125,22 @@ class AskService:
         retrieval: Callable[[], Retrieval] | None = None,
         circuit_lists: bool = False,
         equation_lookup: EquationLookup | None = None,
+        whole_blocks: WholeBlocks | None = None,
     ):
         """``retrieval`` is called only for a question that uses the index, so a configuration
         problem with it does not stop one that does not (``use_index=False``).
         ``circuit_lists`` adds a gate list after each circuit code block of the retrieved chunks;
         it is for an answerer that reads the chunks as they are (``[qa] skip_summary``), as a
         summary would not keep the list. ``equation_lookup`` adds the chunk of an equation number
-        that the question names (see ``with_equation_lookup``); it is for the same answerer."""
+        that the question names (see ``with_equation_lookup``); it is for the same answerer, and
+        so is ``whole_blocks``, which completes the display equations, code blocks and tables
+        that a chunk cuts (see ``with_whole_blocks``) and is also opt in (``[qa] whole_blocks``)."""
         self.store = store
         self.qa = qa
         self._retrieval = retrieval
         self._circuit_lists = circuit_lists
         self._equation_lookup = equation_lookup
+        self._whole_blocks = whole_blocks
 
     @property
     def has_index(self) -> bool:
@@ -151,15 +174,29 @@ class AskService:
         finally:
             retrieval.index.close()
         labels: Labels = {}
+        notes: Notes = {}
+        if self._whole_blocks is not None:  # first: the lookup sees the completed chunks
+            contexts, notes = with_whole_blocks(
+                contexts, sources, self.store, warn, blocks=self._whole_blocks
+            )
         if self._equation_lookup is not None:
             contexts, labels = with_equation_lookup(
-                contexts, sources, question, self.store, warn, lookup=self._equation_lookup
+                contexts,
+                sources,
+                question,
+                self.store,
+                warn,
+                lookup=self._equation_lookup,
+                completed=self._whole_blocks is not None,
             )
             kept = {c.doc_id for c in contexts}
             sources = [d for d in sources if d.manifest.doc_id in kept]
         if self._circuit_lists:
             contexts = with_gate_lists(contexts, sources, self.store, warn)
-        if labels:  # last: a header moves the text, and the gate lists read it by offset
+        # last: a note and a header move the text, and the gate lists read it by offset
+        if notes:
+            contexts = with_block_notes(contexts, notes)
+        if labels:
             contexts = with_equation_headers(contexts, labels, sources)
         # The answerer needs only the manifests of the papers the chunks come from.
         return await self.qa.ask(question, [(d, "") for d in sources], warn, contexts=contexts)
@@ -205,6 +242,123 @@ def retrieve(
     for chunk in top:
         seen.setdefault(chunk.doc_id, by_id[chunk.doc_id])
     return top, list(seen.values())
+
+
+Notes = dict[
+    tuple[str, int], tuple[Kind, ...]
+]  # (doc id, chunk start) to the blocks it shows part of
+
+
+def with_whole_blocks(
+    contexts: list[Chunk],
+    sources: list[StoredDocument],
+    store: DocumentStore,
+    warn: Callable[[str], None],
+    *,
+    blocks: WholeBlocks,
+) -> tuple[list[Chunk], Notes]:
+    """``contexts`` with each display equation, code block and table that a chunk starts or
+    stops inside completed from the paper's text, and the notes for ``with_block_notes``.
+
+    Only the chunks the answer prompt carries (the first ``blocks.sources``) are looked at, and
+    a paper's Markdown is read once, when its first chunk comes. A cut block is read with the
+    caption that follows it (see ``domain.blocks``) and the chunk is extended to the block's start
+    or end, as far as no other chunk of the prompt holds the text already: an overlap that two
+    neighbouring chunks share is never added to either, and the best ranked of two chunks next
+    to the missing text takes it (``domain.blocks.complete``). A block with its caption of more
+    than ``BLOCK_CHUNKS`` chunks is completed without the caption, and one longer than that is
+    left as it is; the chunks that hold part of it get a note. The chunks keep their order, and
+    an extended chunk keeps what it was (its text is the paper's text at its new offsets, its
+    pages and name follow the pages it now spans). A chunk whose text is not the paper's text at
+    its offset (the index may be older than the Markdown) is left alone and holds nothing.
+
+    Like the gate lists this never stops an answer: if anything fails for a paper or a chunk the
+    chunks stay as they are and ``warn`` is called once for that paper."""
+    window = contexts[: max(1, blocks.sources)]
+    by_id = {d.manifest.doc_id: d for d in sources}
+    papers: dict[str, list[int]] = {}  # the places of the window, by paper
+    for i, chunk in enumerate(window):
+        if chunk.doc_id in by_id:
+            papers.setdefault(chunk.doc_id, []).append(i)
+    out = list(contexts)
+    notes: Notes = {}
+    for doc_id, places in papers.items():
+        try:
+            pages = split_pages(store.markdown(by_id[doc_id]))
+            document = "".join(text + PAGE_BREAK for text in pages.values())
+            held = [i for i in places if _is_text_at(document, out[i])]
+            plans = complete(
+                [(out[i].start, out[i].start + len(out[i].text)) for i in held],
+                whole_blocks(document, caption_max=blocks.chunk_chars),
+                limit=BLOCK_CHUNKS * blocks.chunk_chars,
+            )
+            page_starts = _page_starts(pages)
+        except Exception as e:
+            warn(f"whole blocks skipped for {doc_id[:NAME_LENGTH]}: {e}")
+            continue
+        warned = False
+        for i, plan in zip(held, plans, strict=True):
+            chunk = out[i]
+            try:
+                if (plan.start, plan.stop) != (chunk.start, chunk.start + len(chunk.text)):
+                    chunk = _extended(chunk, document, plan.start, plan.stop, page_starts)
+                    out[i] = chunk
+                if plan.partial:
+                    notes[(doc_id, chunk.start)] = plan.partial
+            except Exception as e:
+                if not warned:
+                    warned = True
+                    warn(f"whole blocks skipped for {doc_id[:NAME_LENGTH]}: {e}")
+    return out, notes
+
+
+def _is_text_at(document: str, chunk: Chunk) -> bool:
+    """Whether ``chunk`` is the paper's text at its offset."""
+    return document[chunk.start : chunk.start + len(chunk.text)] == chunk.text
+
+
+def _page_starts(pages: dict[int, str]) -> list[tuple[int, int]]:
+    """``(offset, page number)`` of each page in the pages joined as the chunker joins them."""
+    starts, at = [], 0
+    for number, text in pages.items():
+        starts.append((at, number))
+        at += len(text) + len(PAGE_BREAK)
+    return starts
+
+
+def _extended(
+    chunk: Chunk, document: str, start: int, stop: int, page_starts: list[tuple[int, int]]
+) -> Chunk:
+    """``chunk`` as the paper's text from ``start`` to ``stop``, with the pages it now spans."""
+    offsets = [offset for offset, _ in page_starts]
+
+    def page_at(offset: int) -> int:
+        return page_starts[max(0, bisect_right(offsets, offset) - 1)][1]
+
+    first = min(chunk.first_page, page_at(start))
+    last = max(chunk.last_page, page_at(stop - 1))
+    name = chunk.name
+    if (first, last) != (chunk.first_page, chunk.last_page):
+        name = f"{chunk.doc_id[:NAME_LENGTH]} pages {first}-{last}"
+    return replace(
+        chunk,
+        name=name,
+        text=document[start:stop],
+        first_page=first,
+        last_page=last,
+        start=start,
+    )
+
+
+def with_block_notes(contexts: list[Chunk], notes: Notes) -> list[Chunk]:
+    """``contexts`` with the note of ``domain.blocks.partial_note`` and a blank line before the
+    text of each chunk in ``notes``. Only ``text`` changes."""
+    return [
+        replace(c, text=f"{partial_note(notes[key])}\n\n{c.text}")
+        if (key := (c.doc_id, c.start)) in notes
+        else c
+        for c in contexts
+    ]
 
 
 def with_gate_lists(
@@ -268,6 +422,7 @@ def with_equation_lookup(
     warn: Callable[[str], None],
     *,
     lookup: EquationLookup,
+    completed: bool = False,
 ) -> tuple[list[Chunk], Labels]:
     """``contexts`` with the chunk that holds each equation number the question names, and the
     labels for ``with_equation_headers``.
@@ -289,8 +444,10 @@ def with_equation_lookup(
     once those are full: never the best one, never one that is labelled, and a chunk whose paper
     keeps another chunk before one that is the only chunk of its paper (a paper leaves the
     prompt only when nothing else can give a place). Where that leaves no place, the later picks
-    are not added. A chunk with an old text at the offset of an added chunk is replaced by it.
-    Chunks beyond the prompt stay as they are.
+    are not added. A chunk with an old text at the offset of an added chunk is replaced by it,
+    except, with ``completed``, one whose text only goes on after the added chunk's text (a
+    chunk that ``with_whole_blocks`` completed at its end). Chunks beyond the prompt stay as
+    they are.
 
     Like the gate lists this never stops an answer: if anything fails for a paper (its Markdown
     cannot be read) nothing is added for it and ``warn`` is called once for that paper."""
@@ -301,7 +458,7 @@ def with_equation_lookup(
     window = contexts[:capacity]
     by_id = {d.manifest.doc_id: d for d in sources}
     papers = _Papers(by_id, numbers, question, store, warn=warn, lookup=lookup)
-    picked, labels = _pick_equations(numbers, window, papers)
+    picked, labels = _pick_equations(numbers, window, papers, completed)
     # the largest number of picks that has places: the free ones, the places of the chunks that
     # an added chunk replaces at its own offset, and the lowest ranked ones that may go
     keep, stale, victims = len(picked), set(), []
@@ -443,7 +600,7 @@ class _Papers:
 
 
 def _pick_equations(
-    numbers: list[str], window: list[Chunk], papers: _Papers
+    numbers: list[str], window: list[Chunk], papers: _Papers, completed: bool
 ) -> tuple[list[tuple[str, Chunk]], Labels]:
     """The chunks to add, best pick first, as ``(doc id, chunk)``, and the labels of every chunk
     that gets a header: the added ones and the ones of ``window`` that hold the equation."""
@@ -477,9 +634,13 @@ def _pick_equations(
                 key = (doc_id, there.start if there else chunk.start)
                 if there is None and key not in added:
                     twin = next((c for c in window if (c.doc_id, c.start) == key), None)
-                    if (
-                        twin is None or twin.text != chunk.text
-                    ):  # a twin with an old text is replaced
+                    # a twin with an old text is replaced; with completed blocks, one that only
+                    # goes on after the chunk's text (a block completed at its end) is the same
+                    if twin is None or (
+                        not twin.text.startswith(chunk.text)
+                        if completed
+                        else twin.text != chunk.text
+                    ):
                         if len(picked) >= MAX_ADDED:
                             break
                         picked.append((doc_id, chunk))
