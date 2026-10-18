@@ -61,13 +61,30 @@ class LabelError(QuantumSimError, ValueError):
         self.ambiguous = ambiguous
 
 
+class RefusedError(QuantumSimError):
+    """A circuit/1 document cannot be turned into a circuit. ``reasons`` lists everything that
+    stopped it (at most ``MAX_REASONS``), each with its place in the document."""
+
+    def __init__(self, reasons: Sequence[str]) -> None:
+        self.reasons = tuple(reasons)
+        super().__init__("; ".join(self.reasons))
+
+
 # --- Limits ------------------------------------------------------------------------------------
 
 MAX_STATEVECTOR_WIRES = 20  # 16 MiB of complex128
 MAX_UNITARY_WIRES = 10  # 16 MiB of complex128
 MAX_OPS = 10_000
 RANDOM_STATES = 8  # states used by `equal` for 11 to 20 wires
+MAX_REASONS = 25  # reasons listed in one refusal; the rest are counted
 ATOL = 1e-9  # tolerance of `equal` and of the input-state norm
+
+
+def short_text(value: object, limit: int = 40) -> str:
+    """``value`` as text, cut to ``limit`` characters (a number in a message can be 4000 digits)."""
+    text = str(value)
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
 
 # --- Gate table --------------------------------------------------------------------------------
 

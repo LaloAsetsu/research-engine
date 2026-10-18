@@ -72,22 +72,24 @@ include_external_packages = true
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Layers: entrypoints, engine and labels, gates and angles, domain; a module imports only the layers below it"
+name = "Layers: entrypoints, formats, engine and labels, gates and angles, domain; a module imports only the layers below it"
 type = "layers"
 layers = [
     "quantum_sim.entrypoints",
+    "quantum_sim.formats",
     "quantum_sim.engine | quantum_sim.labels",
     "quantum_sim.gates | quantum_sim.angles",
     "quantum_sim.domain",
 ]
 
 [[tool.importlinter.contracts]]
-name = "The domain, the angle parser and the label resolver are the standard library only"
+name = "The domain, the angle parser, the label resolver and the formats are the standard library only"
 type = "forbidden"
 source_modules = [
     "quantum_sim.domain",
     "quantum_sim.angles",
     "quantum_sim.labels",
+    "quantum_sim.formats",
 ]
 forbidden_modules = ["numpy"]
 

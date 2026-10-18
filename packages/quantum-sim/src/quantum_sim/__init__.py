@@ -12,6 +12,7 @@ from quantum_sim.domain import (
     CONVENTIONS,
     GATES,
     MAX_OPS,
+    MAX_REASONS,
     MAX_STATEVECTOR_WIRES,
     MAX_UNITARY_WIRES,
     MEASURE,
@@ -26,20 +27,31 @@ from quantum_sim.domain import (
     LimitExceededError,
     Op,
     QuantumSimError,
+    RefusedError,
     UnknownGateError,
     UnsupportedOperationError,
     validate,
 )
 from quantum_sim.engine import equal, probabilities, statevector, unitary
+from quantum_sim.formats import (
+    CIRCUIT_FORMAT,
+    ParametricCircuit,
+    ParametricOp,
+    Reading,
+    from_gate_list,
+    to_gate_list,
+)
 from quantum_sim.labels import ResolvedLabel, label_of, resolve_label
 
 __version__ = version("quantum-sim")
 
 __all__ = [
     "ATOL",
+    "CIRCUIT_FORMAT",
     "CONVENTIONS",
     "GATES",
     "MAX_OPS",
+    "MAX_REASONS",
     "MAX_STATEVECTOR_WIRES",
     "MAX_UNITARY_WIRES",
     "MEASURE",
@@ -54,17 +66,23 @@ __all__ = [
     "LabelError",
     "LimitExceededError",
     "Op",
+    "ParametricCircuit",
+    "ParametricOp",
     "QuantumSimError",
+    "Reading",
+    "RefusedError",
     "ResolvedLabel",
     "UnknownGateError",
     "UnsupportedOperationError",
     "__version__",
     "equal",
+    "from_gate_list",
     "label_of",
     "parse_angle",
     "probabilities",
     "resolve_label",
     "statevector",
+    "to_gate_list",
     "unitary",
     "validate",
 ]
