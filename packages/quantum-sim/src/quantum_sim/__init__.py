@@ -7,6 +7,7 @@ are numbered from 1, and results are compared up to global phase. See ``docs/con
 from importlib.metadata import version
 
 from quantum_sim.angles import Angle, parse_angle
+from quantum_sim.api import RESULT_FORMAT, check, refusal, run
 from quantum_sim.domain import (
     ATOL,
     CONVENTIONS,
@@ -56,6 +57,7 @@ __all__ = [
     "MAX_UNITARY_WIRES",
     "MEASURE",
     "RANDOM_STATES",
+    "RESULT_FORMAT",
     "Angle",
     "AngleError",
     "Circuit",
@@ -75,12 +77,15 @@ __all__ = [
     "UnknownGateError",
     "UnsupportedOperationError",
     "__version__",
+    "check",
     "equal",
     "from_gate_list",
     "label_of",
     "parse_angle",
     "probabilities",
+    "refusal",
     "resolve_label",
+    "run",
     "statevector",
     "to_gate_list",
     "unitary",

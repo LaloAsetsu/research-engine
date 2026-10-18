@@ -72,10 +72,11 @@ include_external_packages = true
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Layers: entrypoints, formats, engine and labels, gates and angles, domain; a module imports only the layers below it"
+name = "Layers: entrypoints, api, formats, engine and labels, gates and angles, domain; a module imports only the layers below it"
 type = "layers"
 layers = [
     "quantum_sim.entrypoints",
+    "quantum_sim.api",
     "quantum_sim.formats",
     "quantum_sim.engine | quantum_sim.labels",
     "quantum_sim.gates | quantum_sim.angles",
