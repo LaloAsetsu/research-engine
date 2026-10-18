@@ -151,8 +151,8 @@ CASES = {
         quantikz("& \\gate[wires=3][2cm]{V} & \\qw", "& & \\qw", "& & \\qw"),
         ["Wires: 1; 2; 3", "Step 1: V on wires 1, 2 and 3 (one gate on these wires)"],
     ),
-    "gate with a count and nwires": (
-        quantikz("& \\gate[4, nwires=3]{W} & \\qw", "& & \\qw", "& & \\qw", "& & \\qw"),
+    "gate with a count and a width": (
+        quantikz("& \\gate[wires=4][2cm]{W} & \\qw", "& & \\qw", "& & \\qw", "& & \\qw"),
         ["Wires: 1; 2; 3; 4", "Step 1: W on wires 1, 2, 3 and 4 (one gate on these wires)"],
     ),
     "measurements of three kinds": (
@@ -178,8 +178,59 @@ CASES = {
         ],
     ),
     "a second lstick further right is text there": (
+        quantikz("\\lstick{a} & \\gate{H} & \\lstick{\\ket{0}}", "\\lstick{c} & \\gate{X} & \\qw"),
+        [
+            "Wires: 1 = a; 2 = c",
+            "Step 1: H on wire 1; X on wire 2",
+            "Step 2: text \\ket{0} on wire 1",
+        ],
+    ),
+    "a second lstick that is not a ket is unparsed there": (
         quantikz("\\lstick{a} & \\gate{H} & \\lstick{b}", "\\lstick{c} & \\gate{X} & \\qw"),
-        ["Wires: 1 = a; 2 = c", "Step 1: H on wire 1; X on wire 2", "Step 2: text b on wire 1"],
+        [
+            "Wires: 1 = a; 2 = c",
+            "Step 1: H on wire 1; X on wire 2",
+            "Step 2: unparsed on wire 1: \\lstick{b}",
+        ],
+    ),
+    "a first lstick after drawn content is text there, not the legend": (
+        quantikz("\\lstick{a} & \\gate{H} & \\qw", "& \\gate{X} & \\lstick{\\ket{1}}"),
+        [
+            "Wires: 1 = a; 2",
+            "Step 1: H on wire 1; X on wire 2",
+            "Step 2: text \\ket{1} on wire 2",
+        ],
+    ),
+    "an lstick after an empty cell is still the legend": (
+        quantikz("\\lstick{a} & \\gate{H} & \\qw", "& \\lstick{c} & \\gate{X}"),
+        ["Wires: 1 = a; 2 = c", "Step 1: H on wire 1", "Step 2: X on wire 2"],
+    ),
+    "an lstick under a box from the row above is text there": (
+        quantikz(
+            "\\lstick{a} & \\gate{X} & \\gate[2]{\\mathrm{SWAP}} & \\qw",
+            "& & & \\lstick{\\ket{0}}",
+        ),
+        [
+            "Wires: 1 = a; 2",
+            "Step 1: X on wire 1",
+            "Step 2: \\mathrm{SWAP} on wires 1 and 2 (one gate on these wires)",
+            "Step 3: text \\ket{0} on wire 2",
+        ],
+    ),
+    "an lstick in the cell under a box is text there": (
+        quantikz("\\lstick{a} & \\gate[wires=2]{U} & \\qw", "& \\lstick{\\ket{0}} & \\qw"),
+        [
+            "Wires: 1 = a; 2",
+            "Step 1: U on wires 1 and 2 (one gate on these wires); text \\ket{0} on wire 2",
+        ],
+    ),
+    "an lstick in the cell of a gate is text there": (
+        quantikz("\\lstick{a} & & \\ctrl{1} & \\qw", "& & \\targ{} \\lstick{\\ket{0}} & \\qw"),
+        ["Wires: 1 = a; 2", "Step 1: CNOT: control wire 1, target wire 2; text \\ket{0} on wire 2"],
+    ),
+    "an lstick left of a box from the row above is still the legend": (
+        quantikz("\\lstick{a} & & \\gate[2]{U} & \\qw", "\\lstick{b} & \\qw & & \\qw"),
+        ["Wires: 1 = a; 2 = b", "Step 1: U on wires 1 and 2 (one gate on these wires)"],
     ),
     "bundle and output labels": (
         quantikz(
@@ -224,13 +275,13 @@ CASES = {
     ),
     "a gate classically controlled by an earlier measurement": (
         qcircuit(
-            "\\lstick{a} & \\meter & \\control \\cw \\cwx[1] & \\cw",
-            "\\lstick{b} & \\qw & \\gate{X} & \\qw",
+            "\\lstick{a} & \\meter & \\cw & \\cw",
+            "\\lstick{b} & \\qw & \\gate{X} \\cwx[-1] & \\qw",
         ),
         [
             "Wires: 1 = a; 2 = b",
             "Step 1: measure wire 1",
-            "Step 2: controlled-X (classically controlled): control wire 1, target wire 2",
+            "Step 2: X on wire 2, classically controlled by wire 1",
         ],
     ),
     "comments are not read": (
@@ -319,8 +370,12 @@ CASES = {
         ),
         ["Wires: 1 = a; 2 = b; 3 = c", "Step 1: H on wire 1; X on wire 3"],
     ),
-    "a Qcircuit row of text only is not a wire": (
+    "a Qcircuit row of text only is not a wire, and its text is unparsed": (
         qcircuit("& \\gate{H} & \\qw", "& \\raisebox{0pt}{\\text{a}} &", "& \\gate{X} & \\qw"),
+        ["Wires: 1; 2", "Step 1: H on wire 1; X on wire 2; unparsed on no wire: \\text{a}"],
+    ),
+    "a Qcircuit row of spacing only is not a wire and says nothing": (
+        qcircuit("& \\gate{H} & \\qw", "& \\hspace{1em} &", "& \\gate{X} & \\qw"),
         ["Wires: 1; 2", "Step 1: H on wire 1; X on wire 2"],
     ),
     "a Qcircuit row of barriers and text only is not a wire": (
@@ -328,7 +383,7 @@ CASES = {
             "& t\\in[0,1] \\barrier[-1em]{1} &",
             "\\lstick{a} & \\gate{H} & \\qw",
         ),
-        ["Wires: 1 = a", "Step 1: H on wire 1; barrier"],
+        ["Wires: 1 = a", "Step 1: H on wire 1; unparsed on no wire: t \\in[0,1]; barrier"],
     ),
     "midstick equals splits the circuit in two": (
         quantikz(
@@ -452,8 +507,8 @@ CASES = {
             "Step 1: measure wires 1, 2 and 3 (one measurement over these wires); H on wire 4",
         ],
     ),
-    "a measurement style option is not a span": (
-        quantikz("& \\meter[fill=red]{} & \\qw"),
+    "a measurement count option is a span of one": (
+        quantikz("& \\meter[wires=1]{} & \\qw"),
         ["Wires: 1", "Step 1: measure wire 1"],
     ),
     "a measurement box over wires whose result controls a gate": (
@@ -539,6 +594,693 @@ def test_an_arrow_in_a_tikzcd_circuit_is_unparsed_and_the_rest_is_read():
     source = "\\begin{tikzcd}\n\\lstick{a} & \\gate{H} \\ar[r] & \\qw\n\\end{tikzcd}"
     assert lines(source) == ["Wires: 1 = a", "Step 1: H on wire 1; unparsed on wire 1: \\ar[r]"]
     assert gate_list(source).status == "partial"
+
+
+LADDER_MARKS = [
+    '\\wire[l][1]["\\ddots"{below,pos=0.1}]{a}',
+    '\\wire[r][1]["\\iddots"]{a}',
+    '\\wire[l][2]["\\cdots"]{a}',
+    '\\wire[l][1]["\\vdots"]{a}',
+    '\\wire[r][1]["\\ldots"]{a}',
+    '\\wire[l][1]["\\dots"]{a}',
+    "\\wire[l][1]{\\ddots}",
+    "\\wire[d][1]{\\vdots}",
+    '\\wire[u][2]["$\\cdots$"]{c}',
+]
+# other spellings of a row of dots, and labels that are not a wire name at all
+OTHER_MARKS = [
+    '\\wire[l][1]["..."]{a}',
+    '\\wire[l][1]["\u2026"]{a}',
+    '\\wire[l][1]["\\cdot\\cdot\\cdot"]{a}',
+    '\\wire[l][1]["\\dotsc"]{a}',
+    '\\wire[l][1]["\\dotsm"]{a}',
+    '\\wire[l][1]["\\dotso"]{a}',
+    '\\wire[l][1]["\\textellipsis"]{a}',
+    '\\wire[l][1]["\\mathellipsis"]{a}',
+    '\\wire[l][1]["\\udots"]{a}',
+    '\\wire[l][1]["\\adots"]{a}',
+    '\\wire[l][1]["\\rvdots"]{a}',
+    '\\wire[l][1]["\\Ddots"]{a}',
+    '\\wire[l][1]["\\vdotswithin{}"]{a}',
+    '\\wire[l][1]["\\hdots"{above}]{a}',
+    '\\wire[l][1]["\\dotsb"]{a}',
+    '\\wire[l][1]["$\\ddots$"]{a}',
+    '\\wire[l][1]["\\reflectbox{$\\ddots$}"]{a}',
+    '\\wire[l][1]["\\text{...}"]{a}',
+    '\\wire[l][1]["a" label={\\ddots}]{a}',
+    '\\wire[l][1]["a"{label=\\ddots}]{a}',
+    '\\wire[l][1]["a", "\\ddots"]{a}',
+    "\\wire[l][1][\\ddots]{a}",
+    '\\wire[l][1]["a"][\\ddots]{a}',
+    "\\wire[l][\\ddots]{a}",
+    '\\wire[l][1]["\\mathrm{a b c d e f g h i}"]{a}',
+    '\\wire[l][1]["some words"]{a}',
+    '\\wire[l][1]["x\\ldots"]{a}',
+    "\\wire[l][1]{\\dotsc}",
+    "\\wire[l][1]{...}",
+    '\\wire[d][1]["..."]{c}',
+    "\\wire[u][1]{\\textellipsis}",
+    # a word in \text or \mathrm is not a name: only one letter is (quantum-sim's grammar)
+    '\\wire[l][1]["\\text{omitted}"]{a}',
+    '\\wire[l][1]["\\text{gates}"]{a}',
+    '\\wire[l][1]["\\text{etc}"]{a}',
+    '\\wire[l][1]["\\mathrm{dots}"]{a}',
+    '\\wire[l][1]["\\text{repeat}"]{a}',
+    '\\wire[l][1]["\\text{x n}"]{a}',
+    '\\wire[l][1]["\\text{n times}"]{a}',
+    '\\wire[l][1]["\\text{anc 1}"]{a}',
+    '\\wire[l][1]["\\mathrm{dotted}"]{a}',
+    "\\wire[l][1]{\\text{omitted}}",
+    "\\wire[l][1]{\\mathrm{c1}}",
+    '\\wire[l][1]["\\text{ }"]{a}',
+    '\\wire[l][1]["$\\text{abc}$"]{a}',
+    # other things that are not a name
+    '\\wire[l][1]["\u22ee"]{a}',
+    '\\wire[l][1]["\u22ef"]{a}',
+    '\\wire[l][1]["\u22f1"]{a}',
+    '\\wire[l][1]["\u00b7"]{a}',
+    '\\wire[l][1]["\u00e9"]{a}',
+    '\\wire[l][1]["\\udots"]{a}',
+    '\\wire[l][1]["omitted"]{a}',
+    '\\wire[l][1]["$\\times n$"]{a}',
+    '\\wire[l][1]["3"]{a}',
+    '\\wire[l][1]["12"]{a}',
+    '\\wire[l][1]["n-1"]{a}',
+    '\\wire[l][1]["$n-1$"]{a}',
+    '\\wire[l][1]["q_{2,...}"]{a}',
+    '\\wire[l][1]["$\\alpha$"]{a}',
+    '\\wire[l][1]["x^2"]{a}',
+    '\\wire[l][1]["$x+y$"]{a}',
+    '\\wire[l][1]["$a"]{a}',
+    # a style after the label that is not where the label sits or how far along the wire
+    '\\wire[l][1]["a", dotted]{a}',
+    '\\wire[l][1]["a" dotted]{a}',
+    '\\wire[l][1]["a" dashed]{a}',
+    '\\wire[l][1]["", dotted]{a}',
+    '\\wire[l][1]["a",dotted]{a}',
+    '\\wire[l][1]["a"{dotted}]{a}',
+    '\\wire[l][1]["a"{below}, dotted, thick]{a}',
+    '\\wire[l][1]["a" , loosely dotted]{a}',
+    '\\wire[l][1]["a" , draw=none]{a}',
+    '\\wire[l][1]["a" , opacity=0]{a}',
+    '\\wire[l][1]["a" , white]{a}',
+    '\\wire[l][1]["a" , decorate]{a}',
+    '\\wire[l][1]["a" , bend left=30]{a}',
+    '\\wire[l][1]["a" , -]{a}',
+    '\\wire[l][1]["a" , pos=0.1, 3 dots]{a}',
+    '\\wire[l][1]["a" , pos=x]{a}',
+    '\\wire[l][1]["a" above dotted]{a}',
+    '\\wire[l][1]["a"{above,pos=0.2,dotted}]{a}',
+    "\\wire[l][1][dotted]{a}",
+    "\\wire[l][1][dashed]{a}",
+    '\\wire[l][1]["a" , pos=0.1,]{a}',
+    "\\wire[l][1.5]{a}",
+    "\\wire[x][1]{a}",
+    "\\wire[][1]{a}",
+    "\\wire{a}",
+    "\\wire",
+    "\\wire[\\ddots][1]{a}",
+    "\\wire[l][1]{omitted}",
+    '\\wire[l][1]["q_{n-1}" dotted]{a}',
+    # the type argument: only q and a on a wire of its row, and a type it does not have is a change
+    "\\wire[l][1]",
+    "\\wire[l][1]{}",
+    "\\wire[l][1]{$$}",
+    "\\wire[l][1]{c}",
+    "\\wire[l][1]{b}",
+    "\\wire[r][1]{c}",
+    "\\wire[r][2]{b}",
+    "\\wire[l][1]{n}",
+    "\\wire[l][1]{t}",
+    "\\wire[l][1]{x}",
+    "\\wire[l][1]{A}",
+    "\\wire[l][1]{\\mathrm{c}1}",
+    '\\wire[r][1]["q_0"]{b}',
+    '\\wire[r][1]["$q_{1}$"]{b}',
+    '\\wire[l][1]["n"]{c}',
+]
+
+
+@pytest.mark.parametrize("mark", LADDER_MARKS)
+def test_a_wire_mark_with_dots_stands_for_left_out_gates_and_is_unparsed(mark):
+    # the dots of a parity ladder draw gates or wires the figure leaves out, so the gates that
+    # are drawn are not the whole circuit: it must be partial, never a complete list
+    source = quantikz(f"& \\ctrl{{1}} & \\qw {mark} & \\qw", "& \\targ{} & \\qw & \\qw")
+    result = gate_list(source)
+    assert result.status == "partial"
+    assert lines(source) == [
+        "Wires: 1; 2",
+        "Step 1: CNOT: control wire 1, target wire 2",
+        f"Step 2: unparsed on wire 1: {mark}",
+    ]
+
+
+@pytest.mark.parametrize("mark", OTHER_MARKS)
+def test_a_wire_mark_that_is_not_a_wire_name_is_unparsed_in_any_spelling(mark):
+    # an allowlist, not a list of dots macros: whatever the label says that is not a plain wire
+    # name may stand for left-out gates, so it is kept with its source
+    source = quantikz(f"& \\ctrl{{1}} & \\qw {mark} & \\qw", "& \\targ{} & \\qw & \\qw")
+    result = gate_list(source)
+    assert result.status == "partial"
+    assert lines(source) == [
+        "Wires: 1; 2",
+        "Step 1: CNOT: control wire 1, target wire 2",
+        f"Step 2: unparsed on wire 1: {mark}",
+    ]
+
+
+@pytest.mark.parametrize(
+    "mark",
+    [
+        "\\wire[l][1]{a}",
+        "\\wire[r][2]{q}",
+        '\\wire[l][1]["a"]{a}',
+        '\\wire[r][1]["q_0"]{a}',
+        '\\wire[r][1]["$q_{1}$"]{a}',
+        '\\wire[l][1]["x\'"]{a}',
+        '\\wire[l][1]["A"{above,pos=0.2}]{a}',
+        '\\wire[l][1]["B" above]{a}',
+        '\\wire[l][1]["B", below left]{a}',
+        '\\wire[l][1]["B"{below right}, pos=0.5]{a}',
+        '\\wire[l][1]["B"{pos=-0.1}]{a}',
+        '\\wire[l][1]["\\mathrm{A}_1"]{a}',
+        '\\wire[l][1]["\\text{A}"]{a}',  # one letter in \text or \mathrm is a name
+        '\\wire[l][1]["n"]{a}',
+        '\\wire[l][1]["q_{n-1}"]{a}',
+        '\\wire[l][1][""]{a}',
+        '\\wire[l][1]["$q$"{above}]{a}',
+        "\\wire[l][-1]{a}",
+        "\\wire[l][]{a}",
+        "\\wire[l][1][ ]{a}",
+        "\\wire[l][1]{q}",
+        " \\wire[l][1]{ a }",
+    ],
+)
+def test_a_wire_mark_that_is_a_name_is_still_not_a_gate(mark):
+    source = quantikz(f"& \\ctrl{{1}} & \\qw {mark} & \\qw", "& \\targ{} & \\qw & \\qw")
+    assert gate_list(source).status == "parsed"
+    assert lines(source) == ["Wires: 1; 2", "Step 1: CNOT: control wire 1, target wire 2"]
+
+
+def test_a_ladder_with_dots_is_not_read_as_a_complete_circuit():
+    # three drawn CNOTs of a longer parity ladder: the \iddots mark says gates are left out
+    source = quantikz(
+        "& \\ctrl{1} & \\qw & \\qw",
+        '& \\targ{} & \\ctrl{1} \\wire[l][1]["\\iddots"]{a} & \\qw',
+        "& \\qw & \\targ{} & \\qw",
+    )
+    assert gate_list(source).status == "partial"
+    assert "unparsed on wire 2: " in gate_list(source).text
+
+
+# Commands that draw no gate are skipped only when everything they carry is harmless: an
+# integer, a length, a line style, a plain wire name, a frame style. A label is free text, so a
+# word, a macro or dots there (\\cds{1}{\\times n}, a "Repeat k times" box) can stand for gates that
+# the figure leaves out: the item is unparsed and the circuit partial.
+CNOT_ROWS = ("& \\ctrl{1} & MARK & \\qw", "& \\targ{} & \\qw & \\qw")
+QCIRCUIT_HARMLESS = [
+    "\\cds{1}{}",
+    "\\cds{1}{\\sffamily}",
+    "\\qw[2]",
+    "\\qw[-1]",
+    "\\qw \\dstick{}",
+    "\\qw \\gategroup{1}{2}{2}{2}{.7em}{--}",
+    "\\qw \\gategroup{1}{2}{2}{2}{.7em}{.}",
+    "\\qw \\gategroup{1}{2}{2}{2}{.7em}{-} \\gategroup{1}{3}{2}{3}{1em}{--}",
+    "[0.5cm] \\qw",
+    "[ -1.5em ] \\qw",
+]
+QCIRCUIT_DROPPING = [
+    "\\cds{1}{q}",
+    "\\cds{1}{n}",
+    "\\cds{1}{x3}",
+    "\\cds{1}{\\sffamily n}",
+    "\\cds{1}{\\cdots}",
+    "\\cds{1}{\\times n}",
+    "\\cds{1}{Repeat k times}",
+    "\\cds{x}{q}",
+    "\\cds{1.5}{q}",
+    "\\qw[x]",
+    '\\qw["\\ldots"]',
+    "\\cw[\\cdots]",
+    "\\cw[2]",
+    "\\qw \\gategroup{1}{2}{2}{2}{.7em}{dotted}",
+    "\\qw \\gategroup{1}{2}{2}{x}{.7em}{--}",
+    "\\qw \\gategroup{1}{2}{2}{2}{big}{--}",
+]
+
+
+@pytest.mark.parametrize("mark", QCIRCUIT_HARMLESS)
+def test_a_qcircuit_command_that_carries_nothing_but_a_number_or_a_name_is_skipped(mark):
+    source = qcircuit(CNOT_ROWS[0].replace("MARK", mark), CNOT_ROWS[1])
+    assert gate_list(source).status == "parsed"
+    assert lines(source) == ["Wires: 1; 2", "Step 1: CNOT: control wire 1, target wire 2"]
+
+
+@pytest.mark.parametrize("mark", QCIRCUIT_DROPPING)
+def test_a_qcircuit_command_with_text_or_dots_in_it_is_unparsed_not_skipped(mark):
+    source = qcircuit(CNOT_ROWS[0].replace("MARK", mark), CNOT_ROWS[1])
+    assert gate_list(source).status == "partial"
+    assert any("unparsed on wire 1: " in x for x in lines(source))
+
+
+@pytest.mark.parametrize(
+    "first_cell",
+    [
+        "\\inputgroupv{1}{2}{.8em}{.8em}{}",
+        "\\inputgroupv*{1}{2}{.8em}{.8em}{}",
+        "\\inputgroupv{1}{2}{.8em}{.8em}{\\sffamily}",
+        "\\inputgroup{1}{2}{.8em}{}",
+    ],
+)
+def test_a_qcircuit_input_group_with_no_label_is_skipped(first_cell):
+    source = qcircuit(first_cell + " & \\ctrl{1} & \\qw", "& \\targ & \\qw")
+    assert gate_list(source).status == "parsed"
+    assert lines(source) == ["Wires: 1; 2", "Step 1: CNOT: control wire 1, target wire 2"]
+
+
+@pytest.mark.parametrize(
+    "first_cell",
+    [
+        "\\inputgroupv{1}{2}{.8em}{.8em}{q}",
+        "\\inputgroupv{1}{2}{.8em}{.8em}{n}",
+        "\\inputgroupv*{1}{2}{.8em}{.8em}{x3}",
+        "\\inputgroup{1}{2}{.8em}{q}",
+        "\\inputgroupv{1}{2}{.8em}{.8em}{\\cdots}",
+        "\\inputgroupv{1}{2}{.8em}{.8em}{n times}",
+        "\\inputgroupv{1}{2}{big}{.8em}{q}",
+        "\\inputgroupv{1}{2}{.8em}{.8em}",
+        "\\inputgroup{1}{2}{.8em}{\\ldots}",
+    ],
+)
+def test_a_qcircuit_input_group_with_any_label_text_is_unparsed(first_cell):
+    source = qcircuit(first_cell + " & \\ctrl{1} & \\qw", "& \\targ & \\qw")
+    assert gate_list(source).status == "partial"
+    assert f"unparsed on wire 1: {first_cell}" in lines(source)[1]
+
+
+QUANTIKZ_HARMLESS = [
+    "\\setwiretype{q} \\qw",
+    "\\wireoverride{q}",
+    "\\nghost{\\ldots}",  # a phantom: its argument only sets the width of an invisible box
+    "\\qw[3]",
+    "[0.5cm] \\qw",
+    "\\qw\\gategroup[2,steps=1]{}",
+    "\\qw\\gategroup[wires=2,steps=3]{}",
+    "\\qw\\gategroup[2,steps=1]{\\sffamily }",
+    "\\qw\\gategroup[2,steps=1,style={dashed,rounded corners,fill=blue!5,inner xsep=2pt},"
+    "background,label style={label position=below,anchor=north,yshift=-0.2cm}]{}",
+    "\\qw\\gategroup[2,steps=1,style={fill=gray!12,draw=gray!60!black,inner ysep=-3pt}]{}",
+    "\\qw\\gategroup[2,steps=1,style={fill=blue!8,draw=none,inner ysep=1pt},background]{}",
+]
+QUANTIKZ_DROPPING = [
+    "\\setwiretype{n} \\qw",  # the wire is hidden here
+    "\\setwiretype{c} \\qw",  # the wire is classical from here
+    "\\setwiretype{b} \\qw",
+    "\\wireoverride{n}",
+    "\\wireoverride{t}",
+    "\\qw\\gategroup[2,steps=1]{$W_t$}",  # one letter or a name can say "repeated"
+    "\\qw\\gategroup[2,steps=1]{q}",
+    "\\qw\\gategroup[2,steps=1]{n}",
+    "\\qw\\gategroup[2,steps=1]{x3}",
+    "\\qw\\gategroup[2,steps=1]{$n$}",
+    "\\qw\\gategroup[2,steps=1]{$k$}",
+    "\\qw\\gategroup[2,steps=1]{\\text{n}}",
+    "\\qw\\gategroup[2,steps=1]{\\sffamily n}",
+    "\\qw\\gategroup[2,steps=1]{Source}",
+    "\\setwiretype{\\cdots} \\qw",
+    "\\setwiretype{nn} \\qw",
+    "\\wireoverride{dotted}",
+    "\\qw\\gategroup[2,steps=1]{$\\times n$}",
+    "\\qw\\gategroup[2,steps=1]{\\cdots}",
+    "\\qw\\gategroup[2,steps=1]{\\ldots}",
+    "\\qw\\gategroup[2,steps=1]{Repeat $k-2$ times}",
+    "\\qw\\gategroup[2,steps=1]{Repeat $k$ rounds}",
+    "\\qw\\gategroup[2,steps=1]{$\\lambda$ times}",
+    "\\qw\\gategroup[2,steps=1]{Source}",
+    "\\qw\\gategroup[2,steps=1]{\\text{omitted}}",
+    "\\qw\\gategroup[2,steps=1]{...}",
+    "\\qw\\gategroup[2,steps=1,style={dashed,label={above:{Repeat $k-2$ times}}}]{}",
+    "\\qw\\gategroup[2,steps=1,label style={label=omitted}]{}",
+    "\\qw\\gategroup[2,steps=1,style={draw=none,opacity=0}]{}",
+    "\\qw\\gategroup[2,steps=1,label={x}]{}",
+    "\\qw\\gategroup[2,steps=n]{}",
+    "\\qw\\gategroup{}",
+    '\\qw["\\ldots"]',
+    "\\qw[x]",
+]
+
+
+@pytest.mark.parametrize("mark", QUANTIKZ_HARMLESS)
+def test_a_quantikz_command_that_carries_nothing_but_a_number_or_a_name_is_skipped(mark):
+    source = quantikz(CNOT_ROWS[0].replace("MARK", mark), CNOT_ROWS[1])
+    assert gate_list(source).status == "parsed"
+    assert lines(source) == ["Wires: 1; 2", "Step 1: CNOT: control wire 1, target wire 2"]
+
+
+@pytest.mark.parametrize("mark", QUANTIKZ_DROPPING)
+def test_a_quantikz_command_with_text_or_dots_in_it_is_unparsed_not_skipped(mark):
+    source = quantikz(CNOT_ROWS[0].replace("MARK", mark), CNOT_ROWS[1])
+    assert gate_list(source).status == "partial"
+    assert any("unparsed on wire 1: " in x for x in lines(source))
+
+
+def test_a_gate_pin_with_no_label_is_skipped():
+    source = quantikz("& \\gate[2]{U}\\gateinput{}\\gateoutput{} & \\qw", "& & \\qw")
+    assert gate_list(source).status == "parsed"
+    assert lines(source) == ["Wires: 1; 2", "Step 1: U on wires 1 and 2 (one gate on these wires)"]
+
+
+@pytest.mark.parametrize("pin", ["0", "1", "q", "\\cdots", "\\ldots", "n times", "..."])
+def test_a_gate_pin_with_any_label_is_unparsed(pin):
+    source = quantikz(f"& \\gate[2]{{U}}\\gateinput{{{pin}}} & \\qw", "& & \\qw")
+    assert gate_list(source).status == "partial"
+    assert any(f"unparsed on wire 1: \\gateinput{{{pin}}}" in x for x in lines(source))
+
+
+# ------------------------------------------------------------------ options the reader drops
+# An option or argument that a reader does not read can hold a label, a dotted or hidden wire, a
+# repeat count: \ctrl[wire style={"n"}]{1} draws a vertical wire marked "n". A reader reads the
+# options it uses (wires, open, vertical wire=c) and an operation that carries any other is
+# unparsed, whatever the spelling.
+
+
+def beside_h(cell: str, other: str = "& \\qw & \\targ{} & \\qw") -> str:
+    return quantikz(f"& \\gate{{H}} & {cell} & \\qw", other)
+
+
+CONTROL_STEP = "Step 2: CNOT: control wire 1, target wire 2"
+OPEN_STEP = "Step 2: CNOT: open control (on |0>) wire 1, target wire 2"
+CLASSICAL_STEP = "Step 2: CNOT (classically controlled): control wire 1, target wire 2"
+
+
+@pytest.mark.parametrize(
+    ("cell", "step"),
+    [
+        ("\\ctrl{1}", CONTROL_STEP),
+        ("\\ctrl[]{1}", CONTROL_STEP),
+        ("\\ctrl[vertical wire=q]{1}", CONTROL_STEP),
+        ("\\ctrl[vertical wire = c]{1}", CLASSICAL_STEP),
+        ("\\ctrl[open]{1}", OPEN_STEP),
+        ("\\ctrl[open,open]{1}", OPEN_STEP),
+        ("\\octrl{1}", OPEN_STEP),
+        ("\\ctrlo{1}", OPEN_STEP),
+        (
+            "\\octrl[vertical wire=c]{1}",
+            "Step 2: CNOT (classically controlled): open control (on |0>) wire 1, target wire 2",
+        ),
+    ],
+)
+def test_a_control_is_read_with_the_options_it_uses(cell, step):
+    source = beside_h(cell)
+    assert gate_list(source).status == "parsed"
+    assert lines(source)[1:] == ["Step 1: H on wire 1", step]
+
+
+CONTROL_OPTIONS = [
+    'wire style={"\\cdots"}',
+    'wire style={"\\vdots"{right}}',
+    'wire style={"\\ldots"}',
+    'wire style={"n"}',
+    'wire style={"x3"}',
+    'wire style={"1"}',
+    'wire style={"\\ket{i_2 \\ldots i_{t-1}}"}',  # 0acd23c0e2d00661, block 4
+    "wire style={dotted}",
+    "wire style={draw=none}",
+    "label={\\cdots}",
+    "style={opacity=0}",
+    "vertical wire=x",
+    "open, dotted",
+    "open, wire style={dotted}",
+    "vertical wire=c, label={n}",
+]
+
+
+@pytest.mark.parametrize("name", ["ctrl", "octrl", "ctrlo"])
+@pytest.mark.parametrize("option", CONTROL_OPTIONS)
+def test_a_control_with_an_option_it_does_not_read_is_unparsed(name, option):
+    cell = f"\\{name}[{option}]{{1}}"
+    source = beside_h(cell)
+    assert gate_list(source).status == "partial"
+    assert f"unparsed on wire 1: {cell}" in lines(source)[-1]
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        '\\gate[wire style={"\\cdots"}]{X}',
+        "\\gate[label={\\cdots}]{X}",
+        "\\gate[style={draw=none}, label style={opacity=0}]{X}",
+        "\\gate[style={fill=none}]{X}",
+        "\\gate[style={fill=red, thick}]{X}",
+        "\\gate[style={rounded corners}]{X}",
+        "\\gate[style={fill=red}, style={opacity=0}]{X}",
+        "\\gate[style={text=\\cdots}]{X}",
+        "\\gate[style={fill=rgb,255:red,1;green,2;blue,3}]{X}",
+        "\\gate[style={fill=red,label={n}}]{X}",
+        "\\gate[style={fill}]{X}",
+        "\\gate[style={}]{X}",
+        "\\gate[style=fill=red]{X}",
+        "\\gate[2, nwires=1]{U}",  # nwires: wires of the box the gate does not act on
+        "\\gate[4, disable auto height][1][1]{U}",
+        "\\gate[2][x]{U}",
+        "\\gate[2, 3]{U}",
+        "\\gate[wires=2, wires=3]{U}",
+        "\\meter[label={\\cdots}]{}",
+        "\\meter[style={fill=red!18, thick}]{}",
+        "\\meter[2, label={n}]{}",
+        "\\meterD[label={n}]{M}",
+        '\\phase[wire style={"\\cdots"}]{\\theta}',
+        "\\swap[dotted]{1}",
+        '\\targ[wire style={"\\cdots"}]{}',
+        "\\targ[label={a}]{}",
+        "\\targ{\\cdots}",
+        "\\targ{x}",
+        '\\control[wire style={"\\cdots"}]{}',
+        "\\control{n}",
+        "\\ghost[x]{y}",
+        "\\vqw[dotted]{1}",
+        "\\vcw[dotted]{1}",
+        "\\qwx[-1, dotted]",
+        "\\qwx[x]",
+        "\\qwbundle[dotted]{n}",
+        "\\lstick[label style={color=blue}]{a}",
+        "\\lstick[2, dotted]{a}",
+        "\\rstick[dotted]{a}",
+        "\\midstick[dotted]{=}",
+        "\\midstick[2, brackets=fancy]{=}",
+        "\\push[x]{a}",
+        "\\slice[style=red]{a}",
+        "\\barrier{x}",
+        "\\barrier[x]{2}",
+        "\\permute[dotted]{2,1}",
+        "\\trash{\\scriptstyle\\mathrm{Tr}_{\\mathrm m}}",  # 9777305218dd3799
+        "\\ground{n}",
+        "\\nghost[x]{y}",
+        "\\dstick[x]{}",
+        "\\dstick[x]{a}",
+        "\\ustick[x]{a}",
+        "\\setwiretype[x]{q}",
+    ],
+)
+def test_an_operation_with_an_option_or_argument_it_does_not_read_is_unparsed(cell):
+    source = beside_h(cell, "& \\qw & \\qw & \\qw")
+    assert gate_list(source).status == "partial"
+    assert f"unparsed on wire 1: {cell}" in " ".join(lines(source))
+
+
+@pytest.mark.parametrize(
+    ("cell", "step"),
+    [
+        ("\\gate[]{U}", "Step 2: U on wire 1"),
+        ("\\gate[2]{U}", "Step 2: U on wires 1 and 2 (one gate on these wires)"),
+        ("\\gate[wires=2]{U}", "Step 2: U on wires 1 and 2 (one gate on these wires)"),
+        ("\\gate[wires=2][1.5cm]{U}", "Step 2: U on wires 1 and 2 (one gate on these wires)"),
+        ("\\gate[2][1cm][2cm]{U}", "Step 2: U on wires 1 and 2 (one gate on these wires)"),
+        ("\\meter{}", "Step 2: measure wire 1"),
+        ("\\meter[wires=2]{}", "Step 2: measure wires 1 and 2 (one measurement over these wires)"),
+        ("\\gate[style={fill=red}]{X}", "Step 2: X on wire 1"),
+        ("\\gate[style={fill=red!10}]{U}", "Step 2: U on wire 1"),
+        ("\\gate[style={fill=cyan!15}][2cm]{U}", "Step 2: U on wire 1"),
+        ("\\meter[style={fill=red!18}]{}", "Step 2: measure wire 1"),
+        ("\\meterD[wires=1, style={fill=gray!50}]{}", "Step 2: measure wire 1"),
+        ("\\qwbundle[alternate]{n}", ""),
+        ("\\midstick[2,brackets=none]{=}", ""),
+        ("\\barrier[0em]{2}", "Step 2: barrier"),
+        ("\\slice{a}", "Step 2: barrier a"),
+        ("\\nghost{x}", ""),
+        ("\\ghost{x}", ""),
+        ("\\dstick{}", ""),
+    ],
+)
+def test_a_box_or_mark_is_read_with_the_options_it_uses(cell, step):
+    source = beside_h(cell, "& \\qw & \\qw & \\qw")
+    assert gate_list(source).status == "parsed"
+    assert step in lines(source) if step else True
+
+
+def test_a_target_draws_the_vertical_wire_to_its_control_like_the_control_does():
+    # quantikz: \\ctrl{4} over \\targ{-4} are the two ends of one wire (e13599e10b23635d)
+    both = quantikz("& \\ctrl{1} & \\qw", "& \\targ{-1} & \\qw")
+    assert gate_list(both).status == "parsed"
+    assert lines(both) == ["Wires: 1; 2", "Step 1: CNOT: control wire 1, target wire 2"]
+    outside = quantikz("& \\targ{-1} & \\qw", "& \\qw & \\qw")
+    assert gate_list(outside).status == "unparsed"  # points above the circuit
+    assert gate_list(quantikz("& \\gate{H} & \\qw", "& \\targ{x} & \\qw")).status == "partial"
+
+
+def test_a_second_output_label_on_a_row_is_unparsed_not_a_replacement():
+    in_one_cell = quantikz("& \\gate{H} & \\rstick{a}\\rstick{b}")
+    in_two_cells = quantikz("& \\gate{H} & \\rstick{a} & \\rstick{b}")
+    for source, second in [(in_one_cell, "\\rstick{b}"), (in_two_cells, "\\rstick{b}")]:
+        assert gate_list(source).status == "partial"
+        assert lines(source)[0] == "Wires: 1 = output a"
+        assert f"unparsed on wire 1: {second}" in " ".join(lines(source))
+    assert gate_list(quantikz("& \\gate{H} & \\rstick{} & \\rstick{a}")).status == "parsed"
+
+
+def test_a_wrapper_is_opened_only_when_what_it_holds_besides_its_text_is_formatting():
+    ok = quantikz("& \\gate{H} & \\raisebox{1ex}{$\\vdots$} & \\qw")
+    assert gate_list(ok).status == "parsed"
+    for wrapper in ["\\raisebox{\\cdots}{a}", "\\raisebox{dotted words}{a}", "\\scalebox{0, 1}{a}"]:
+        source = quantikz(f"& \\gate{{H}} & {wrapper} & \\qw")
+        assert gate_list(source).status == "partial"
+        assert f"unparsed on wire 1: {wrapper}" in " ".join(lines(source))
+
+
+# ------------------------------------------------------------------ environment options
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        "",
+        "[baseline=-0.5ex]",
+        "[column sep=0.17cm, row sep=0.24cm]",
+        "[row sep={0.6cm,between origins}, column sep = 0.1cm]",
+        "[scale=.2, thick]",
+        "[transparent, row sep={0.6cm,between origins}, column sep = 0.4cm, font=\\scriptsize]",
+        "[row sep={0.8cm,between origins}, slice style=blue]",
+        "[row sep=3mm, column sep=3mm, wire types={q,q}]",
+        "[thin lines]",
+    ],
+)
+def test_the_size_and_style_options_of_a_quantikz_environment_are_let_through(options):
+    source = quantikz("& \\gate{H} & \\qw", "& \\qw & \\qw", options=options)
+    assert gate_list(source).status == "parsed"
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        "[wire types={q,c}]",
+        "[wire types={n,q}]",
+        "[remove end wires]",
+        "[execute at end picture={\\draw (0,0) -- (1,1);}]",
+        "[row sep=\\textwidth]",
+        "[column sep=0.5cm, dotted]",
+        "[every wire/.style={dotted}]",
+        "[align at=1]",
+    ],
+)
+def test_any_other_option_of_a_quantikz_environment_leaves_the_circuit_unparsed(options):
+    source = quantikz("& \\gate{H} & \\qw", "& \\qw & \\qw", options=options)
+    result = gate_list(source)
+    assert result.status == "unparsed" and result.text == ""
+    assert result.circuits[0].status == "unparsed"
+
+
+def test_a_tikzcd_size_option_is_let_through_and_a_yquant_option_is_not():
+    assert gate_list("\\begin{tikzcd}[sep=small]\n\\lstick{a} & \\gate{H}\n\\end{tikzcd}").text
+    options = "[register/default name=q]"
+    source = f"\\begin{{yquant}}{options}\nqubit a;\nh a;\n\\end{{yquant}}"
+    assert gate_list(source).status == "unparsed"
+    assert gate_list("\\begin{yquant}\nqubit a;\nh a;\n\\end{yquant}").status == "parsed"
+
+
+@pytest.mark.parametrize(
+    "options", ["@C=1em @R=1em", "@C=.6em @R=.5em @!R", "@C=1em@R=1.5em", "@!C @!R", ""]
+)
+def test_the_size_options_of_a_qcircuit_are_let_through(options):
+    source = f"\\Qcircuit {options} {{\n\\lstick{{a}} & \\gate{{H}} & \\qw\n}}"
+    assert gate_list(source).status == "parsed"
+
+
+@pytest.mark.parametrize("options", ["@C=big", "@X=1em", "@C=1em dotted", "@R"])
+def test_any_other_option_of_a_qcircuit_leaves_the_circuit_unparsed(options):
+    source = f"\\Qcircuit {options} {{\n\\lstick{{a}} & \\gate{{H}} & \\qw\n}}"
+    assert gate_list(source).status == "unparsed"
+
+
+# ------------------------------------------------------------------ yquant values
+
+YQ_HEAD = "qubit {$a$} a;\nqubit b;\n"
+
+
+def yquant(*statements: str) -> str:
+    return "\\begin{yquant}\n" + YQ_HEAD + "\n".join(statements) + "\n\\end{yquant}"
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "h {\\cdots} a;",
+        "x {$\\times n$} a;",
+        "y {n} a;",
+        "z {x3} a;",
+        "s {a} a;",
+        "t {Repeat k times} a;",
+        "not {n} a;",
+        "cnot {\\cdots} b | a;",
+        "swap {\\cdots} a, b;",
+        "h {1} a, b;",
+    ],
+)
+def test_a_value_on_a_yquant_gate_that_is_drawn_without_one_is_unparsed(statement):
+    source = yquant("h a;", statement)
+    assert gate_list(source).status == "partial"
+    assert lines(source)[-1] == f"Step 2: unparsed: {statement[:-1]}"
+
+
+@pytest.mark.parametrize(
+    ("statement", "step"),
+    [
+        ("box {U} a;", "U on wire 1"),
+        ("h {} a;", "H on wire 1"),
+        ("cnot {} b | a;", "CNOT: control wire 1, target wire 2"),
+        ("swap {} a, b;", "SWAP wires 1 and 2"),
+        ("measure {Z} a;", "measure wire 1"),
+        ("barrier {t} a;", "barrier wire 1"),
+        ("discard {x} a;", "discard wire 1"),
+    ],
+)
+def test_a_value_on_a_yquant_statement_that_uses_it_is_read(statement, step):
+    source = yquant(statement)
+    assert gate_list(source).status == "parsed"
+    assert lines(source)[-1] == f"Step 1: {step}"
+
+
+def test_the_value_of_a_yquant_measure_barrier_and_discard_is_kept_in_the_data():
+    source = yquant("measure {Z} a;", "barrier {t} a;", "discard {x} b;")
+    labels = [step[0].label for step in gate_list(source).circuits[0].parts[0]]
+    assert labels == ["Z", "t", "x"]
+
+
+def test_every_reader_has_a_row_in_the_table_of_what_its_command_may_carry():
+    # a command added to _READERS without a row would keep dropping what it does not read
+    from docingest.domain import circuits
+
+    assert set(circuits._READERS) - set(circuits._CARRIES) == {"wire"}
+    assert set(circuits._CARRIES) <= set(circuits._READERS)
+
+
+def test_a_bare_option_in_a_cell_is_dropped_only_if_it_is_a_length():
+    # [0.5cm] is a column-spacing option; [dotted] is not a length and is an unparsed item
+    spaced = quantikz("& \\ctrl{1} & [0.5cm] \\qw", "& \\targ{} & \\qw")
+    assert lines(spaced) == ["Wires: 1; 2", "Step 1: CNOT: control wire 1, target wire 2"]
+    styled = quantikz("& \\ctrl{1} & [dotted] \\qw", "& \\targ{} & \\qw")
+    assert gate_list(styled).status == "partial"
+    assert "Step 2: unparsed on wire 1: [dotted]" in lines(styled)
 
 
 def test_a_circuit_made_only_of_macros_has_no_list():
@@ -630,8 +1372,7 @@ def test_a_circuit_without_a_label_has_the_plain_header():
 
 def test_several_circuits_are_listed_one_after_the_other_each_with_its_label():
     source = (
-        "\\begin{quantikz}\\label{a}\n& \\gate{H} & \\qw\n\\end{quantikz}\n"
-        "and then\n"
+        "\\begin{quantikz}\\label{a}\n& \\gate{H} & \\qw\n\\end{quantikz}\n\n"
         "\\begin{quantikz}\n& \\gate{X} & \\qw\n\\end{quantikz}"
     )
     result = gate_list(source)
@@ -822,12 +1563,14 @@ VOCAB = [
     "\\qwx[-1]", "\\cwx[1]", "\\vcw{1}", "\\vqw{-1}", "\\meter{}", "\\meterD{Z}", "\\measure{X}",
     "\\lstick{$\\ket{0}$}", "\\lstick[wires=2]{a}", "\\rstick{b}", "\\qwbundle{3}", "\\qw", "\\cw",
     "\\multigate{1}{U}", "\\ghost{U}", "\\sgate{U}{1}", "\\dstick{\\theta}", "\\push{=}",
-    "\\phase{\\phi}", "\\wire[d][2]", "\\wire[u][1]{c}", "\\slice{s}", "\\quxrier{x}", "\\equiv",
+    "\\phase{\\phi}", "\\wire[d][2]", "\\wire[u][1]{c}", '\\wire[l][1]["\\ddots"]{a}', "\\slice{s}", "\\quxrier{x}", "\\equiv",
     "\\vdots", "\\cdots", "\\macro", "\\ar[r]", "\\cwbend{1}", "\\mbox{\\gate{Z}}", "\\label{l}",
     "% note\n", "\\%", "\\\\[2mm]", "$", "text", "\\alpha", "\\begin{yquant}", "\\end{yquant}",
     "qubit q[2];", "h q[0];", "cnot q[1] | q[0];", "box {X} q[0] | ~q[1];", "\\begin{tikzcd}",
     "\\end{tikzcd}", "\\gate[", "\\gate{", "\\", "\\gategroup[2,steps=3]{x}",
     "\\gategroup{1}{1}{2}{2}{1em}{--}", "99999999999999999999", "\n", " ",
+    "\\cw[-1]", "\\linethrough", "\\begin{center}", "\\end{center}", "\\[", "\\]", "\\centering",
+    "\\gate[style={fill=red!10}]{X}", "\\gate[style={draw=white}]{X}", "^{\\otimes n}", "\\Rightarrow",
 ]  # fmt: skip
 
 ITEM_WORDS = (
@@ -977,6 +1720,13 @@ UNITS = {
     "environments that never close": lambda n: "\\begin{quantikz}\n" * n,
     "environments inside one": lambda n: "\\begin{quantikz}" * n + "& \\gate{H}\\end{quantikz}",
     "closed circuits one after the other": lambda n: quantikz("& \\gate{H}") * n,
+    "closed circuits with text between them": lambda n: (quantikz("& \\gate{H}") + " x ") * n,
+    "a long text outside the circuit": lambda n: "word " * n + quantikz("& \\gate{H}"),
+    "wrappers around the circuit": lambda n: "$" * n + quantikz("& \\gate{H}") + "$" * n,
+    "words that look like wrappers": lambda n: "\\centering\\" * n + quantikz("& \\gate{H}"),
+    "cells that go classical": lambda n: quantikz("& \\meter{} & " + " & ".join(["\\cw"] * n)),
+    "cells that go classical and back": lambda n: quantikz("& \\meter{} & " + "\\cw & \\qw & " * n),
+    "lone vertical wires": lambda n: quantikz(*["& \\vqw{1}"] * n),
     "Qcircuit with no group": lambda n: "\\Qcircuit " * n,
     "Qcircuit groups that never close": lambda n: "\\Qcircuit { & \\gate{H} " * n,
     "Qcircuit groups inside one": lambda n: "\\Qcircuit {" * n + "& \\gate{H}" + "}" * n,

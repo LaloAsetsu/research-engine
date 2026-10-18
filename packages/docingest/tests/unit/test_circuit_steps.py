@@ -236,6 +236,10 @@ def step_words(ops: tuple[GateOp, ...], yquant: bool) -> set[str]:
     return after(0)
 
 
+# the signs after which the list says "an equivalent circuit" (the ones quantum-sim compares)
+EQUALITY_SIGNS = {"=", "\\equiv", "\\simeq", "\\cong", "\\Leftrightarrow"}
+
+
 def render_lines(result: GateList) -> list[set[str]]:
     """The lines of the text, from ``result.circuits`` only; each is the set of lines the fields
     can give."""
@@ -265,11 +269,12 @@ def render_lines(result: GateList) -> list[set[str]]:
             for step in part:
                 if len(step) == 1 and step[0].kind == "sep":
                     sign = step[0].label
-                    steps.append(
-                        {
-                            f"[{sign}: the steps below draw the right-hand side, an equivalent circuit]"
-                        }
+                    claim = (
+                        "an equivalent circuit"
+                        if sign in EQUALITY_SIGNS
+                        else "after an arrow or approximation sign, not compared"
                     )
+                    steps.append({f"[{sign}: the steps below draw the right-hand side, {claim}]"})
                     number = 0
                     continue
                 number += 1
@@ -414,13 +419,15 @@ def test_phase_dots_and_a_lone_control_and_a_lone_phase():
 
 
 def test_what_is_not_a_gate_is_text_dots_a_discard_a_barrier_or_unparsed_with_its_source():
-    source = quantikz("& \\gate{H} \\macro{a} & \\vdots & \\slice{s}", "& \\trash{} & x")
+    source = quantikz("& \\gate{H} \\macro{a} & \\vdots & \\slice{s}", "& \\trash{} & \\ket{0} x")
     kinds = [(o[0], o[1], o[2], o[6]) for step in ops(source) for o in step]
     assert ("unparsed", "", (1,), "\\macro{a}") in kinds
     assert ("barrier", "s", (), "") in kinds
     assert ("discard", "", (2,), "") in kinds
     assert ("dots", "", (1,), "") in kinds
-    assert ("text", "x", (2,), "") in kinds
+    assert ("unparsed", "", (2,), "\\ket{0} x") in kinds  # text that is not just a ket
+    ket = quantikz("& \\gate{H} & \\qw", "& \\gate{X} & \\ket{1}")
+    assert ("text", "\\ket{1}", (2,), "") in [(o[0], o[1], o[2], o[6]) for s in ops(ket) for o in s]
 
 
 def test_a_combination_the_list_does_not_know_is_unparsed_and_keeps_what_it_saw():
@@ -526,6 +533,60 @@ def test_several_operations_of_one_cell_and_a_vertical_wire_are_one_unparsed_gro
     assert steps[0][0][2] == (1,)
     assert gate_list(source).status == "partial"
     assert "unparsed joined operation" in gate_list(source).text
+
+
+@pytest.mark.parametrize(
+    "mark",
+    [
+        '\\wire[l][1]["\\ddots"{below,pos=0.1}]{a}',
+        '\\wire[r][1]["\\iddots"]{a}',
+        "\\wire[d][2]{\\vdots}",
+        '\\wire[l][1]["..."]{a}',
+        '\\wire[l][1]["\u2026"]{a}',
+        '\\wire[l][1]["\\dotsc"]{a}',
+        '\\wire[r][1]["\\cdot\\cdot\\cdot"]{a}',
+    ],
+)
+def test_a_wire_mark_with_dots_is_an_unparsed_item_in_the_data(mark):
+    # the dots draw gates or wires that are left out: a reader must refuse the circuit, so the
+    # item is in the data (with its source) and the status is partial; no spelling is skipped
+    source = quantikz(f"& \\ctrl{{1}} & \\qw {mark} & \\qw", "& \\targ{} & \\qw & \\qw")
+    result = gate_list(source)
+    [circuit] = result.circuits
+    assert circuit.status == result.status == "partial"
+    steps = ops(source)
+    assert [[o[0] for o in step] for step in steps] == [["x"], ["unparsed"]]
+    assert steps[1][0] == ("unparsed", "", (1,), (), (), False, mark)
+    assert [o["kind"] for part in circuit.to_dict()["parts"] for step in part for o in step] == [
+        "x",
+        "unparsed",
+    ]
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        '\\ctrl[wire style={"\\cdots"}]{1}',
+        '\\ctrl[wire style={"n"}]{1}',
+        "\\ctrl[wire style={dotted}]{1}",
+        "\\octrl[label={\\cdots}]{1}",
+        '\\ctrlo[wire style={"x3"}]{1}',
+    ],
+)
+def test_a_control_with_an_option_it_does_not_read_is_an_unparsed_item_in_the_data(cell):
+    source = quantikz(f"& {cell} & \\qw", "& \\targ{} & \\qw")
+    result = gate_list(source)
+    assert result.circuits[0].status == result.status == "partial"
+    steps = ops(source)
+    assert [o[0] for o in steps[0]] == ["x", "unparsed"]
+    assert ("unparsed", "", (1,), (), (), False, cell) in steps[0]
+
+
+def test_a_yquant_value_that_is_not_read_is_an_unparsed_item_in_the_data():
+    source = "\\begin{yquant}\nqubit a;\nqubit b;\nh a;\ncnot {$\\times n$} b | a;\n\\end{yquant}"
+    result = gate_list(source)
+    assert result.circuits[0].status == result.status == "partial"
+    assert ops(source)[1] == [("unparsed", "", (), (), (), False, "cnot {$\\times n$} b | a")]
 
 
 def test_the_wire_of_a_one_row_cell_does_not_make_a_gate_out_of_its_operations_in_quantikz():

@@ -19,10 +19,28 @@ bend) is written as ``unparsed on wire k: <source>`` at its step, a circuit with
 gets no list, and a block that holds several circuits lists each under "Circuit k of n". Labels
 are copied as written, LaTeX included.
 
+What it never guesses is checked structurally, not command by command. Every token of a circuit's
+source (a command with its options and arguments, a run of text; so every cell and every row, also
+a row that draws no wire) starts unconsumed. A token is consumed only by a rule that understood it:
+the reading used it (an operation, a legend, a sign), or an explicit allowlist says it has no
+effect on the circuit (spacing, a comment, a skipped frame, a size, a wire mark that only names a
+wire). What no rule consumed is written as an unparsed item that names the token and its place, and
+the circuit is partial. So a command the reader does not know, text it has no rule for, or a reader
+that drops part of what it read, is refused by default; an allowlist is the only way to let
+something through. A ``yquant`` statement is its own token: it is read by a rule of the ``qubit``
+and ``cbit`` statements or of a gate, and every other one is unparsed.
+
+The check covers the whole block, not only the circuit environment: any token outside it that no
+rule takes (a power, brackets, a macro definition, a caption, any text) makes every circuit of
+the block partial, and only a short closed list of wrappers with no effect is let through. The
+type of a Qcircuit wire is carried along its row: a ``\\cw`` is a classical segment, and a gate
+or control drawn on one, a wire that turns classical with no measurement before it in its row, and
+a classical wire that turns quantum again are unparsed.
+
 Order is the drawing order: columns of the grid (``&``) are steps, left to right, and columns
 with only wires are skipped. Two gates in different columns may commute or run together on
 hardware; the list does not say so. Labels drawn outside the grid (``\\gategroup`` boxes,
-captions, TikZ nodes) are not in the list.
+captions, TikZ nodes) are not in the list, but a caption or a node of the block is an unparsed item.
 
 The same reading is also returned as data, :attr:`GateList.circuits`: for each circuit its wires,
 its parts (the sides of a drawn equality) and its steps, each step a tuple of :class:`GateOp`
@@ -40,8 +58,10 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
+from heapq import heappop, heappush
+from typing import NamedTuple
 
 __all__ = [
     "CIRCUIT_FORMAT",
@@ -112,7 +132,13 @@ def split_top(s: str, sep: str) -> list[str]:
                 k = j  # row spacing: \\[2mm]
                 while k < len(s) and s[k] in " \t\n":
                     k += 1
-                if k < len(s) and s[k] == "[" and k in squares:
+                # only a length is spacing; any other bracket stays in the next row, as text
+                if (
+                    k < len(s)
+                    and s[k] == "["
+                    and k in squares
+                    and _SPACING_OPTION.fullmatch(s[k : squares[k]])
+                ):
                     j = squares[k]
                 start = j
                 continue
@@ -132,10 +158,26 @@ def split_top(s: str, sep: str) -> list[str]:
 
 @dataclass
 class Tok:
+    """One token of a cell: a command with its options and arguments, or a run of text.
+
+    ``used`` is the consumption check. Every token of a circuit's source starts unconsumed and is
+    marked only by a rule that understood it: a reader that made an operation or a fact from it
+    (the operation or the fact is then marked when the list says it), or an explicit allowlist
+    that says it has no effect on the circuit (spacing, a comment, a skipped frame). A token that
+    no rule marked is written as an unparsed item (see :func:`_unconsumed`), so a command or text
+    that the reader does not know is refused by default."""
+
     name: str  # command name without backslash, or "" for plain text
     opts: list[str] = field(default_factory=list)
     args: list[str] = field(default_factory=list)
     src: str = ""
+    used: bool = field(default=False, compare=False)
+
+
+def _use(*toks: Tok) -> None:
+    """Mark ``toks`` consumed: a rule has understood them."""
+    for t in toks:
+        t.used = True
 
 
 # mandatory brace arguments of the commands read; -1 = take one brace group only if it is there
@@ -155,7 +197,7 @@ SPACING = frozenset(
     {
         *("hspace", "vspace", "hphantom", "vphantom", "phantom", "quad", "qquad", "rule", ",", ";"),
         *("!", " ", "centering", "small", "footnotesize", "scriptsize", "large", "Large"),
-        *("normalsize", "linethrough"),
+        *("normalsize", "hspace*", "vspace*"),
     }
 )
 ELLIPSIS = frozenset({"vdots", "cdots", "ldots", "dots", "ddots", "iddots", "hdots", "dotsb"})
@@ -203,6 +245,9 @@ EQUALS_TEXT = re.compile(
 )
 _DOTS_TEXT = re.compile(r"\$?\s*\\?(vdots|cdots|ldots|dots|ddots|iddots)?\s*\$?|[.\s]*")
 _DOTS_TOKEN = re.compile(r"\$?\s*\\?(vdots|cdots|ldots|dots)?\s*\$?|[.\s]*")
+_SPACING_OPTION = re.compile(
+    r"\[\s*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)\s*(?:pt|em|ex|cm|mm|in|bp|pc)?\s*\]"
+)
 _SPACE_ESCAPES = re.compile(r"\\[ ,;:!]")
 _SPACE_ONLY = re.compile(
     r"(\\[,;:! ]|\\q?quad|\\[hv]?space\{[^}]*\}|\\rule(\{[^}]*\}){2}|\\[hv]?phantom\{[^}]*\}|\s)*"
@@ -311,18 +356,35 @@ class Op:
     classical: bool = False
     src: str = ""
     tag: str = ""  # a label drawn next to it (\dstick)
+    on_classical: bool = False  # drawn on a wire that a \cw made classical
+    toks: list[Tok] = field(
+        default_factory=list, repr=False, compare=False
+    )  # what it was read from
+
+
+def _consume(o: Op) -> None:
+    """The list has said ``o``: the tokens it was read from are consumed."""
+    _use(*o.toks)
 
 
 @dataclass
 class Facts:
-    """What a cell says about its wire rather than about a gate."""
+    """What a cell says about its wire rather than about a gate. A fact keeps the token it came
+    from, which is consumed when the wire legend that shows it is written."""
 
     label: tuple[str, int] | None = None  # \lstick text and the wires it spans
+    label_tok: Tok | None = None
     out: str = ""  # \rstick
     out_span: int = 1  # wires the \rstick label spans
+    out_src: str = ""  # the source of that \rstick
+    out_tok: Tok | None = None
     bundle: str | None = None  # \qwbundle
+    bundle_tok: Tok | None = None
     wire: bool = False  # \qw or \cw: the cell draws a wire
+    segments: list[tuple[Tok, str]] = field(default_factory=list)  # (\qw or \cw, "q" or "c")
     stick: str = ""  # \dstick: a label drawn under a pair of dots
+    stick_tok: Tok | None = None
+    pending: list[Tok] = field(default_factory=list)  # the tokens of the cell not yet consumed
 
 
 def _one_line(s: str) -> str:
@@ -358,97 +420,423 @@ def int_arg(s: str, default: int | None) -> int | None:
         return None
 
 
+# What a wrapper (\raisebox, \scalebox, \textcolor ...) may carry besides the text it wraps: a
+# length, a number, a colour or an alignment letter. Anything else is dropped content, so the
+# wrapper is not opened and stays an unparsed command.
+_FORMATTING = re.compile(
+    r"\s*(?:[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)\s*(?:pt|em|ex|cm|mm|in|bp|pc)?|!|"
+    r"[a-z]+(?:![0-9]{1,3})*)?\s*"
+)
+
+
+def _formatting_only(t: Tok) -> bool:
+    return all(_FORMATTING.fullmatch(x) for x in (*t.opts, *t.args[:-1]))
+
+
+def _ignorable(t: Tok) -> bool:
+    """Whether ``t`` is a ``\\label{..}`` or a switch that carries nothing (``\\relax``,
+    ``\\strut``). One that swallowed a group (``\\hfill{n}``) is not: the group would be dropped."""
+    if t.name == "label":
+        return not t.opts and len(t.args) == 1
+    return t.name in IGNORED and not t.opts and not t.args
+
+
 def _expand(toks: list[Tok], qcircuit: bool) -> list[Tok]:
-    """``toks`` with the formatting wrappers and bare groups replaced by what they hold."""
+    """``toks`` with the formatting wrappers and bare groups replaced by what they hold. A wrapper,
+    a group, a ``\\label`` and a column-spacing option are consumed: what they hold, if anything,
+    is read as tokens of its own."""
     out: list[Tok] = []
     for t in toks:
-        if t.name in WRAPPERS and t.args:
+        if t.name in WRAPPERS and t.args and _formatting_only(t):
+            _use(t)
             out += tokenize(t.args[-1], qcircuit)
         elif t.name == "" and t.src.startswith("{") and t.src.endswith("}"):
+            _use(t)
             out += tokenize(t.src[1:-1], qcircuit)
-        elif t.name in IGNORED or (t.name == "" and re.fullmatch(r"\[[^\]]*\]", t.src.strip())):
-            continue  # \label, \protect, a column-spacing option [0.5cm]
+        elif _ignorable(t) or (t.name == "" and _SPACING_OPTION.fullmatch(t.src.strip())):
+            _use(t)  # \label, \protect, a column-spacing option [0.5cm] (a length, not text)
         else:
             out.append(t)
     return out
 
 
-def _text_op(src: str) -> Op | None:
-    """The item a run of text and math makes: a separator, dots, text, or nothing."""
-    bare = _SPACE_ESCAPES.sub(" ", src).strip()
+# The only text the list lets stand on a wire: empty, or a ket of a computational-basis state, in
+# the spellings that quantum-sim reads (``_BASIS_KET`` of its formats.py, copied; the samples of
+# packages/quantum-sim/tests/fixtures/basis_kets.json give both the same verdicts). Any other text
+# on a wire (a word, a bra, ``n``, ``\\times n``, ``(gates omitted)``, a name) can say that the
+# drawing leaves gates out or that the wire is measured or postselected, and no list of such
+# words is complete, so it is an unparsed item and the circuit is partial.
+_KET_BAR = r"(?:\||\\lvert|\\vert)"
+_BASIS_KET = re.compile(
+    r"\\ket\s*\{\s*[01]\s*\}"
+    r"|\\ket\s*[01]"
+    rf"|\\left\s*{_KET_BAR}\s*[01]\s*\\right\s*\\rangle"
+    rf"|{_KET_BAR}\s*[01]\s*\\rangle",
+    re.ASCII,
+)
+
+
+def _harmless_text(label: str) -> bool:
+    """Whether the text ``label`` on a wire is empty or a basis ket |0> or |1>."""
+    text = re.sub(r"\s+", " ", label).strip()
+    return not text or _BASIS_KET.fullmatch(re.sub(r"\s+", " ", _peeled(text))) is not None
+
+
+def _text_op(src: str, toks: Sequence[Tok] = ()) -> Op | None:
+    """The item a run of text and math makes: a separator, dots, text, or nothing. ``toks`` are
+    the tokens of the run: the item carries them, or they are consumed here when it is nothing."""
+    bare = _SPACE_ESCAPES.sub(" ", src).replace("~", " ").strip()
     if not bare:
+        _use(*toks)
         return None
     if EQUALS_TEXT.match(src):
-        return Op("sep", label=clean_label(src))
+        return Op("sep", label=clean_label(src), toks=list(toks))
     if _DOTS_TEXT.fullmatch(bare):
-        return Op("ellipsis") if bare.strip(" $") else None
-    return Op("text", clean_label(src))
+        if bare.strip(" $"):
+            return Op("ellipsis", toks=list(toks))
+        _use(*toks)
+        return None
+    return Op("text", clean_label(src), src=src, toks=list(toks))
 
 
 def cell_ops(cell: str, qcircuit: bool) -> tuple[list[Op], Facts]:
-    """Operations of one cell, and the wire facts found in it (label, output label, bundle)."""
+    """Operations of one cell, and the wire facts found in it (label, output label, bundle).
+    ``Facts.pending`` holds the tokens that no rule has consumed yet: those of the operations and
+    facts, which the list consumes when it says them."""
     facts = Facts()
-    toks = [t for t in _expand(tokenize(cell, qcircuit), qcircuit) if t.name not in SPACING]
+    leaves = _expand(tokenize(cell, qcircuit), qcircuit)
+    toks = []
+    for t in leaves:
+        if _spacing(t):
+            _use(t)  # no effect on the circuit: a space, a width, an invisible box
+        else:
+            toks.append(t)
+    ops = _read_cell(toks, facts)
+    facts.pending = [t for t in leaves if not t.used]
+    return ops, facts
+
+
+def _read_cell(toks: list[Tok], facts: Facts) -> list[Op]:
     if toks and all(is_text_token(t) for t in toks):
         # a state, an output name or an interval: kept as one text item
         src = " ".join(t.src for t in toks).strip()
         if EQUALS_TEXT.match(src) or src in ("\\equiv", "="):
-            return [Op("sep", label=clean_label(src))], facts
-        op = _text_op(src)
-        return ([op] if op else []), facts
+            return [Op("sep", label=clean_label(src), toks=list(toks))]
+        op = _text_op(src, toks)
+        return [op] if op else []
     ops: list[Op] = []
-    runs: list[Tok] = []  # runs of text and math between circuit commands become one item each
+    runs: list[
+        list[Tok]
+    ] = []  # runs of text and math between circuit commands become one item each
     commands: list[Tok] = []
-    pending: list[str] = []
+    pending: list[Tok] = []
     for t in toks:
         if is_text_token(t):
-            pending.append(t.src)
+            pending.append(t)
             continue
         if pending:
-            runs.append(Tok("#text", [], [], " ".join(pending)))
+            runs.append(pending)
             pending = []
         commands.append(t)
     if pending:
-        runs.append(Tok("#text", [], [], " ".join(pending)))
+        runs.append(pending)
     for run in runs:
-        if op := _text_op(run.src.strip()):
+        if op := _text_op(" ".join(t.src for t in run).strip(), run):
             ops.append(op)
     for t in commands:
         _read_command(t, ops, facts)
-    return ops, facts
+    return ops
+
+
+def _stick(t: Tok, facts: Facts) -> None:
+    """``\\dstick{label}`` / ``\\ustick{label}``: a label drawn below or above a gate (Qcircuit's
+    way to name a controlled phase drawn as two dots)."""
+    lab = re.sub(r"\\hspace\{[^}]*\}", "", clean_label(t.args[0])).strip()
+    lab = lab[2:-1] if lab.startswith("_{") and lab.endswith("}") else lab
+    if lab:
+        facts.stick, facts.stick_tok = lab, t
+    else:
+        _use(t)  # only spacing
 
 
 def _read_command(t: Tok, ops: list[Op], facts: Facts) -> None:
+    """Read the command ``t``. What it makes (operations, facts) carries it, and it is consumed
+    when the list says them; a command that no rule below understands is an unparsed item."""
+    made = len(ops)
+    _dispatch(t, ops, facts)
+    for o in ops[made:]:
+        o.toks.append(t)
+
+
+def _read_mark(t: Tok, ops: list[Op], facts: Facts) -> bool:
+    """Read ``t`` if it is a mark that makes no operation: a label under dots, a plain wire or a
+    frame that draws no gate. It is then consumed, or an unparsed item when it carries more."""
     nm = t.name
-    if nm in ("dstick", "ustick") and t.args and clean_label(t.args[0]).strip():
-        # a label drawn below or above a gate (Qcircuit's way to name a controlled phase drawn as
-        # two dots)
-        lab = re.sub(r"\\hspace\{[^}]*\}", "", clean_label(t.args[0])).strip()
-        lab = lab[2:-1] if lab.startswith("_{") and lab.endswith("}") else lab
-        if lab:
-            facts.stick = lab
+    if nm in ("dstick", "ustick") and not t.opts and t.args and clean_label(t.args[0]).strip():
+        if facts.stick_tok is not None:  # a second label in a cell would replace the first
+            ops.append(_unparsed(t))
+        else:
+            _stick(t, facts)
+    elif nm in ("qw", "cw"):
+        if all(_INTEGER.fullmatch(o) for o in t.opts) and not t.args:
+            facts.wire = True
+            facts.segments.append((t, nm[0]))
+            _use(t)  # the wire it draws makes its row a wire; _RowWire types the segment
+        else:
+            ops.append(_unparsed(t))
+    elif nm in _SKIPPED:
+        if _skippable(t):
+            _use(t)
+        else:
+            ops.append(_unparsed(t))
+    else:
+        return False
+    return True
+
+
+def _dispatch(t: Tok, ops: list[Op], facts: Facts) -> None:
+    nm = t.name
+    if _read_mark(t, ops, facts):
         return
-    if nm in ("qw", "cw"):
-        facts.wire = True
-        return
-    if nm in _SKIPPED or nm in SPACING:
-        return
-    if nm in ELLIPSIS:
+    if nm in ELLIPSIS and not t.opts and not t.args:
         ops.append(Op("ellipsis"))
-    elif nm in SEPARATOR_COMMANDS:
+    elif nm in SEPARATOR_COMMANDS and not t.opts and not t.args:
         ops.append(Op("sep", label="\\" + nm))
-    elif (reader := _READERS.get(nm)) is not None:
+    elif (reader := _READERS.get(nm)) is not None and _carries_only_read(t):
         reader(t, ops, facts)
     else:
         ops.append(Op("unparsed", src=t.src))
 
 
-_SKIPPED = frozenset(
-    {
-        *("qw", "cw", "nghost", "setwiretype", "wireoverride", "gateinput", "gateoutput"),
-        *("dstick", "ustick", "cds", "inputgroupv", "inputgroupv*", "inputgroup", "gategroup"),
-    }
+# Commands that draw no gate. A command is skipped only when everything it carries is harmless: a
+# closed grammar per argument, never a list of the words or macros that mean "left out" (no list is
+# complete: \\cdots, \\times n, "Repeat k times", "..."). Anything else is an unparsed item, so the
+# circuit is partial.
+# The kinds of the brace arguments of each skipped command, one letter each: i an integer, l a
+# length, e nothing, t nothing or a bare font switch (\\sffamily), q the wire type q (the one every
+# wire has by default), s a line style of a Qcircuit \\gategroup (-, -- or .). A label is text, so
+# it is never read here: any text in it can say that a block repeats (n, x3, "Repeat k times").
+_SKIPPED: dict[str, str] = {
+    "setwiretype": "q",
+    "wireoverride": "q",
+    "gateinput": "t",
+    "gateoutput": "t",
+    "dstick": "e",
+    "ustick": "e",
+    "cds": "it",
+    "inputgroupv": "iillt",
+    "inputgroupv*": "iillt",
+    "inputgroup": "iilt",
+    "gategroup": "",  # quantikz: options and one label, see _skippable
+    "nghost": "x",  # a phantom: its argument only sets the width of an invisible box
+}
+_INTEGER = re.compile(r"\s*[+-]?[0-9]{1,6}\s*")
+_LENGTH = re.compile(r"\s*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)\s*(?:pt|em|ex|cm|mm|in|bp|pc)\s*")
+_LINE_STYLE = re.compile(r"\s*(?:--|-|\.)\s*")
+# the only text in a \\gategroup label that is not a name
+_FONT_SWITCH = re.compile(r"\s*\\sffamily\s*")
+_COLOR = r"(?:[a-z]+(?:![0-9]{1,3}){0,2}(?:![a-z]+)?|none)"
+_LEN = r"-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:pt|em|ex|cm|mm)"
+# what a quantikz \\gategroup option may hold: its size, the style of its frame and of its label,
+# the items that the corpus uses. A label is text, so `label=` (even inside `style`) is not here.
+_BOX_STYLE_ITEM = re.compile(
+    rf"\s*(?:dashed|dotted|rounded corners|fill={_COLOR}|draw={_COLOR}|inner [xy]?sep={_LEN})?\s*"
 )
+_BOX_LABEL_STYLE_ITEM = re.compile(
+    rf"\s*(?:label position=(?:above|below|left|right)|anchor=(?:north|south|east|west)"
+    rf"|[xy]shift={_LEN}|text={_COLOR})?\s*"
+)
+_BOX_OPTION = re.compile(r"\s*(?:[0-9]{1,6}|(?:wires|steps)\s*=\s*[0-9]{1,6}|background)?\s*")
+_BOX_STYLE = re.compile(r"\s*(?P<key>style|label style)\s*=\s*\{(?P<body>.*)\}\s*", re.S)
+
+
+def _split_commas(s: str) -> list[str]:
+    """``s`` split at the commas outside braces."""
+    parts: list[str] = []
+    depth, start = 0, 0
+    for j, c in enumerate(s):
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth = max(0, depth - 1)
+        elif c == "," and depth == 0:
+            parts.append(s[start:j])
+            start = j + 1
+    parts.append(s[start:])
+    return parts
+
+
+def _gategroup_options_ok(opt: str) -> bool:
+    for item in _split_commas(opt):
+        if _BOX_OPTION.fullmatch(item):
+            continue
+        style = _BOX_STYLE.fullmatch(item)
+        if style is None:
+            return False
+        pattern = _BOX_STYLE_ITEM if style["key"] == "style" else _BOX_LABEL_STYLE_ITEM
+        if not all(pattern.fullmatch(x) for x in _split_commas(style["body"])):
+            return False
+    return True
+
+
+def _peeled(text: str) -> str:
+    """``text`` without the braces and dollar signs that wrap it."""
+    text = text.strip()
+    while len(text) > 1 and (text[0], text[-1]) in (("{", "}"), ("$", "$")):
+        text = text[1:-1].strip()
+    return text
+
+
+_ARGUMENT_PATTERNS = {"i": _INTEGER, "l": _LENGTH, "s": _LINE_STYLE}
+
+
+def _argument_ok(kind: str, arg: str) -> bool:
+    """Whether ``arg`` is of ``kind`` (the letters of ``_SKIPPED`` and ``_CARRIES``)."""
+    pattern = _ARGUMENT_PATTERNS.get(kind)
+    if pattern is not None:
+        return pattern.fullmatch(arg) is not None
+    if kind == "q":
+        return arg.strip() == "q"
+    text = _peeled(arg)
+    if kind in "et":
+        return not text or (kind == "t" and _FONT_SWITCH.fullmatch(text) is not None)
+    return kind in "ux"  # u: the reader reads it; x: a cover's or a phantom's argument, never drawn
+
+
+def _skippable(t: Tok) -> bool:
+    """Whether the skipped command ``t`` carries nothing but harmless options and arguments."""
+    if t.name == "gategroup":
+        if len(t.args) == QCIRCUIT_GATEGROUP:  # \\gategroup{r1}{c1}{r2}{c2}{margin}{style}
+            return not t.opts and all(map(_argument_ok, "iiiils", t.args))
+        return (  # quantikz \\gategroup[wires,steps=n,style={..}]{label}
+            len(t.opts) == 1
+            and _gategroup_options_ok(t.opts[0])
+            and len(t.args) == 1
+            and _argument_ok("t", t.args[0])
+        )
+    kinds = _SKIPPED[t.name]
+    return not t.opts and len(t.args) == len(kinds) and all(map(_argument_ok, kinds, t.args))
+
+
+# What a spacing command may carry and still have no effect on the circuit: the kinds of its brace
+# arguments (a width is a length, an invisible box holds anything because nothing of it is drawn).
+# A command in ``SPACING`` with anything else (``\\small{\\gate{X}}``, ``\\quad{n}``) is not
+# spacing: it swallowed content, so it is an unparsed item.
+_SPACING_ARGS = {
+    **dict.fromkeys(("hspace", "hspace*", "vspace", "vspace*"), "l"),
+    **dict.fromkeys(("hphantom", "vphantom", "phantom"), "x"),
+    "rule": "ll",
+}
+
+
+def _spacing(t: Tok) -> bool:
+    """Whether ``t`` is a spacing command with only the options and arguments of a spacing."""
+    if t.name not in SPACING:
+        return False
+    kinds = _SPACING_ARGS.get(t.name, "")
+    lengths = all(_LENGTH.fullmatch(o) for o in t.opts) and len(t.opts) <= 1  # rule[raise]{w}{h}
+    return (
+        (lengths if t.name == "rule" else not t.opts)
+        and len(t.args) == len(kinds)
+        and all(map(_argument_ok, kinds, t.args))
+    )
+
+
+# What the options of an operation may hold. An option is read only when the reader of its command
+# uses it (wires, open, vertical wire=c) or when it is the one fixed word of a kind that cannot
+# hide content (how a bracket is drawn, a bundle's slash, a width). Everything else (wire style,
+# label, style, nwires, a colour) is dropped by the reader, and a dropped option can carry a label
+# or a dotted or hidden wire that says gates are left out: the operation is then unparsed.
+# A closed appearance list for the style of a box: one fill, and nothing else. The fill is a base
+# colour of xcolor, alone or mixed with white to a strength of 10 to 100 percent (cyan, red!10,
+# gray!40). White and black are not in it, nor is a mix under 10 percent: a white fill hides the
+# box, and a black one hides its label, which is drawn in black. A colour the author defined (a
+# name such as mygreen or bg) is not in it either, for the definition may be white and is not in
+# the block. `draw` and `text` are not in it: a pale line or label hides a gate (draw=white,
+# text=gray!5). thick, dashed, rounded corners, sizes, a font and rgb values are unparsed too.
+_FILL_COLOURS = (
+    "blue|brown|cyan|darkgray|gray|green|lightgray|lime|magenta|olive|orange|pink|purple|red"
+    "|teal|violet|yellow"
+)
+_APPEARANCE = re.compile(
+    rf"\s*style\s*=\s*\{{\s*fill\s*=\s*(?:{_FILL_COLOURS})(?:![1-9][0-9]|!100)?\s*\}}\s*"
+)
+_OPTION_KINDS: dict[str, re.Pattern[str]] = {
+    "wires": re.compile(r"\s*(?:[0-9]{1,6}|wires\s*=\s*[0-9]{1,6})\s*"),
+    "appearance": _APPEARANCE,
+    "open": re.compile(r"\s*open\s*"),
+    "classical": re.compile(r"\s*vertical wire\s*=\s*[cq]\s*"),
+    "brackets": re.compile(r"\s*brackets\s*=\s*(?:none|left|right|both)\s*"),
+    "alternate": re.compile(r"\s*alternate\s*"),
+    "length": _LENGTH,
+    "offset": _INTEGER,
+}
+
+
+class _Carries(NamedTuple):
+    first: tuple[str, ...]  # the kinds of option the first [..] may hold
+    later: tuple[str, ...]  # the kinds the following [..] may hold
+    args: str  # the kinds of the brace arguments; u is one that the reader reads
+
+
+_WIRES = ("wires", "brackets")
+_CARRIES: dict[str, _Carries] = {
+    "lstick": _Carries(_WIRES, (), "u"),
+    "rstick": _Carries(_WIRES, (), "u"),
+    "midstick": _Carries(_WIRES, (), "u"),
+    "push": _Carries(_WIRES, (), "u"),
+    "qwbundle": _Carries(("alternate",), (), "u"),
+    "gate": _Carries(("wires", "appearance"), ("length",), "u"),
+    **dict.fromkeys(
+        ("meter", "meterD", "meterB", "measure", "measureD"),
+        _Carries(("wires", "appearance"), ("length",), "u"),
+    ),
+    "multigate": _Carries((), (), "uu"),
+    "sgate": _Carries((), (), "uu"),
+    "ghost": _Carries((), (), "x"),
+    **dict.fromkeys(("ctrl", "octrl", "ctrlo"), _Carries(("open", "classical"), (), "u")),
+    **dict.fromkeys(
+        ("control", "ocontrol", "controlo", "targX", "qswap", "trash", "ground"),
+        _Carries((), (), "e"),
+    ),
+    **dict.fromkeys(("swap", "targ"), _Carries((), (), "u")),
+    "phase": _Carries((), (), "u"),
+    **dict.fromkeys(("qwx", "cwx"), _Carries(("offset",), (), "")),
+    **dict.fromkeys(("vqw", "vcw"), _Carries((), (), "u")),
+    "slice": _Carries((), (), "u"),
+    "barrier": _Carries(("length",), (), "i"),  # Qcircuit \\barrier[0em]{5}: only its height
+    "permute": _Carries((), (), "u"),
+}  # \\wire is not here: _r_wire reads its marks with a grammar of their own
+
+
+def _options_ok(opts: list[str], first: tuple[str, ...], later: tuple[str, ...]) -> bool:
+    """Whether every item of the options is of a kind in ``first`` (the first ``[..]``) or in
+    ``later`` (the others), and no item gives the wires twice."""
+    wires = 0
+    for k, opt in enumerate(opts):
+        for item in _split_commas(opt):
+            if not item.strip():
+                continue
+            kind = next(
+                (n for n in (first if k == 0 else later) if _OPTION_KINDS[n].fullmatch(item)), ""
+            )
+            if not kind:
+                return False
+            wires += kind == "wires"
+    return wires <= 1
+
+
+def _carries_only_read(t: Tok) -> bool:
+    """Whether the options and arguments of ``t`` that its reader does not read are empty or of
+    a kind that cannot hide content; a command that is not in ``_CARRIES`` is read as it is."""
+    spec = _CARRIES.get(t.name)
+    if spec is None:
+        return True
+    return (
+        _options_ok(t.opts, spec.first, spec.later)
+        and len(t.args) <= len(spec.args)
+        and all(_argument_ok(k, a) for k, a in zip(spec.args, t.args, strict=False))
+    )
 
 
 def _unparsed(t: Tok) -> Op:
@@ -461,25 +849,30 @@ def _first(t: Tok) -> str:
 
 def _r_lstick(t: Tok, ops: list[Op], facts: Facts) -> None:
     if facts.label is not None:
-        ops.append(Op("text", _first(t)))
+        ops.append(Op("text", _first(t), src=t.src))
         return
     wires = wires_option(t.opts)
     if wires is None or wires < 1:
         ops.append(_unparsed(t))
     else:
-        facts.label = (_first(t), wires)
+        facts.label, facts.label_tok = (_first(t), wires), t
 
 
 def _r_rstick(t: Tok, ops: list[Op], facts: Facts) -> None:
     wires = wires_option(t.opts)
-    if wires is None or wires < 1:
+    if wires is None or wires < 1 or facts.out:  # a second one would replace the first
         ops.append(_unparsed(t))
-    else:
-        facts.out, facts.out_span = _first(t), wires
+        return
+    facts.out, facts.out_span, facts.out_src, facts.out_tok = _first(t), wires, t.src, t
+    if not facts.out:
+        _use(t)  # an empty label says nothing
 
 
 def _r_bundle(t: Tok, ops: list[Op], facts: Facts) -> None:
-    facts.bundle = _first(t)
+    if facts.bundle is not None:  # a second one in a cell would replace the first
+        ops.append(_unparsed(t))
+    else:
+        facts.bundle, facts.bundle_tok = _first(t), t
 
 
 def _r_gate(t: Tok, ops: list[Op], facts: Facts) -> None:
@@ -515,8 +908,9 @@ def _r_ctrl(t: Tok, ops: list[Op], facts: Facts) -> None:
     if off is None:
         ops.append(_unparsed(t))
         return
-    classical = any("verticalwire=c" in o.replace(" ", "") for o in t.opts)
-    open_ = t.name != "ctrl" or "open" in "".join(t.opts)
+    items = [item for o in t.opts for item in _split_commas(o)]
+    classical = any(re.fullmatch(r"\s*vertical wire\s*=\s*c\s*", item) for item in items)
+    open_ = t.name != "ctrl" or any(_OPTION_KINDS["open"].fullmatch(item) for item in items)
     ops.append(Op("ctrl", link=[off] if off else [], open_=open_, classical=classical))
 
 
@@ -525,7 +919,10 @@ def _r_control(t: Tok, ops: list[Op], facts: Facts) -> None:
 
 
 def _r_targ(t: Tok, ops: list[Op], facts: Facts) -> None:
-    ops.append(Op("targ"))
+    """quantikz ``\\targ{-1}``: the target draws the vertical wire to its control, as ``\\ctrl{1}``
+    does from the other end; the offset is read like a control's."""
+    off = int_arg(t.args[0], 0) if t.args else 0
+    ops.append(Op("targ", link=[off] if off else []) if off is not None else _unparsed(t))
 
 
 def _r_swap(t: Tok, ops: list[Op], facts: Facts) -> None:
@@ -564,15 +961,70 @@ def _r_vqw(t: Tok, ops: list[Op], facts: Facts) -> None:
         ops.append(Op("wire", link=[off], classical=(t.name == "vcw")))
 
 
+# What a \wire mark may carry and still be skipped: the closed grammar of a wire name that
+# quantum-sim reads, copied from quantum_sim.formats (_SUBSCRIPT, _NAME_HEAD, _SYMBOL): one letter,
+# alone or in \mathrm{} or \text{}, up to two digits, a subscript, primes. Never a word and never a
+# list of dots macros: no list is complete. packages/quantum-sim/tests/fixtures/wire_names.json
+# holds samples that both packages must give the same verdict on, so the copies cannot drift.
+_WIRE_SUB = r"_(?:[A-Za-z0-9]|\{[A-Za-z0-9][A-Za-z0-9+,-]{0,7}\})"
+_WIRE_HEAD = r"(?:[A-Za-z]|\\(?:mathrm|text)\{[A-Za-z]\})[0-9]{0,2}'*"
+_WIRE_NAME = re.compile(rf"{_WIRE_HEAD}(?:{_WIRE_SUB})?'*")
+# After the quoted name of a \wire label, only these TikZ options may follow, alone or in braces,
+# apart or separated by commas: where the label sits and how far along the wire. Whatever else
+# (dotted, dashed, draw=none, opacity, label=, a word) can change what the wire path shows, and a
+# dotted or hidden wire can mean gates or wires that the figure leaves out.
+_PLACEMENT = r"(?:(?:above|below)(?:\s+(?:left|right))?|left|right)"
+_POSITION = r"pos\s*=\s*-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+_LABEL_OPTION = rf"(?:{_PLACEMENT}|{_POSITION})"
+_LABEL_OPTIONS = rf"{_LABEL_OPTION}(?:\s*,\s*{_LABEL_OPTION})*"
+_LABEL_GROUP = r"(?:\{\s*" + _LABEL_OPTIONS + r"\s*\}|" + _LABEL_OPTIONS + ")"
+_WIRE_LABEL = re.compile(
+    r'"(?P<name>[^"]*)"(?:\s*,?\s*' + _LABEL_GROUP + r"(?:\s*,\s*" + _LABEL_GROUP + r")*)?\s*"
+)
+
+
+def _plain_wire_text(text: str) -> bool:
+    """Whether ``text`` is empty or a plain wire name, alone or between dollar signs or braces."""
+    text = _peeled(text)
+    return not text or _WIRE_NAME.fullmatch(text) is not None
+
+
+def _plain_wire_label(opt: str) -> bool:
+    opt = opt.strip()
+    if not opt:
+        return True
+    label = _WIRE_LABEL.fullmatch(opt)
+    return label is not None and _plain_wire_text(label["name"])
+
+
+# The type argument of a quantikz \\wire[dir][len][label]{type}: q is a quantum wire, c a classical
+# one, a the type the wire already has (automatic), b a bundle. A vertical wire (d, u) joins two
+# rows, so it is q or c (a classical one makes what it joins classically controlled). A horizontal
+# one (l, r) only continues the wire of its row, so it is q or a; c or b there changes the type of
+# the wire. Any other argument is unparsed, and so is a label on a vertical wire: the name grammar
+# below fits a wire on its row, not one between two rows.
+_WIRE_TYPES = {"d": ("q", "c"), "u": ("q", "c"), "l": ("q", "a"), "r": ("q", "a")}
+
+
 def _r_wire(t: Tok, ops: list[Op], facts: Facts) -> None:
-    """quantikz ``\\wire[d][2]{q}``."""
+    """quantikz ``\\wire[d][2]{q}``. A mark may be skipped only when its type is one the direction
+    allows and its label and options say nothing but a wire name; any other label (dots in any
+    spelling, a word, a macro) can stand for gates or wires the drawing leaves out, so the item is
+    unparsed."""
     d = t.opts[0].strip() if t.opts else ""
     length = int_arg(t.opts[1], 1) if len(t.opts) > 1 else 1
-    if d in ("d", "u") and length is not None:
-        ops.append(
-            Op("wire", link=[length if d == "d" else -length], classical=t.args[:1] == ["c"])
-        )
-    elif d not in ("l", "r"):
+    kind = t.args[0].strip() if len(t.args) == 1 else None
+    labels = t.opts[2:]
+    if length is None or kind not in _WIRE_TYPES.get(d, ()):
+        ops.append(_unparsed(t))
+    elif d in ("d", "u"):
+        if any(o.strip() for o in labels):
+            ops.append(_unparsed(t))
+        else:
+            ops.append(Op("wire", link=[length if d == "d" else -length], classical=kind == "c"))
+    elif all(_plain_wire_label(o) for o in labels):
+        _use(t)  # the wire of its row goes on, with a name drawn on it
+    else:
         ops.append(_unparsed(t))
 
 
@@ -584,7 +1036,7 @@ def _r_push(t: Tok, ops: list[Op], facts: Facts) -> None:
     elif txt.strip("\\ ") in ELLIPSIS or txt == "":
         ops.append(Op("ellipsis") if txt else Op("text", ""))
     else:
-        ops.append(Op("text", txt))
+        ops.append(Op("text", txt, src=t.src))
 
 
 def _r_discard(t: Tok, ops: list[Op], facts: Facts) -> None:
@@ -755,6 +1207,10 @@ class Names:
 
     def wire(self, r: int) -> str:
         return f"wire {self.num(r)}"
+
+    def place(self, r: int) -> str:
+        """Where something sits: its wire, or "no wire" on a row that draws none."""
+        return self.wire(r) if r in self.number else "no wire"
 
     def numbers(self, rows: Iterable[int]) -> list[int]:
         """The numbers of ``rows``, each wire once, top to bottom."""
@@ -1096,19 +1552,25 @@ class _Grid:
     bundles: dict[int, str] = field(default_factory=dict)
     blank: list[bool] = field(default_factory=list)
     dots: list[bool] = field(default_factory=list)
+    # the token and the column of each wire fact the legends show: (kind, row) -> (token, column)
+    facts: dict[tuple[str, int], tuple[Tok, int]] = field(default_factory=dict)
+    # every token of the grid that no rule had consumed when its cell was read: (token, row, column)
+    ledger: list[tuple[Tok, int, int]] = field(default_factory=list)
 
 
-def _attach_stick(ops: list[Op], previous: list[Op], label: str) -> None:
+def _attach_stick(ops: list[Op], previous: list[Op], label: str, tok: Tok) -> None:
     """Qcircuit writes the label of a dot gate in its own cell or in the cell to its right: it
     names the gate in this cell, else the dots in the cell before, else it is text."""
     named = [o for o in ops if o.kind in ("ctrl", "targ", "gate", "phase", "swap")]
     left = [o for o in previous if o.kind in ("ctrl", "phase")]
     if named:
         named[0].tag = label
+        named[0].toks.append(tok)
     elif left and not ops:
         left[0].tag = label
+        left[0].toks.append(tok)
     else:
-        ops.append(Op("text", label))
+        ops.append(Op("text", label, src=tok.src, toks=[tok]))
 
 
 def _spanned_rows(g: _Grid) -> list[bool]:
@@ -1150,31 +1612,122 @@ def _blank_rows(g: _Grid, grid: list[list[str]], kind: str, drawn: list[bool]) -
     return blank
 
 
+def _covered_from(boxes: list[tuple[int, int]], r: int) -> int:
+    """The first column where a multi-wire gate of a row above covers row ``r``, or a number
+    past every column. ``boxes`` holds ``(column, last covered row + 1)``, a heap by column;
+    the boxes that end before ``r`` are dropped, for rows are read in order."""
+    while boxes and boxes[0][1] <= r:
+        heappop(boxes)
+    return boxes[0][0] if boxes else 1 << 30
+
+
+def _take_label(
+    g: _Grid, at: tuple[int, int], facts: Facts, ops: list[Op], *, legend: bool
+) -> None:
+    """An ``\\lstick`` is the legend of row ``r`` when ``legend``; otherwise (a second one, one
+    drawn after content, or one in the cell of an operation) it is a text item at its place. An
+    empty one says nothing. ``at`` is the row and the column of the cell."""
+    r, c = at
+    tok = facts.label_tok
+    if facts.label is None or tok is None:
+        return
+    text, wires = facts.label
+    if legend and text:
+        g.labels[r], g.spans[r] = text, wires
+        g.facts["label", r] = (tok, c)
+    elif text:
+        ops.append(Op("text", text, src=tok.src, toks=[tok]))
+    else:
+        _use(tok)
+
+
+def _shelve_facts(g: _Grid, at: tuple[int, int], facts: Facts, ops: list[Op]) -> None:
+    """Put the output label, the bundle and the stick label of a cell where the wire lines and the
+    gates read them. A second output label or bundle on a row would replace the first: it is an
+    unparsed item instead."""
+    r, c = at
+    if facts.out and facts.out_tok is not None:
+        if r in g.outs:
+            ops.append(Op("unparsed", src=facts.out_src, toks=[facts.out_tok]))
+        else:
+            g.outs[r], g.out_spans[r] = facts.out, facts.out_span
+            g.facts["out", r] = (facts.out_tok, c)
+    if facts.bundle is not None and facts.bundle_tok is not None:
+        if r in g.bundles:
+            ops.append(Op("unparsed", src=facts.bundle_tok.src, toks=[facts.bundle_tok]))
+        else:
+            g.bundles[r] = facts.bundle
+            g.facts["bundle", r] = (facts.bundle_tok, c)
+    if facts.stick and facts.stick_tok is not None:
+        _attach_stick(ops, g.rows[r].get(c - 1, []), facts.stick, facts.stick_tok)
+
+
+# The type of a Qcircuit wire follows its row from left to right. A cell's \qw or \cw (quantikz
+# has the same two, as legacy commands) draws the segment of the wire that enters the cell, so the
+# wire is classical from a \cw on, until a \qw says otherwise. A list of gates cannot say what a
+# gate drawn on a classical wire, a control that starts on one, a wire that turns classical with
+# no measurement before it in its row, or one that turns quantum again would be, and quantum-sim
+# v1 refuses a classical control: each of them is unparsed.
+_ON_A_WIRE = frozenset({"gate", "ctrl", "targ", "swap", "phase", "meter"})
+
+
+class _RowWire:
+    """The type of the wire of one row as its cells are read, left to right."""
+
+    def __init__(self) -> None:
+        self.kind = "q"
+        self.metered = False  # a measurement stands left of the cell being read
+
+    def _refused(self, tok: Tok, kind: str, mixed: bool) -> bool:
+        if mixed:  # \qw and \cw in one cell: which type the wire has is not said
+            return True
+        if kind == "q":
+            return self.kind == "c"  # nothing says how a classical wire becomes quantum
+        reaches = [o.strip() for o in tok.opts if o.strip()]
+        return reaches not in ([], ["-1"]) or not (self.kind == "c" or self.metered)
+
+    def cell(self, ops: list[Op], facts: Facts) -> None:
+        """Type the segments of the cell: an unparsed item for each that is refused, and the
+        operations drawn on a classical wire marked."""
+        kinds = {k for _, k in facts.segments}
+        for tok, kind in facts.segments:
+            if self._refused(tok, kind, len(kinds) > 1):
+                ops.append(Op("unparsed", src=tok.src, toks=[tok]))
+        if len(kinds) == 1:
+            self.kind = kinds.pop()
+        if self.kind == "c":
+            for o in ops:
+                o.on_classical = o.kind in _ON_A_WIRE
+        self.metered = self.metered or any(o.kind == "meter" for o in ops)
+
+
 def _read_grid(grid: list[list[str]], kind: str) -> _Grid:
     """Every cell of ``grid`` read: operations by row and column, and the wire facts."""
     qc = kind == "qcircuit"
     g = _Grid(rows=[{} for _ in grid])
     drawn = [False] * len(grid)
+    boxes: list[tuple[int, int]] = []
     for r, row in enumerate(grid):
         seen_label = False
+        row_wire = _RowWire()
+        # before: something is drawn left of this cell, or a box of a row above covers this row
+        # from this column on (quantikz leaves the cells under a \\gate[2] empty)
+        under = _covered_from(boxes, r)
+        before = False
         for c, cell in enumerate(row):
             ops, facts = cell_ops(cell, qc)
+            g.ledger += [(t, r, c) for t in facts.pending]
             drawn[r] = drawn[r] or facts.wire or facts.bundle is not None
-            if facts.label is not None:
-                lab, wires = facts.label
-                if not seen_label and lab:
-                    g.labels[r], g.spans[r] = lab, wires
-                elif seen_label and lab:
-                    ops.append(Op("text", lab))  # a second \lstick further right: text there
-                seen_label = True
-            if facts.out:
-                g.outs[r], g.out_spans[r] = facts.out, facts.out_span
-            if facts.bundle is not None:
-                g.bundles[r] = facts.bundle
-            if facts.stick:
-                _attach_stick(ops, g.rows[r].get(c - 1, []), facts.stick)
+            before = before or c >= under
+            _take_label(g, (r, c), facts, ops, legend=not (seen_label or before or ops))
+            seen_label = seen_label or facts.label is not None
+            before = before or bool(ops) or facts.wire or facts.bundle is not None
+            _shelve_facts(g, (r, c), facts, ops)
+            row_wire.cell(ops, facts)
             if ops:
                 g.rows[r][c] = ops
+                for end in (r + o.span for o in ops if o.span > 1):
+                    heappush(boxes, (c, end))
                 drawn[r] = drawn[r] or any(o.kind not in _NOT_A_WIRE for o in ops)
     # rows that draw nothing (a leading "\\", a spacer row) get no wire number; rows that only
     # hold dots are listed once as "more wires"
@@ -1213,8 +1766,24 @@ def _wire_lines(g: _Grid, names: Names) -> list[str]:
             bits.append(f"bundle {g.bundles[r]}".strip())
         if r in g.outs:
             bits.append(f"output {g.outs[r]}" + _label_span(names, r, g.out_spans.get(r, 1)))
+        for kind in ("label", "out", "bundle"):
+            if (kind, r) in g.facts:
+                _use(g.facts[kind, r][0])  # the legend shows it
         lines.append(f"{names.num(r)}" + (f" = {', '.join(bits)}" if bits else ""))
     return lines
+
+
+def _unlisted_facts(g: _Grid) -> None:
+    """A legend fact on a row that the wire lines do not list (a row that draws no wire, or a row
+    of dots) would be dropped. It becomes an unparsed item at its cell, unless it is only dots."""
+    for (kind, r), (tok, c) in sorted(g.facts.items(), key=lambda item: (item[0][1], item[1][1])):
+        if tok.used:
+            continue
+        text = {"label": g.labels, "out": g.outs, "bundle": g.bundles}[kind][r]
+        if kind != "bundle" and _DOTS_TEXT.fullmatch(text.strip()):
+            _use(tok)  # dots on a row of dots
+        else:
+            g.rows[r].setdefault(c, []).append(Op("unparsed", src=tok.src, toks=[tok]))
 
 
 def _column_groups(
@@ -1249,13 +1818,27 @@ def _column_groups(
     return ordered, bad
 
 
-def _loose_item(r: int, o: Op, names: Names, circ: Circuit) -> tuple[str, GateOp | None]:
+def _reported(o: Op, blank: bool) -> Op:
+    """``o`` as the list reports it. Text that is not a ket |0> or |1>, and text or a sign on a row
+    that draws no wire, is unparsed: it can say that the drawing leaves something out (``repeat n
+    times``, ``\\times n``, ``(gates omitted)``). Empty text says nothing and stays as it is."""
+    if o.kind == "text" and not o.label:
+        return o
+    if (o.kind in ("text", "sep") and blank) or (o.kind == "text" and not _harmless_text(o.label)):
+        return Op("unparsed", src=o.src or o.label)
+    return o
+
+
+def _loose_item(r: int, o: Op, names: Names, circ: Circuit, g: _Grid) -> tuple[str, GateOp | None]:
+    """The item of an operation that no vertical wire joins to another."""
     circ.n_items += 1
-    wire = (names.num(r),)
+    _consume(o)
+    wire = (names.num(r),) if r in names.number else ()
+    o = _reported(o, g.blank[r])
     if o.kind == "unparsed":
         circ.n_unparsed += 1
         source = _one_line(o.src)[:80]
-        return f"unparsed on {names.wire(r)}: {source}", GateOp(
+        return f"unparsed on {names.place(r)}: {source}", GateOp(
             "unparsed", targets=wire, source=source
         )
     if o.kind == "text":
@@ -1307,15 +1890,17 @@ def _meets_itself(op: GateOp) -> bool:
 
 
 def _unparsed_group(
-    grp: list[tuple[int, Op]], names: Names, circ: Circuit
+    grp: list[tuple[int, Op]], names: Names, circ: Circuit, why: str = ""
 ) -> tuple[list[str], list[GateOp]]:
     """The item for a group that the list does not read; the group is counted as one item that is
-    unparsed (``circ.n_items`` is counted by the caller)."""
+    unparsed (``circ.n_items`` is counted by the caller). ``why`` says what is wrong with it when
+    the combination is not."""
     circ.n_unparsed += 1
     srcs = ", ".join(
         f"{names.wire(r)}: {o.kind}{(' ' + o.label) if o.label else ''}" for r, o in grp
     )
     rows = {r for r, _ in grp}
+    srcs += f", {why}" if why else ""
     group = GateOp("unparsed_group", targets=tuple(names.numbers(rows)), source=srcs)
     return [f"unparsed joined operation ({srcs})"], [group]
 
@@ -1327,6 +1912,11 @@ def _group_items(
     and the operations they describe."""
     items: list[str] = []
     ops: list[GateOp] = []
+    for _, o in joined:
+        _consume(o)  # whatever the group becomes, a gate, an unparsed group or a bare wire
+    if any(o.on_classical for _, o in joined):
+        circ.n_items += 1  # a gate or a control drawn on a classical wire (see _RowWire)
+        return _unparsed_group(joined, names, circ, "drawn on a classical wire")
     # a classical wire in the group (\\cwx, \\vcw) makes what it joins classically controlled
     classical = any(o.classical for _, o in joined)
     grp = [
@@ -1335,7 +1925,10 @@ def _group_items(
         if o.kind != "wire" or len(joined) == 1
     ]
     if not grp or all(o.kind == "wire" for _, o in grp):
-        return items, ops  # a vertical wire with nothing on it in this column
+        # a vertical wire with nothing joined to it in this column: it may pass through a box or
+        # join a gate the list does not have, and a wire that is dropped says nothing
+        circ.n_items += 1
+        return _unparsed_group(joined, names, circ, "a vertical wire with nothing joined")
     rows = {r for r, _ in grp}
     if len(rows) == 1 and len(grp) == len(joined) > 1 and not any(o.link for _, o in grp):
         # several independent ops on one wire (\gate{H} \meter in one cell) in order; a vertical
@@ -1376,10 +1969,9 @@ def _step_items(
         group_items, group_ops = _group_items(joined, g, names, circ)
         items += group_items
         ops += group_ops
-    # text on a row that is not a wire (a caption, a layout row) is not "on a wire"
     for r, o in col:
-        if o.kind in _LOOSE and not (g.blank[r] and o.kind in ("text", "sep")):
-            text, op = _loose_item(r, o, names, circ)
+        if o.kind in _LOOSE:
+            text, op = _loose_item(r, o, names, circ, g)
             if op is not None:
                 items.append(text)
                 ops.append(op)
@@ -1406,42 +1998,125 @@ def grid_circuit(body: str, kind: str) -> Circuit:
     names = Names([r for r in range(len(g.rows)) if not g.blank[r]])
     circ = Circuit(kind)
     circ.wires = _wire_lines(g, names)
-    columns: dict[int, list[tuple[int, Op]]] = {}
-    for r, row in enumerate(g.rows):
-        for c, ops in row.items():
-            columns.setdefault(c, []).extend((r, o) for o in ops)
-    part: list[str] = []
-    steps: list[tuple[GateOp, ...]] = []
-    step = 0
-    for c in sorted(columns):
-        col = [
-            (r, o)
-            for r, o in columns[c]
-            if o.kind != "cover" and not (g.dots[r] and o.kind == "ellipsis")
-        ]
-        if not col:
+    _unlisted_facts(g)
+    parts = _Parts(circ)
+    for col in _columns(g):
+        equality = _equality(col)
+        if equality is None:
+            parts.add(*_step_items(col, g, names, circ))
             continue
-        if any(o.kind == "sep" for _, o in col) and all(o.kind in ("sep", "text") for _, o in col):
-            lab = next(o.label for _, o in col if o.kind == "sep")
-            if part:
-                circ.parts.append(part)
-                circ.steps.append(steps)
-            part = [f"[{lab}: the steps below draw the right-hand side, an equivalent circuit]"]
-            steps = [(GateOp("sep", lab),)]
-            step = 0
-            continue
-        items, ops = _step_items(col, g, names, circ)
-        if items:
-            step += 1
-            part.append(f"Step {step}: " + "; ".join(items))
-            steps.append(tuple(ops))
-    if part:
-        circ.parts.append(part)
-        circ.steps.append(steps)
+        label, rest = equality
+        parts.split(label)
+        if rest:  # a ket drawn in the column of the sign opens the right-hand side
+            parts.add(*_step_items(rest, g, names, circ))
+    parts.add_unconsumed(_unconsumed(g, circ))
+    parts.close()
     if not circ.parts:
         return Circuit(kind, "unparsed", "no operation found")
     _grade(circ)
     return circ
+
+
+# The signs quantum-sim compares the two sides of (formats.py, _EQUALITY_SIGNS, without \iff, which
+# docingest does not read as a sign). An arrow or \approx is drawn between circuits too, but it
+# says "leads to" or "about", and the sides are not compared across it.
+_EQUALITY_SIGNS = frozenset({"=", "\\equiv", "\\simeq", "\\Leftrightarrow", "\\cong"})
+
+
+def _claim_of(sign: str) -> str:
+    """What the circuit after the sign ``sign`` is said to be, in the words of the list."""
+    if sign in _EQUALITY_SIGNS:
+        return "an equivalent circuit"
+    return "after an arrow or approximation sign, not compared"
+
+
+class _Parts:
+    """The parts of a circuit being built: the sides of its drawn equalities, each a list of lines
+    and, as data, a list of steps."""
+
+    def __init__(self, circ: Circuit) -> None:
+        self.circ = circ
+        self.lines: list[str] = []
+        self.steps: list[tuple[GateOp, ...]] = []
+        self.number = 0
+
+    def add(self, items: list[str], ops: list[GateOp]) -> None:
+        if items:
+            self.number += 1
+            self.lines.append(f"Step {self.number}: " + "; ".join(items))
+            self.steps.append(tuple(ops))
+
+    def add_unconsumed(self, found: list[tuple[str, GateOp]]) -> None:
+        self.add([text for text, _ in found], [op for _, op in found])
+
+    def close(self) -> None:
+        if self.lines:
+            self.circ.parts.append(self.lines)
+            self.circ.steps.append(self.steps)
+
+    def split(self, label: str) -> None:
+        """Start the right-hand side of an equality or an arrow drawn as ``label``."""
+        self.close()
+        self.lines = [f"[{label}: the steps below draw the right-hand side, {_claim_of(label)}]"]
+        self.steps = [(GateOp("sep", label),)]
+        self.number = 0
+
+
+def _columns(g: _Grid) -> Iterator[list[tuple[int, Op]]]:
+    """The operations of each column of the grid, left to right, that make steps. A ghost covers
+    a box and the dots of a row of dots are listed once with the row: both are consumed here."""
+    columns: dict[int, list[tuple[int, Op]]] = {}
+    for r, row in enumerate(g.rows):
+        for c, ops in row.items():
+            columns.setdefault(c, []).extend((r, o) for o in ops)
+    for c in sorted(columns):
+        col: list[tuple[int, Op]] = []
+        for r, o in columns[c]:
+            if o.kind == "cover" or (g.dots[r] and o.kind == "ellipsis"):
+                _consume(o)
+            else:
+                col.append((r, o))
+        if col:
+            yield col
+
+
+def _equality(col: list[tuple[int, Op]]) -> tuple[str, list[tuple[int, Op]]] | None:
+    """The sign and the rest of a column that draws an equality: signs, and text beside them.
+    The signs that say the same as the first are consumed; any other sign and the text are the
+    rest. None for a column that is not one."""
+    if not any(o.kind == "sep" for _, o in col) or any(
+        o.kind not in ("sep", "text") for _, o in col
+    ):
+        return None
+    label = next(o.label for _, o in col if o.kind == "sep")
+    rest = []
+    for r, o in col:
+        if o.kind == "sep" and o.label == label:
+            _consume(o)
+        else:
+            rest.append((r, o))
+    return label, rest
+
+
+def _unconsumed(g: _Grid, circ: Circuit) -> list[tuple[str, GateOp]]:
+    """The consumption check: an unparsed item for every token of the grid that no rule consumed,
+    naming the token and its place. Nothing should be left, because each rule that drops a token
+    marks it and each item the list writes consumes the tokens it was read from; this is what
+    keeps a command or a text run that no rule knows from vanishing."""
+    found: list[tuple[str, GateOp]] = []
+    for tok, r, c in g.ledger:
+        if tok.used:
+            continue
+        source = _one_line(tok.src)[:80]
+        circ.n_items += 1
+        circ.n_unparsed += 1
+        found.append(
+            (
+                f"unparsed (read by no rule) at row {r + 1}, column {c + 1}: {source}",
+                GateOp("unparsed", source=source),
+            )
+        )
+    return found
 
 
 def _grade(circ: Circuit) -> None:
@@ -1503,6 +2178,10 @@ def _yq_operation(
         lab, rest = (clean_label(rest[1 : end - 1]), rest[end:]) if end > 0 else ("", "")
     if not m or not rest.strip() or "{" in rest or "(" in rest:
         return None
+    if lab and m.group("g") not in ("box", "measure", "barrier", "discard"):
+        return (
+            None  # only these four keep the value; h {..} a, cnot {..} b | a and the rest drop it
+        )
     target, _, control = rest.partition("|")
     tg = [x.strip() for x in target.split(",") if x.strip()]
     cs = [x.strip() for x in control.split(",") if x.strip()]
@@ -1573,6 +2252,8 @@ def yquant_circuit(body: str) -> Circuit:
     steps: list[str] = []
     data: list[tuple[GateOp, ...]] = []
     unparsed = items = 0
+    # each statement is a token, consumed only by the rule of a register (qubit, cbit) or of a gate
+    # below; any other statement, with anything it carries, is unparsed (comments are cut first)
     for stmt in [s.strip() for s in strip_comments(body).split(";") if s.strip()]:
         items += 1
         m = _YQ_REGISTER.match(stmt)
@@ -1618,14 +2299,42 @@ def _label_of(source: str) -> str:
     return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
 
 
-def find_circuits(src: str) -> list[tuple[str, str | None, str]]:
-    """``(kind, body, label)`` of each circuit in a block, in source order. ``body`` is None when
-    the environment or group never closes. A circuit read is not looked into again, so the
-    circuits of one block are disjoint and a missing end is looked for once."""
+# What the options of a circuit environment may hold. The reader reads none of them, so an option
+# is let through only when it is a size, a scale or a line weight, which draw the same gates, or
+# the wire types q, the type every wire has by default. Anything else (wire types={q,c},
+# remove end wires, execute at end picture, a yquant option that renames registers) can add,
+# remove or rename a wire, and the circuit is unparsed.
+_NUMBER = r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+_UNIT_LENGTH = rf"{_NUMBER}\s*(?:pt|em|ex|cm|mm|in|bp|pc)"
+_ENVIRONMENT_OPTION = re.compile(
+    rf"\s*(?:(?:row |column )?sep\s*=\s*(?:{_UNIT_LENGTH}"
+    rf"|\{{\s*{_UNIT_LENGTH}\s*,\s*between origins\s*\}}|tiny|scriptsize|small|normal|large|huge)"
+    rf"|baseline\s*=\s*{_UNIT_LENGTH}|scale\s*=\s*{_NUMBER}|thick|thin lines|transparent"
+    r"|font\s*=\s*\\(?:tiny|scriptsize|footnotesize|small|normalsize|large)"
+    r"|slice style\s*=\s*[a-z]+(?:![0-9]{1,3})*"
+    r"|wire types\s*=\s*\{\s*q(?:\s*,\s*q)*\s*\})?\s*"
+)
+_QCIRCUIT_OPTIONS = re.compile(rf"(?:\s*@(?:[CR*]\s*=\s*{_UNIT_LENGTH}|![CR*]?))*\s*")
+
+
+def _environment_options_ok(kind: str, options: str) -> bool:
+    if kind == "qcircuit":
+        return _QCIRCUIT_OPTIONS.fullmatch(options) is not None
+    if kind == "yquant":
+        return not options.strip()
+    return all(_ENVIRONMENT_OPTION.fullmatch(x) for x in _split_commas(options))
+
+
+def _scan(src: str) -> tuple[str, list[tuple[str, str | None, str, str]], list[tuple[int, int]]]:
+    """``src`` without its comments, the circuits in it (see :func:`find_circuits`) and the span
+    ``(start, end)`` of each in that text: from ``\\begin`` to ``\\end`` and from ``\\Qcircuit`` to
+    the end of its group. A circuit that never closes owns the rest of the text, which may hold
+    more circuits (their spans lie inside it)."""
     src = strip_comments(src)
     braces = _pairs(src, "{", "}")
     squares = _pairs(src, "[", "]")
-    found: list[tuple[str, str | None, str]] = []
+    found: list[tuple[str, str | None, str, str]] = []
+    spans: list[tuple[int, int]] = []
     pos = 0
     no_end: set[str] = set()  # environments whose end is nowhere after their beginning
     brace_from = -1  # a position after which the text holds no "{"
@@ -1638,28 +2347,98 @@ def find_circuits(src: str) -> list[tuple[str, str | None, str]]:
             j = m.end()
             while j < len(src) and src[j] in " \t\n":
                 j += 1
+            options = ""
             if j < len(src) and src[j] == "[" and j in squares:
+                options = src[j + 1 : squares[j] - 1]
                 j = squares[j]
             end = -1 if env in no_end else src.find("\\end{" + env + "}", j)
             if end < 0:
                 no_end.add(env)
-                found.append((kind, None, ""))
+                found.append((kind, None, "", ""))
+                spans.append((m.start(), len(src)))
                 continue
-            found.append((kind, src[j:end], _label_of(src[m.start() : end])))
+            found.append((kind, src[j:end], _label_of(src[m.start() : end]), options))
             pos = end + len("\\end{" + env + "}")
+            spans.append((m.start(), pos))
             continue
         j = m.end()
         k = -1 if 0 <= brace_from <= j else src.find("{", j)
         if k < 0:
             brace_from = j
         if k < 0 or _BREAKS.search(src, j, k) or k not in braces:
-            found.append(("qcircuit", None, ""))
+            found.append(("qcircuit", None, "", ""))
+            spans.append((m.start(), len(src)))
             continue
         found.append(
-            ("qcircuit", src[k + 1 : braces[k] - 1], _label_of(src[m.start() : braces[k]]))
+            (
+                "qcircuit",
+                src[k + 1 : braces[k] - 1],
+                _label_of(src[m.start() : braces[k]]),
+                src[j:k],
+            )
         )
         pos = braces[k]
-    return found
+        spans.append((m.start(), pos))
+    return src, found, spans
+
+
+def find_circuits(src: str) -> list[tuple[str, str | None, str, str]]:
+    """``(kind, body, label, options)`` of each circuit in a block, in source order. ``body`` is
+    None when the environment or group never closes; ``options`` are the ``[..]`` after
+    ``\\begin{quantikz}`` or the text between ``\\Qcircuit`` and its group. A circuit read is not
+    looked into again, so the circuits of one block are disjoint and a missing end is looked for
+    once."""
+    return _scan(src)[1]
+
+
+# What a block may hold outside its circuits without that changing them: the delimiters of math,
+# the wrappers of a figure that hold no caption, a label and spacing. A power (^{\otimes n}, ^{2}),
+# a tensor mark, an \underbrace, brackets, a macro definition (\def, \let, \newcommand,
+# \renewcommand), a caption, a TikZ node and any text can say that the circuit is repeated, is a
+# part of a larger one or means something else than it draws, so a circuit of a block with such a
+# token is partial. No list of the commands that matter could be complete: this is the list of the
+# ones that do not.
+_BLANK = " \t\r\n\f\v"  # white space is ASCII only: any other space character is text
+_GAP = r"[ \t\r\n]*"
+_OUTSIDE_NO_EFFECT = re.compile(
+    r"[ \t\r\n\f\v]+|\$\$?|\\[\[\]()]|\\centering(?![A-Za-z])"
+    rf"|\\(?:begin|end){_GAP}\{{(?:center|figure\*?|equation\*?)\}}(?:{_GAP}\[[!htbpH]{{1,5}}\])?"
+    rf"|\\label{_GAP}\{{[^{{}}]*\}}|\\[,;:! ]|\\q?quad(?![A-Za-z])"
+)
+
+
+def _outside(text: str, spans: Sequence[tuple[int, int]]) -> list[str]:
+    """The runs of ``text`` outside ``spans`` that no rule of ``_OUTSIDE_NO_EFFECT`` takes: what
+    the block says besides its circuits, in order, with the spaces squeezed."""
+    pieces, pos = [], 0
+    for start, end in spans:
+        pieces.append(text[pos:start])
+        pos = max(pos, end)
+    pieces.append(text[pos:])
+    runs: list[str] = []
+    for piece in pieces:
+        gaps, last = [], 0  # what lies between two matches of the rules is what they do not take
+        for m in _OUTSIDE_NO_EFFECT.finditer(piece):
+            gaps.append(piece[last : m.start()])
+            last = m.end()
+        gaps.append(piece[last:])
+        runs += [_one_line(gap) for gap in gaps if gap.strip(_BLANK)]
+    return runs
+
+
+def _with_outside(circ: Circuit, source: str) -> None:
+    """``circ`` with one more unparsed item that names the text of the block outside its circuits
+    (``source``, as the item shows it). A circuit that could not be read keeps its status."""
+    if circ.status == "unparsed" or not circ.parts:
+        return
+    number = sum(line.startswith("Step ") for line in circ.parts[-1]) + 1
+    where = "unparsed" if circ.kind == "yquant" else "unparsed on no wire"
+    circ.parts[-1].append(f"Step {number}: {where}: {source}")
+    circ.steps[-1].append((GateOp("unparsed", source=source),))
+    circ.n_items += 1
+    circ.n_unparsed += 1
+    circ.status = "partial"
+    circ.reason = f"{circ.n_unparsed} of {circ.n_items} items unparsed"
 
 
 @dataclass(frozen=True)
@@ -1687,9 +2466,12 @@ def _steps_of(circ: Circuit) -> CircuitSteps:
 def gate_list(source: str) -> GateList:
     """The gate list of the circuits in ``source`` (the body of one code block)."""
     circs: list[Circuit] = []
-    for kind, body, label in find_circuits(source):
+    text, found, spans = _scan(source)
+    for kind, body, label, options in found:
         if body is None:
             circ = Circuit(kind, "unparsed", "environment or group does not close")
+        elif not _environment_options_ok(kind, options):
+            circ = Circuit(kind, "unparsed", f"option not read: {_one_line(options)[:60]}")
         elif kind == "yquant":
             circ = yquant_circuit(body)
         else:
@@ -1698,6 +2480,10 @@ def gate_list(source: str) -> GateList:
         circs.append(circ)
     if not circs:
         return GateList("unparsed", "")
+    if runs := _outside(text, spans):
+        shown = _one_line("outside the circuit: " + " ".join(runs))[:80]
+        for circ in circs:
+            _with_outside(circ, shown)
     statuses = {c.status for c in circs}
     if statuses == {"parsed"}:
         status = "parsed"
