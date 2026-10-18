@@ -46,6 +46,21 @@ class InvalidStateError(QuantumSimError, ValueError):
     """The input state has the wrong length, is not normalized, or is a malformed basis label."""
 
 
+class AngleError(QuantumSimError, ValueError):
+    """An angle expression is not in the grammar, divides by zero, overflows, or lacks a value
+    for one of its symbols."""
+
+
+class LabelError(QuantumSimError, ValueError):
+    """A gate label is not one the resolver knows. ``ambiguous`` is True when the label is a
+    known family whose meaning depends on the paper (``U_1``, ``R(\\theta)``, ...): it is refused
+    and never mapped."""
+
+    def __init__(self, message: str, *, ambiguous: bool = False) -> None:
+        super().__init__(message)
+        self.ambiguous = ambiguous
+
+
 # --- Limits ------------------------------------------------------------------------------------
 
 MAX_STATEVECTOR_WIRES = 20  # 16 MiB of complex128

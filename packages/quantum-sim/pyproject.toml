@@ -72,19 +72,23 @@ include_external_packages = true
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Layers: entrypoints, engine, gates, domain; a module imports only the layers below it"
+name = "Layers: entrypoints, engine and labels, gates and angles, domain; a module imports only the layers below it"
 type = "layers"
 layers = [
     "quantum_sim.entrypoints",
-    "quantum_sim.engine",
-    "quantum_sim.gates",
+    "quantum_sim.engine | quantum_sim.labels",
+    "quantum_sim.gates | quantum_sim.angles",
     "quantum_sim.domain",
 ]
 
 [[tool.importlinter.contracts]]
-name = "The domain is the standard library only"
+name = "The domain, the angle parser and the label resolver are the standard library only"
 type = "forbidden"
-source_modules = ["quantum_sim.domain"]
+source_modules = [
+    "quantum_sim.domain",
+    "quantum_sim.angles",
+    "quantum_sim.labels",
+]
 forbidden_modules = ["numpy"]
 
 # The other direction (docingest never imports quantum_sim) is a contract in docingest's
