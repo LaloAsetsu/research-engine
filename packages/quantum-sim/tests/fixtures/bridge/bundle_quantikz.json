@@ -1,0 +1,43 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [
+      1
+     ],
+     "kind": "x",
+     "label": "X",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      2
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1",
+  "2 = a, bundle m"
+ ],
+ "wires": 2
+}

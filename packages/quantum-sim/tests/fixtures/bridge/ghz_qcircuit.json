@@ -1,0 +1,59 @@
+{
+ "format": "circuit/1",
+ "kind": "qcircuit",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [
+      1
+     ],
+     "kind": "x",
+     "label": "X",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      2
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [
+      2
+     ],
+     "kind": "x",
+     "label": "X",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      3
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1",
+  "2",
+  "3"
+ ],
+ "wires": 3
+}

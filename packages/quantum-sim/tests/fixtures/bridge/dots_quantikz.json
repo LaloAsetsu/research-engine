@@ -1,0 +1,40 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    },
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      3
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1 = q_1",
+  "2 = dots (more wires, not drawn)",
+  "3 = q_n"
+ ],
+ "wires": 3
+}

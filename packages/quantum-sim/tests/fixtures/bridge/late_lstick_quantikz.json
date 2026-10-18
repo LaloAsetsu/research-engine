@@ -1,0 +1,56 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [
+      1
+     ],
+     "kind": "x",
+     "label": "X",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      2
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "text",
+     "label": "\\ket{0}",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      2
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1 = \\ket{0}",
+  "2"
+ ],
+ "wires": 2
+}

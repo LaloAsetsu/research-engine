@@ -1,0 +1,32 @@
+{
+ "format": "circuit/1",
+ "kind": "qcircuit",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [
+      1,
+      2
+     ],
+     "kind": "x",
+     "label": "X",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      3
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1",
+  "2",
+  "3"
+ ],
+ "wires": 3
+}

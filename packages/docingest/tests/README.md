@@ -127,6 +127,8 @@ flowchart LR
 | `test_stats.py` | `application.stats`: paired bootstrap, `quantile`, `bootstrap_ci` |
 | `test_text.py` | `domain.text`: garbled-text detection, the math-symbol and equals-sign counts (the edges of every symbol block, `ϕ`, `ˆ`, `™`), de-hyphenation, page splitting |
 | `test_structure.py` | `domain.structure`, `furniture` and `headings` on synthetic lines: running headers and page numbers, paragraphs, hyphenation, headings, footnotes |
+| `test_quantum_sim_fixtures.py` | The `circuit/1` documents saved in `packages/quantum-sim/tests/fixtures/bridge/` are what `gate_list` returns for the LaTeX sources next to them (the other half of quantum-sim's bridge tests; docingest never imports `quantum_sim`), and an unknown command or a text token put in any of those sources is never read as `parsed` |
+| `test_wire_names.py` | docingest's copy of quantum-sim's wire-name grammar (`_WIRE_NAME`) gives the same verdict as quantum-sim on every sample of `packages/quantum-sim/tests/fixtures/wire_names.json`; a word in `\text` or `\mathrm` is never a name |
 
 ### contract/
 

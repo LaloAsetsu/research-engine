@@ -1,0 +1,27 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "R_y(2{\\theta+1})",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1 = \\ket{0}"
+ ],
+ "wires": 1
+}

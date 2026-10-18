@@ -1,0 +1,114 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [
+      2
+     ],
+     "kind": "gate",
+     "label": "R_2",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [
+      3
+     ],
+     "kind": "gate",
+     "label": "R_3",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      2
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [
+      3
+     ],
+     "kind": "gate",
+     "label": "R_2",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      2
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      3
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "swap",
+     "label": "",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1,
+      3
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1",
+  "2",
+  "3"
+ ],
+ "wires": 3
+}

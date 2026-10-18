@@ -1,0 +1,79 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "Z",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "H",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ]
+  ],
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "sep",
+     "label": "=",
+     "open_controls": [],
+     "source": "",
+     "targets": []
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "X",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1"
+ ],
+ "wires": 1
+}

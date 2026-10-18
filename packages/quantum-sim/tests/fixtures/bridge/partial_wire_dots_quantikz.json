@@ -1,0 +1,57 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [
+      1
+     ],
+     "kind": "x",
+     "label": "X",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      2
+     ]
+    }
+   ],
+   [
+    {
+     "classical": false,
+     "controls": [
+      2
+     ],
+     "kind": "x",
+     "label": "X",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      3
+     ]
+    },
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "unparsed",
+     "label": "",
+     "open_controls": [],
+     "source": "\\wire[l][1][\"\\iddots\"{below,pos=0.1}]{a}",
+     "targets": [
+      2
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "partial",
+ "wire_labels": [
+  "1 = q_1",
+  "2 = q_2",
+  "3 = q_3"
+ ],
+ "wires": 3
+}

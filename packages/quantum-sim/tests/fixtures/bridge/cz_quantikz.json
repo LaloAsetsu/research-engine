@@ -1,0 +1,29 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [
+      1,
+      2
+     ],
+     "kind": "z_dots",
+     "label": "Z",
+     "open_controls": [],
+     "source": "",
+     "targets": []
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1",
+  "2"
+ ],
+ "wires": 2
+}

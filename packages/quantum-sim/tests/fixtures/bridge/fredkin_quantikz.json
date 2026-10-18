@@ -1,0 +1,32 @@
+{
+ "format": "circuit/1",
+ "kind": "quantikz",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [
+      3
+     ],
+     "kind": "swap",
+     "label": "",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1,
+      2
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1",
+  "2",
+  "3"
+ ],
+ "wires": 3
+}

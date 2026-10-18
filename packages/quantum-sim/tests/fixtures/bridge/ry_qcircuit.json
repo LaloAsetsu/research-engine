@@ -1,0 +1,27 @@
+{
+ "format": "circuit/1",
+ "kind": "qcircuit",
+ "label": "",
+ "parts": [
+  [
+   [
+    {
+     "classical": false,
+     "controls": [],
+     "kind": "gate",
+     "label": "R_y(\\pi/2)",
+     "open_controls": [],
+     "source": "",
+     "targets": [
+      1
+     ]
+    }
+   ]
+  ]
+ ],
+ "status": "parsed",
+ "wire_labels": [
+  "1"
+ ],
+ "wires": 1
+}
