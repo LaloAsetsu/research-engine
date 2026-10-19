@@ -10,6 +10,7 @@ The guide links to the reference for each part instead of repeating it:
 | Every configuration key | [packages/docingest/config/README.md](../packages/docingest/config/README.md) |
 | Every command and option | [packages/docingest/README.md](../packages/docingest/README.md#cli-overview) |
 | How the index works and what it stores | [packages/docingest-index/README.md](../packages/docingest-index/README.md) and [ADR 0004](../packages/docingest/docs/adr/0004-chunk-index-and-two-stage-retrieval.md) |
+| Checking a quantum circuit | [Check a circuit with quantum-sim](#check-a-circuit-with-quantum-sim) below and [packages/quantum-sim/README.md](../packages/quantum-sim/README.md) |
 
 If the three model servers already run on the machine you use, do steps 1 and 2 and skip step 3, then start at step 4; [Sharing a machine](#sharing-a-machine) shows how to check them.
 
@@ -23,6 +24,7 @@ If the three model servers already run on the machine you use, do steps 1 and 2 
 - [6. Build the index](#6-build-the-index)
 - [7. Ask](#7-ask)
 - [8. Add papers later, and stop the servers](#8-add-papers-later-and-stop-the-servers)
+- [Check a circuit with quantum-sim](#check-a-circuit-with-quantum-sim)
 - [Measured times](#measured-times)
 - [Sharing a machine](#sharing-a-machine)
 - [Troubleshooting](#troubleshooting)
@@ -59,7 +61,7 @@ cd research-engine
 uv sync --locked --all-extras
 ```
 
-This installs docingest, docingest-index and the PaperQA2 extra into one environment (`.venv` at the root). It does not install vLLM. The workspace environment is about 6 GB.
+This installs docingest, docingest-index, quantum-sim and the PaperQA2 extra into one environment (`.venv` at the root). It does not install vLLM. The workspace environment is about 6 GB.
 
 Set the Hugging Face cache once, in the shell you will use for the rest of the guide, and put it on a large disk. The model servers download into it, and docingest's `ask` loads a small embedding model from it.
 
@@ -248,6 +250,65 @@ serving/serve.sh llm stop
 serving/serve.sh embed stop
 serving/serve.sh rerank stop
 ```
+
+## Check a circuit with quantum-sim
+
+quantum-sim simulates a quantum circuit with NumPy and says what state it prepares, what it measures, and whether two circuits are equal up to global phase. It runs on the CPU, needs no model server and no GPU, and step 2 already installed it. It reads the `circuit/1` format, which is the format of the gate lists that docingest makes from a paper's LaTeX circuits (`CircuitSteps.to_dict()`), and prints one JSON document. Run the commands from the repository root.
+
+A circuit/1 file is an object whose `parts` is a list of parts (more than one when the drawing has an equals sign), each part a list of steps and each step a list of items, with wires numbered from 1 at the top. Write a Bell pair and run it:
+
+```bash
+cat > bell.json <<'EOF'
+{"format": "circuit/1", "wires": 2,
+ "parts": [[[{"kind": "gate", "label": "H", "targets": [1]}],
+            [{"kind": "x", "label": "X", "targets": [2], "controls": [1]}]]]}
+EOF
+uv run quantum-sim run bell.json
+```
+
+The result has `"status": "ok"`, the `conventions` it used, and for each part of the circuit the `state` (amplitudes as `[re, im]`) and the `probabilities`: `"values": [0.5, 0.0, 0.0, 0.5]` for `|00>`, `|01>`, `|10>` and `|11>`. `--input 10` starts from another basis state, `--unitary` adds the matrix, and on a circuit that has a symbol (a gate labelled `R_y(\theta)`, say) `--set 'theta=\pi/2'` gives it a value; a name the circuit does not have is refused.
+
+`check` takes a request that holds the circuit and what to compare it with: another circuit (`{"a": ..., "b": ...}`), a state or a unitary. Compare the same Bell circuit with the state it should prepare:
+
+```bash
+cat > bell-check.json <<'EOF'
+{"circuit": {"format": "circuit/1", "wires": 2,
+             "parts": [[[{"kind": "gate", "label": "H", "targets": [1]}],
+                        [{"kind": "x", "label": "X", "targets": [2], "controls": [1]}]]]},
+ "target": {"state": [0.7071067811865476, 0, 0, 0.7071067811865476]}}
+EOF
+uv run quantum-sim check bell-check.json
+```
+
+It prints `"equal_to_target": true` and one comparison with `"equal": true`. Both commands exit with 0 when they did the work (a check that finds the circuits different is still 0, with `"equal_to_target": false`), with 1 when the input was refused (the result says why) and with 2 when the command line does not parse.
+
+To read a circuit from a paper, ask docingest for its gate list as data. The circuits of an ingested paper are the fenced `latex` blocks of its `document.md` (see [Open a cited source](#open-a-cited-source) for where it is), and `gate_list` reads a block's source. This writes the identity H Z H = X, drawn as one quantikz circuit with an equality sign, and checks it, because `check` compares the part left of a drawn `=` with the part right of it:
+
+```bash
+uv run python - <<'EOF' > hzh.json
+import json
+from docingest.domain.circuits import gate_list
+
+source = r"""\begin{quantikz}
+& \gate{H} & \gate{Z} & \gate{H} & \qw & \push{=} & \gate{X} & \qw
+\end{quantikz}"""
+print(json.dumps(gate_list(source).circuits[0].to_dict()))
+EOF
+uv run quantum-sim check hzh.json
+```
+
+The result has `"equal_to_target": true` and a comparison between `part 1` and `part 2` with `"method": "unitary"` and a `max_deviation` of about 2e-16. For a circuit of a paper, replace `source` with `circuit_code_blocks(text)[i].source`, where `text` is the `document.md` and `circuit_code_blocks` comes from the same module, and run `run` or `check` on the dictionary. Check that `gate_list(source).status` is `parsed` first. Both commands also read standard input, so the Python step can be piped straight into `uv run quantum-sim check`.
+
+The conventions are Nielsen and Chuang: wire 1 is the top wire and the most significant bit of a basis label (the opposite of Qiskit), wires are numbered from 1, and rotations are R_a(theta) = exp(-i theta sigma_a / 2), and results are compared up to global phase at 1e-9. Every result prints them, and [packages/quantum-sim/docs/conventions.md](../packages/quantum-sim/docs/conventions.md) lists the gate table and every accepted label spelling.
+
+Limits:
+
+- Statevectors up to 20 wires, unitaries up to 10 wires (two circuits of 11 to 20 wires are compared on 8 random states), at most 10,000 operations, 50,000 items in a document and 32 Mi characters of input.
+- Version 1 refuses what it cannot simulate: a measurement before the end of its wire, a classically controlled gate, a reset or a postselection, an angle or a gate label outside its closed grammar, and a wire legend or text that might hide one of those.
+- It never skips a part to make a circuit simulable, and its own refusal is the last word: `status` `parsed` in docingest's gate list is necessary, not sufficient. A circuit that docingest read as `partial` or `unparsed` (a command or wrapper the reader does not know, a `\cw` that no measurement made classical) is refused. So is a `parsed` one whose wire legend shows a bundle, a register, a row of dots or a classical wire, and one with a ket drawn after a gate. The result is `"status": "refused"`, exit status 1, and the reasons.
+- docingest does not mark a `yquant` `cbit` register as classical, so quantum-sim takes it for a qubit: compare the wire count in the result with the drawing.
+
+The full list is in [packages/quantum-sim/README.md](../packages/quantum-sim/README.md#limits) and [the gate lists as data](../packages/docingest/src/docingest/domain/README.md#the-steps-as-data).
 
 ## Measured times
 

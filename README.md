@@ -63,7 +63,7 @@ uv run docingest ask "What limits T1 in transmons?" -c config/examples/lab-serve
 | Learn what docingest does, its commands and the architecture | [packages/docingest/README.md](packages/docingest/README.md) |
 | Set a configuration key or pick an example file | [packages/docingest/config/README.md](packages/docingest/config/README.md) |
 | Understand the chunk index, the embedder and the reranker | [packages/docingest-index/README.md](packages/docingest-index/README.md) and [ADR 0004](packages/docingest/docs/adr/0004-chunk-index-and-two-stage-retrieval.md) |
-| Simulate or check a quantum circuit, and its conventions | [packages/quantum-sim/README.md](packages/quantum-sim/README.md), [conventions](packages/quantum-sim/docs/conventions.md) and [ADR 0005](packages/docingest/docs/adr/0005-own-numpy-circuit-simulator.md) |
+| Simulate or check a quantum circuit, and its conventions | [run guide](docs/run-guide.md#check-a-circuit-with-quantum-sim), [packages/quantum-sim/README.md](packages/quantum-sim/README.md), [conventions](packages/quantum-sim/docs/conventions.md) and [ADR 0005](packages/docingest/docs/adr/0005-own-numpy-circuit-simulator.md) |
 | Change the code and open a pull request | [packages/docingest/CONTRIBUTING.md](packages/docingest/CONTRIBUTING.md) |
 | Find any other document of docingest | [packages/docingest/docs/README.md](packages/docingest/docs/README.md) |
 
