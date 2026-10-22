@@ -68,18 +68,19 @@ include_external_packages = true
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Layers: review rules, then the formats; a module imports only the layers below it"
+name = "Layers: converters and review rules, then the formats; a module imports only the layers below it"
 type = "layers"
 layers = [
-    "qa_bench.reviews",
+    "qa_bench.convert | qa_bench.reviews",
     "qa_bench.formats",
 ]
 
 [[tool.importlinter.contracts]]
-name = "The formats and the review rules use the standard library and jsonschema only"
+name = "The formats, the converters and the review rules use the standard library and jsonschema only"
 type = "forbidden"
 source_modules = [
     "qa_bench.formats",
+    "qa_bench.convert",
     "qa_bench.reviews",
 ]
 forbidden_modules = ["httpx", "numpy", "docingest", "docingest_index", "quantum_sim"]
