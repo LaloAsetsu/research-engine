@@ -33,3 +33,7 @@ __pycache__/
 
 # Machine-specific settings of the model servers
 serving/env.local
+
+# Local settings and databases of the research API (config.example.toml is the tracked example)
+**/research-api.local.toml
+*.sqlite3
