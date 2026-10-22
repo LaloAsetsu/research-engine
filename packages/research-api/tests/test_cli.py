@@ -108,3 +108,25 @@ def test_config_and_fake_cannot_be_combined() -> None:
     with pytest.raises(SystemExit) as stop:
         cli.main(["serve", "--fake", "--config", "x.toml"])
     assert stop.value.code == 2
+
+
+def test_serve_fake_takes_a_port(served: list[dict[str, Any]]) -> None:
+    assert cli.main(["serve", "--fake", "--port", "18090"]) == 0
+    assert (served[0]["host"], served[0]["port"]) == ("127.0.0.1", 18090)
+
+
+def test_a_port_on_the_command_line_beats_the_settings_file(
+    served: list[dict[str, Any]], tmp_path: Path
+) -> None:
+    path = tmp_path / "s.toml"
+    path.write_text("port = 9001\n", encoding="utf-8")
+    assert cli.main(["serve", "--config", str(path), "--port", "9005"]) == 0
+    assert served[0]["port"] == 9005
+
+
+def test_a_port_out_of_range_exits_1(
+    served: list[dict[str, Any]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["serve", "--fake", "--port", "70000"]) == 1
+    assert "--port" in capsys.readouterr().err
+    assert served == []
