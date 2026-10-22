@@ -1,0 +1,12 @@
+# Settings of the research API. Copy it outside the repository and edit it; start the service
+# with `research-api serve --config <file>` or set RESEARCH_API_CONFIG. Every key is optional.
+# A mistyped key is an error. No secret belongs here.
+
+# The address to listen on: a loopback address, or the host's Tailscale address. Anything else
+# (0.0.0.0, a LAN address, a host name) is refused.
+bind_host = "127.0.0.1"
+port = 8090
+
+# The origin people type in the browser, used later to check where a write request came from.
+# Defaults to http://<bind_host>:<port>.
+public_origin = "http://127.0.0.1:8090"

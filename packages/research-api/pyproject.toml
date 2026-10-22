@@ -1,0 +1,186 @@
+[project]
+name = "research-api"
+version = "0.1.0"
+description = "HTTP API of the research engine: a hexagonal FastAPI service over docingest and quantum-sim"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "etxsA", email = "93368439+etxsA@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.159",
+    "pydantic>=2",
+    "uvicorn>=0.54",
+]
+
+[project.scripts]
+research-api = "research_api.entrypoints.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "import-linter>=2.15",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-cov>=7",
+    "ruff>=0.16",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "-ra"]
+
+[tool.coverage.run]
+source = ["research_api"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT", "PL", "C4"]
+ignore = [
+    "PLR0913",  # use cases take several ports by design
+    "PLR2004",  # magic values are fine in tests and thresholds
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR0913", "PT018", "E501"]
+
+[tool.pyright]
+include = ["src"]
+venvPath = "../.."  # the workspace root, where uv keeps the shared .venv
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+
+[tool.importlinter]
+root_packages = ["research_api"]
+include_external_packages = true
+exclude_type_checking_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Hexagonal layers: outer layers may import inner ones, never the reverse"
+type = "layers"
+layers = [
+    "research_api.entrypoints",
+    "research_api.bootstrap",
+    "research_api.adapters",
+    "research_api.application",
+    "research_api.ports",
+    "research_api.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Adapters are independent of each other"
+type = "independence"
+modules = [
+    "research_api.adapters.persistence",
+    "research_api.adapters.docingest_ask",
+    "research_api.adapters.circuits",
+    "research_api.adapters.bench",
+    "research_api.adapters.hashing",
+    "research_api.adapters.files",
+    "research_api.adapters.models",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain is pure: no framework, driver or sibling-package imports"
+type = "forbidden"
+source_modules = ["research_api.domain"]
+forbidden_modules = [
+    "fastapi", "starlette", "sqlalchemy", "alembic", "pwdlib", "argon2", "httpx", "uvicorn",
+    "docingest", "docingest_index", "quantum_sim", "qa_bench", "jsonschema",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application and ports reach docingest, quantum-sim and qa-bench only through ports"
+type = "forbidden"
+source_modules = ["research_api.application", "research_api.ports"]
+forbidden_modules = [
+    "fastapi", "starlette", "sqlalchemy", "alembic", "pwdlib", "argon2", "httpx", "uvicorn",
+    "docingest", "docingest_index", "quantum_sim", "qa_bench", "jsonschema",
+]
+
+# One contract per library, naming every module except the adapter that owns it.
+# Indirect imports are allowed: bootstrap and entrypoints reach a library through its adapter.
+[[tool.importlinter.contracts]]
+name = "Only the docingest adapters import docingest"
+type = "forbidden"
+source_modules = [
+    "research_api.domain", "research_api.ports", "research_api.application",
+    "research_api.bootstrap", "research_api.entrypoints",
+    "research_api.adapters.clock", "research_api.adapters.fake",
+    "research_api.adapters.persistence", "research_api.adapters.bench",
+    "research_api.adapters.hashing", "research_api.adapters.files",
+    "research_api.adapters.models",
+]
+forbidden_modules = ["docingest"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Only the circuits adapter imports quantum_sim"
+type = "forbidden"
+source_modules = [
+    "research_api.domain", "research_api.ports", "research_api.application",
+    "research_api.bootstrap", "research_api.entrypoints",
+    "research_api.adapters.clock", "research_api.adapters.fake",
+    "research_api.adapters.persistence", "research_api.adapters.docingest_ask",
+    "research_api.adapters.bench", "research_api.adapters.hashing",
+    "research_api.adapters.files", "research_api.adapters.models",
+]
+forbidden_modules = ["quantum_sim"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Only the bench adapter imports qa_bench"
+type = "forbidden"
+source_modules = [
+    "research_api.domain", "research_api.ports", "research_api.application",
+    "research_api.bootstrap", "research_api.entrypoints",
+    "research_api.adapters.clock", "research_api.adapters.fake",
+    "research_api.adapters.persistence", "research_api.adapters.docingest_ask",
+    "research_api.adapters.circuits", "research_api.adapters.hashing",
+    "research_api.adapters.files", "research_api.adapters.models",
+]
+forbidden_modules = ["qa_bench"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Only the persistence adapter imports sqlalchemy and alembic"
+type = "forbidden"
+source_modules = [
+    "research_api.domain", "research_api.ports", "research_api.application",
+    "research_api.bootstrap", "research_api.entrypoints",
+    "research_api.adapters.clock", "research_api.adapters.fake",
+    "research_api.adapters.docingest_ask", "research_api.adapters.circuits",
+    "research_api.adapters.bench", "research_api.adapters.hashing",
+    "research_api.adapters.files", "research_api.adapters.models",
+]
+forbidden_modules = ["sqlalchemy", "alembic"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Only the composition root and entrypoints wire concrete adapters"
+type = "protected"
+protected_modules = ["research_api.adapters"]
+allowed_importers = ["research_api.bootstrap", "research_api.entrypoints", "research_api.adapters"]
+
+[[tool.importlinter.contracts]]
+name = "research_api never imports a docingest plugin (docingest finds it by entry point)"
+type = "forbidden"
+source_modules = ["research_api"]
+forbidden_modules = ["docingest_index"]
