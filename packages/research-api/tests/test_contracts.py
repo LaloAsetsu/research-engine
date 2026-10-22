@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,7 @@ SRC = "src/research_api"
 # application's contract through the chain; the cases below list both.
 
 # (file, line added, contracts that must break). An empty set is a control: the import is allowed.
+# A file that does not exist yet is created, which is how a new adapter is simulated.
 CASES = {
     "domain imports an adapter": (
         "domain/status.py",
@@ -103,6 +105,52 @@ CASES = {
         {PLUGIN},
     ),
     "bootstrap imports a plugin": ("bootstrap/container.py", "import docingest_index", {PLUGIN}),
+    "the package root imports docingest": ("__init__.py", "import docingest", {DOCINGEST}),
+    "the adapters package imports sqlalchemy": (
+        "adapters/__init__.py",
+        "import sqlalchemy",
+        {SQL},
+    ),
+    "a new adapter package imports docingest": (
+        "adapters/auth/__init__.py",
+        "import docingest",
+        {DOCINGEST},
+    ),
+    "a new adapter module imports sqlalchemy": (
+        "adapters/sessions.py",
+        "import sqlalchemy",
+        {SQL},
+    ),
+    "a new adapter module imports quantum_sim": (
+        "adapters/sessions.py",
+        "import quantum_sim",
+        {QUANTUM},
+    ),
+    "a new adapter module imports qa_bench": (
+        "adapters/reports.py",
+        "import qa_bench",
+        {QA_BENCH},
+    ),
+    "a module inside the docingest adapter imports quantum_sim": (
+        "adapters/docingest_ask/parsing.py",
+        "import quantum_sim",
+        {QUANTUM},
+    ),
+    "the fake adapter imports the clock adapter": (
+        "adapters/fake/__init__.py",
+        "from .. import clock",
+        {INDEPENDENT},
+    ),
+    "control: a module inside the docingest adapter imports docingest": (
+        "adapters/docingest_ask/parsing.py",
+        "import docingest",
+        set(),
+    ),
+    "control: a module inside persistence imports sqlalchemy": (
+        "adapters/persistence/models.py",
+        "import sqlalchemy",
+        set(),
+    ),
     "control: docingest in its adapter": (
         "adapters/docingest_ask/__init__.py",
         "import docingest",
@@ -171,7 +219,9 @@ def test_the_package_keeps_every_contract(sandbox: Path) -> None:
 def test_a_contract_breaks_on_the_import_it_forbids(sandbox: Path, case: str) -> None:
     file, line, expected = CASES[case]
     target = sandbox / SRC / file
-    target.write_text(target.read_text(encoding="utf-8") + "\n" + line + "\n", encoding="utf-8")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    before = target.read_text(encoding="utf-8") if target.exists() else ""
+    target.write_text(before + "\n" + line + "\n", encoding="utf-8")
     code, out = lint(sandbox)
     broken = {
         name
@@ -191,3 +241,40 @@ def test_a_contract_breaks_on_the_import_it_forbids(sandbox: Path, case: str) ->
     }
     assert broken == expected, out
     assert (code != 0) == bool(expected)
+
+
+def adapter_areas(adapters: Path) -> set[str]:
+    """The folders and modules directly under ``adapters/``: each is one adapter area."""
+    return {
+        entry.stem if entry.is_file() else entry.name
+        for entry in adapters.iterdir()
+        if (entry.is_dir() and not entry.name.startswith(("__", ".")))
+        or (entry.suffix == ".py" and entry.name != "__init__.py")
+    }
+
+
+def listed_as_independent() -> set[str]:
+    pyproject = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))
+    (contract,) = (
+        c for c in pyproject["tool"]["importlinter"]["contracts"] if c["type"] == "independence"
+    )
+    prefix = "research_api.adapters."
+    assert all(module.startswith(prefix) for module in contract["modules"])
+    return {module.removeprefix(prefix) for module in contract["modules"]}
+
+
+def test_every_adapter_area_is_listed_as_independent() -> None:
+    """The independence contract is an explicit list, so a new area must be added to it."""
+    present = adapter_areas(PACKAGE / SRC / "adapters")
+    listed = listed_as_independent()
+    assert present - listed == set(), "add to the independence contract in pyproject.toml"
+    assert listed - present == set(), "listed in pyproject.toml but not in adapters/"
+
+
+def test_a_new_adapter_area_is_noticed(tmp_path: Path) -> None:
+    (tmp_path / "__init__.py").touch()
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "persistence").mkdir()
+    (tmp_path / "auth").mkdir()
+    (tmp_path / "sessions.py").touch()
+    assert adapter_areas(tmp_path) == {"persistence", "auth", "sessions"}

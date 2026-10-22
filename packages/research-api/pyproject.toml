@@ -88,6 +88,8 @@ layers = [
 name = "Adapters are independent of each other"
 type = "independence"
 modules = [
+    "research_api.adapters.clock",
+    "research_api.adapters.fake",
     "research_api.adapters.persistence",
     "research_api.adapters.docingest_ask",
     "research_api.adapters.circuits",
@@ -115,63 +117,61 @@ forbidden_modules = [
     "docingest", "docingest_index", "quantum_sim", "qa_bench", "jsonschema",
 ]
 
-# One contract per library, naming every module except the adapter that owns it.
-# Indirect imports are allowed: bootstrap and entrypoints reach a library through its adapter.
+# One contract per library. The source is the whole package, so a new module, the package root
+# or an adapter added later is checked too; the adapters that own the library are the only
+# exceptions. Indirect imports are allowed: bootstrap and entrypoints reach a library through
+# its adapter. The exceptions name adapters that may still be empty, hence no alert on unmatched.
 [[tool.importlinter.contracts]]
 name = "Only the docingest adapters import docingest"
 type = "forbidden"
-source_modules = [
-    "research_api.domain", "research_api.ports", "research_api.application",
-    "research_api.bootstrap", "research_api.entrypoints",
-    "research_api.adapters.clock", "research_api.adapters.fake",
-    "research_api.adapters.persistence", "research_api.adapters.bench",
-    "research_api.adapters.hashing", "research_api.adapters.files",
-    "research_api.adapters.models",
-]
+source_modules = ["research_api"]
 forbidden_modules = ["docingest"]
+ignore_imports = [
+    "research_api.adapters.docingest_ask -> docingest",
+    "research_api.adapters.docingest_ask.** -> docingest",
+    "research_api.adapters.circuits -> docingest",
+    "research_api.adapters.circuits.** -> docingest",
+]
 allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "Only the circuits adapter imports quantum_sim"
 type = "forbidden"
-source_modules = [
-    "research_api.domain", "research_api.ports", "research_api.application",
-    "research_api.bootstrap", "research_api.entrypoints",
-    "research_api.adapters.clock", "research_api.adapters.fake",
-    "research_api.adapters.persistence", "research_api.adapters.docingest_ask",
-    "research_api.adapters.bench", "research_api.adapters.hashing",
-    "research_api.adapters.files", "research_api.adapters.models",
-]
+source_modules = ["research_api"]
 forbidden_modules = ["quantum_sim"]
+ignore_imports = [
+    "research_api.adapters.circuits -> quantum_sim",
+    "research_api.adapters.circuits.** -> quantum_sim",
+]
 allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "Only the bench adapter imports qa_bench"
 type = "forbidden"
-source_modules = [
-    "research_api.domain", "research_api.ports", "research_api.application",
-    "research_api.bootstrap", "research_api.entrypoints",
-    "research_api.adapters.clock", "research_api.adapters.fake",
-    "research_api.adapters.persistence", "research_api.adapters.docingest_ask",
-    "research_api.adapters.circuits", "research_api.adapters.hashing",
-    "research_api.adapters.files", "research_api.adapters.models",
-]
+source_modules = ["research_api"]
 forbidden_modules = ["qa_bench"]
+ignore_imports = [
+    "research_api.adapters.bench -> qa_bench",
+    "research_api.adapters.bench.** -> qa_bench",
+]
 allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "Only the persistence adapter imports sqlalchemy and alembic"
 type = "forbidden"
-source_modules = [
-    "research_api.domain", "research_api.ports", "research_api.application",
-    "research_api.bootstrap", "research_api.entrypoints",
-    "research_api.adapters.clock", "research_api.adapters.fake",
-    "research_api.adapters.docingest_ask", "research_api.adapters.circuits",
-    "research_api.adapters.bench", "research_api.adapters.hashing",
-    "research_api.adapters.files", "research_api.adapters.models",
-]
+source_modules = ["research_api"]
 forbidden_modules = ["sqlalchemy", "alembic"]
+ignore_imports = [
+    "research_api.adapters.persistence -> sqlalchemy",
+    "research_api.adapters.persistence.** -> sqlalchemy",
+    "research_api.adapters.persistence -> alembic",
+    "research_api.adapters.persistence.** -> alembic",
+]
 allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "Only the composition root and entrypoints wire concrete adapters"
