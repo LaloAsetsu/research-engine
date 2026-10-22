@@ -13,6 +13,9 @@ dependencies = [
     "jsonschema>=4.25",
 ]
 
+[project.scripts]
+qa-bench = "qa_bench.cli:main"
+
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
@@ -68,9 +71,10 @@ include_external_packages = true
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Layers: converters and review rules, then the formats; a module imports only the layers below it"
+name = "Layers: cli, then converters and review rules, then the formats; a module imports only the layers below it"
 type = "layers"
 layers = [
+    "qa_bench.cli",
     "qa_bench.convert | qa_bench.reviews",
     "qa_bench.formats",
 ]

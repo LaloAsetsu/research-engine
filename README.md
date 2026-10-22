@@ -10,6 +10,7 @@ A local research engine for scientific papers. It turns papers into clean Markdo
 | [`packages/docingest-index/`](packages/docingest-index/README.md) | Embedding and reranker clients (OpenAI-compatible `/v1/embeddings`, vLLM `/rerank`) and a persistent chunk index (dense vectors plus BM25), plugged into docingest as adapters. Command: `docingest index build`. | Available (0.1.0); `docingest ask` retrieves from it when configured |
 | [`packages/quantum-sim/`](packages/quantum-sim/README.md) | A small NumPy simulator of quantum circuits (statevector, unitary, equality up to global phase) with Nielsen and Chuang conventions, for checking the circuits a model writes or docingest reads. numpy only; independent of docingest. Command: `quantum-sim`. | 0.1.0: engine, label resolver and angle parser, `circuit/1` reader and writer, `run` and `check` commands |
 | [`packages/research-api/`](packages/research-api/README.md) | The HTTP API of the research engine: a hexagonal FastAPI service that will serve asks with cited sources, question sets, benchmarks and the circuit check to a web app. Command: `research-api`. | 0.1.0: skeleton (layers, import contracts, settings, fake mode, `/health` and `/status`, OpenAPI export) |
+| [`packages/qa-bench/`](packages/qa-bench/README.md) | The shared formats of the question-answer benchmark (`qset/1` question sets, `qa-run/1` runs, `qa-score/1` scores, `reviews/1` decisions): schemas, strict readers and writers, applying reviews, converters of older question sets and ask captures. Depends on jsonschema only. Command: `qa-bench`. | 0.1.0: formats, reviews, converters, `validate` and `convert` |
 | [`serving/`](serving/README.md) | Start and stop script for the local model servers (answering model, embedder, reranker), pinned model list, reranker templates, the vLLM install recipe and GPU requirements. | Available |
 | `experiments/` | Benchmark runners, a timing harness and retrieval and question-answering evaluations. | Planned |
 
@@ -66,6 +67,7 @@ uv run docingest ask "What limits T1 in transmons?" -c config/examples/lab-serve
 | Understand the chunk index, the embedder and the reranker | [packages/docingest-index/README.md](packages/docingest-index/README.md) and [ADR 0004](packages/docingest/docs/adr/0004-chunk-index-and-two-stage-retrieval.md) |
 | Simulate or check a quantum circuit, and its conventions | [run guide](docs/run-guide.md#check-a-circuit-with-quantum-sim), [packages/quantum-sim/README.md](packages/quantum-sim/README.md), [conventions](packages/quantum-sim/docs/conventions.md) and [ADR 0005](packages/docingest/docs/adr/0005-own-numpy-circuit-simulator.md) |
 | Run or extend the HTTP API | [packages/research-api/README.md](packages/research-api/README.md) |
+| Check or convert a question set, a run, a score or a review file | [packages/qa-bench/README.md](packages/qa-bench/README.md) |
 | Change the code and open a pull request | [packages/docingest/CONTRIBUTING.md](packages/docingest/CONTRIBUTING.md) |
 | Find any other document of docingest | [packages/docingest/docs/README.md](packages/docingest/docs/README.md) |
 

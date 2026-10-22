@@ -11,6 +11,7 @@ The guide links to the reference for each part instead of repeating it:
 | Every command and option | [packages/docingest/README.md](../packages/docingest/README.md#cli-overview) |
 | How the index works and what it stores | [packages/docingest-index/README.md](../packages/docingest-index/README.md) and [ADR 0004](../packages/docingest/docs/adr/0004-chunk-index-and-two-stage-retrieval.md) |
 | Checking a quantum circuit | [Check a circuit with quantum-sim](#check-a-circuit-with-quantum-sim) below and [packages/quantum-sim/README.md](../packages/quantum-sim/README.md) |
+| Checking or converting a question set, a run, a score or a review file | [Check a question set with qa-bench](#check-a-question-set-with-qa-bench) below and [packages/qa-bench/README.md](../packages/qa-bench/README.md) |
 
 If the three model servers already run on the machine you use, do steps 1 and 2 and skip step 3, then start at step 4; [Sharing a machine](#sharing-a-machine) shows how to check them.
 
@@ -25,6 +26,7 @@ If the three model servers already run on the machine you use, do steps 1 and 2 
 - [7. Ask](#7-ask)
 - [8. Add papers later, and stop the servers](#8-add-papers-later-and-stop-the-servers)
 - [Check a circuit with quantum-sim](#check-a-circuit-with-quantum-sim)
+- [Check a question set with qa-bench](#check-a-question-set-with-qa-bench)
 - [Measured times](#measured-times)
 - [Sharing a machine](#sharing-a-machine)
 - [Troubleshooting](#troubleshooting)
@@ -61,7 +63,7 @@ cd research-engine
 uv sync --locked --all-extras
 ```
 
-This installs docingest, docingest-index, quantum-sim and the PaperQA2 extra into one environment (`.venv` at the root). It does not install vLLM. The workspace environment is about 6 GB.
+This installs docingest, docingest-index, quantum-sim, qa-bench and the PaperQA2 extra into one environment (`.venv` at the root). It does not install vLLM. The workspace environment is about 6 GB.
 
 Set the Hugging Face cache once, in the shell you will use for the rest of the guide, and put it on a large disk. The model servers download into it, and docingest's `ask` loads a small embedding model from it.
 
@@ -322,6 +324,38 @@ Limits:
 - docingest does not mark a `yquant` `cbit` register as classical, so quantum-sim takes it for a qubit: compare the wire count in the result with the drawing.
 
 The full list is in [packages/quantum-sim/README.md](../packages/quantum-sim/README.md#limits) and [the gate lists as data](../packages/docingest/src/docingest/domain/README.md#the-steps-as-data).
+
+## Check a question set with qa-bench
+
+qa-bench reads, checks and converts the files of the question-answer benchmark: `qset/1` (a question set), `qa-run/1` (the answers of one run), `qa-score/1` (what a scorer computed) and `reviews/1` (decisions about the items). It runs on the CPU, needs no model server and no GPU, and step 2 already installed it. Run the commands from the repository root. Each file is JSON lines whose first line names its format.
+
+Write a set with one question and check it:
+
+```bash
+cat > my-set.qset.jsonl <<'EOF'
+{"format": "qset/1", "set": "my-set/v1", "created": "2026-01-03T09:00:00+00:00"}
+{"id": "Q-001", "lang": "en", "lang_origin": "native", "question": "What does the toy paper call its coupling?", "answer": "J", "form": "single", "content": "math", "corpus": "my-corpus", "gold_papers": [{"doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "passages": [{"source_text": "The coupling is called J."}]}]}
+EOF
+uv run qa-bench validate my-set.qset.jsonl
+```
+
+It prints `ok my-set.qset.jsonl: qset/1, 1 records, md5 ...` and exits with 0. The md5 is the identity of the set: a run or a score file names the set by it, so it changes when a single character of the file changes. A file that breaks a rule is printed as `file:line: pointer: message`, one line per problem (the first 20 per file, all with `--all`), and the exit status is 1. A run, a score or a review file is checked against its set with `--set my-set.qset.jsonl`: the set name and md5 must match and every answer must be for an item of the set.
+
+To bring an older question-set file into the format, name its shape. The shapes are `mathcirc-v1`, `circuit-tasks-v1`, `circuit-claims-v1`, `qubitqa-pilot` and `qasper`; the package README says what each one reads. This turns a tab-separated list of circuit claims into a set:
+
+```bash
+printf 'paper_id\tblock_index\tclaim_quote_short\ttarget_kind\ttarget\tinput_state\tnotes\nd4d4d4d4d4d4d4d4\t1\tH H = I\tidentity\tI (exact)\t-\tcheck\n' > claims.tsv
+uv run qa-bench convert circuit-claims-v1 claims.tsv -o claims.qset.jsonl --set-name claims/v1 --corpus my-corpus
+uv run qa-bench validate claims.qset.jsonl
+```
+
+The converter records the source file's name and md5 in the header of the new set. `--created 2026-01-03T09:00:00+00:00` pins the time written in the header (the default is now, in UTC), so the same input gives the same file and the same md5. `convert` does not overwrite a file that exists unless you add `--force`. `--back` writes a set made this way as a source file again; the rows are the same, but the key order and spacing of the original are not kept.
+
+Limits:
+
+- The files are checked, not scored: `qa-bench` has no command to score a run or to start one yet.
+- A file is read strictly. A key given twice on a line, `NaN`, `Infinity`, a number out of range, an unpaired surrogate escape (`\ud800`) and nesting deeper than 64 levels are refused.
+- A shape that is not in the list is refused with the list of shapes; the command does not guess one.
 
 ## Measured times
 
