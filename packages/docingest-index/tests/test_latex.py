@@ -1,3 +1,4 @@
+import gc
 import time
 
 import pytest
@@ -117,13 +118,38 @@ def test_a_long_question_with_no_latex_is_cheap():
     assert latex_text("$ " * 5_000) == ""
 
 
-def _best_seconds(question: str) -> float:
-    best = float("inf")
-    for _ in range(3):  # best of 3: the least disturbed run
-        start = time.process_time()  # CPU time: waiting for a busy CPU is not counted
-        latex_text(question)
-        best = min(best, time.process_time() - start)
-    return best
+def _cpu(question: str) -> float:
+    start = time.process_time()  # CPU time: waiting for a busy CPU is not counted
+    latex_text(question)
+    return time.process_time() - start
+
+
+def _assert_linear(small: str, big: str, factor: float = 8, floor: float = 0.05) -> None:
+    """Fail unless the CPU time of `big` is under max(factor * that of `small`, floor).
+
+    The same method as docingest's tests/timing.py (packages do not import each other's
+    tests): the two sizes run one after the other, round by round, so a burst of load slows
+    both; the fastest run of each is kept (from the third round on, a pass stops the test);
+    a failed check is measured again, and the test fails only when all 3 attempts fail.
+    Quadratic work costs 16 times as much on 4 times the input, in every attempt. The cyclic
+    collector is off during the runs, so a big heap does not make a linear scan look slower."""
+    seen = []
+    collecting = gc.isenabled()
+    gc.collect()  # as in timing.py: start from a clean heap, then keep the collector off
+    gc.disable()
+    try:
+        for _ in range(3):
+            fastest_small = fastest_big = float("inf")
+            for done in range(1, 6):
+                fastest_small = min(fastest_small, _cpu(small))
+                fastest_big = min(fastest_big, _cpu(big))
+                if done >= 3 and fastest_big < max(factor * fastest_small, floor):
+                    return
+            seen.append((round(fastest_small, 4), round(fastest_big, 4)))
+    finally:
+        if collecting:
+            gc.enable()
+    raise AssertionError(f"not linear in 3 attempts, (small, big) seconds: {seen}")
 
 
 # Each opener repeated must stay unclosed, or the question is just a row of closed pairs: "$a" and
@@ -135,9 +161,7 @@ def test_unclosed_delimiters_cost_time_in_proportion_to_the_question(opener):
     # Quadrupling the question must cost far less than 16x (quadratic scanning). Only the ratio
     # of two runs is checked, in CPU time of this process, so other load on the machine barely
     # moves it; the floor keeps a timer-sized `small` from making the ratio noise.
-    small = _best_seconds(opener * 10_000 + " fin")
-    big = _best_seconds(opener * 40_000 + " fin")
-    assert big < max(8 * small, 0.05), (small, big)
+    _assert_linear(opener * 10_000 + " fin", opener * 40_000 + " fin")
 
 
 @pytest.mark.parametrize(
