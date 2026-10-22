@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from ...bootstrap import Container, container_from_env
+from .guard import BindGuard, loopback_only, loopback_or_address
 from .problems import install_problem_handlers, use_problem_media_in_openapi
 from .routes import router
 
@@ -22,6 +23,13 @@ def build_app(container: Container) -> FastAPI:
         openapi_url=None,
     )
     app.state.container = container
+    # Outermost, so it also covers a start that skips `research-api serve` and its bind check.
+    app.add_middleware(
+        BindGuard,
+        allowed=loopback_only
+        if container.mode == "fake"
+        else loopback_or_address(container.settings.bind_host),
+    )
     app.include_router(router, prefix=API_PREFIX)
     install_problem_handlers(app)
 

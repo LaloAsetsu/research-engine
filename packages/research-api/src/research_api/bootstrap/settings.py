@@ -21,19 +21,31 @@ class SettingsError(ValueError):
     """The settings file is missing, unreadable, not TOML or breaks a rule."""
 
 
+def _address(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """The IP address a string names, or None. ``::ffff:a.b.c.d`` counts as the IPv4 address."""
+    try:
+        address = ipaddress.ip_address(host.partition("%")[0])
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    return address
+
+
 def is_loopback(host: str) -> bool:
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
+    address = _address(host)
+    return address is not None and address.is_loopback
 
 
-def _is_tailscale(host: str) -> bool:
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return any(
+def same_address(first: str, second: str) -> bool:
+    """Whether two strings name the same IP address (``::ffff:a.b.c.d`` equals ``a.b.c.d``)."""
+    address = _address(first)
+    return address is not None and address == _address(second)
+
+
+def is_tailscale(host: str) -> bool:
+    address = _address(host)
+    return address is not None and any(
         address in network for network in _TAILSCALE_NETWORKS if address.version == network.version
     )
 
@@ -50,7 +62,7 @@ class Settings(BaseModel):
     @field_validator("bind_host")
     @classmethod
     def _bind_host_is_private(cls, value: str) -> str:
-        if not (is_loopback(value) or _is_tailscale(value)):
+        if not (is_loopback(value) or is_tailscale(value)):
             raise ValueError(
                 "must be a loopback address or a Tailscale address (never 0.0.0.0 or a LAN address)"
             )

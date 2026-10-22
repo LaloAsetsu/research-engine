@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from research_api.bootstrap import Settings, SettingsError, load_settings
+from research_api.bootstrap.settings import is_loopback, is_tailscale
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -81,6 +82,25 @@ def test_an_origin_without_a_trailing_slash_is_kept_clean() -> None:
 def test_a_value_that_is_not_an_origin_is_refused(origin: str) -> None:
     with pytest.raises(ValueError, match="origin"):
         Settings(public_origin=origin)
+
+
+@pytest.mark.parametrize(
+    ("host", "loopback", "tailscale"),
+    [
+        ("127.0.0.1", True, False),
+        ("::1", True, False),
+        ("::ffff:127.0.0.1", True, False),
+        ("100.64.0.5", False, True),
+        ("::ffff:100.64.0.5", False, True),
+        ("fd7a:115c:a1e0::5", False, True),
+        ("fe80::1%en0", False, False),
+        ("192.168.1.2", False, False),
+        ("testserver", False, False),
+        ("", False, False),
+    ],
+)
+def test_address_classes(host: str, loopback: bool, tailscale: bool) -> None:
+    assert (is_loopback(host), is_tailscale(host)) == (loopback, tailscale)
 
 
 def test_the_default_origin_brackets_an_ipv6_host() -> None:
