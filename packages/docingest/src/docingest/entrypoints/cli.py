@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import sys
 from collections import Counter
 from enum import StrEnum
 from pathlib import Path
@@ -20,6 +22,7 @@ from ..config import load_config
 from ..domain.errors import DocingestError, OcrUnavailableError
 from ..domain.text import split_pages
 from ..ports import StoredDocument
+from .ask_lines import serve_lines
 from .bench_cli import bench_app
 from .index_cli import index_app
 
@@ -273,7 +276,9 @@ class KeywordChoice(StrEnum):
 
 @app.command()
 def ask(
-    question: str,
+    question: Annotated[
+        str | None, typer.Argument(help="The question; not given with --stdin")
+    ] = None,
     config: ConfigOpt = None,
     no_index: Annotated[
         bool,
@@ -288,12 +293,33 @@ def ask(
             "questions with LaTeX, always or never. Overrides [index] bm25 for this question."
         ),
     ] = None,
+    stdin: Annotated[
+        bool,
+        typer.Option(
+            "--stdin",
+            help="Read questions as JSON lines from standard input and write one JSON line "
+            "per answer, keeping the index open between them",
+        ),
+    ] = False,
 ) -> None:
     """Answer a question with PaperQA2 over the normalized corpus (needs the 'qa' extra).
 
     With an index configured ([adapters] index, built by `docingest index build`), the
     evidence is retrieved from it and reranked; without one PaperQA2 retrieves it itself.
+    With --stdin, one process answers many questions: each input line is a JSON object
+    (question, and optionally id, use_index, bm25, whole_blocks, return_contexts) and each
+    output line the answer with its sources, warnings, timings and index generation.
     """
+    if stdin:
+        if question is not None or no_index or bm25 is not None:
+            raise typer.BadParameter(
+                "--stdin takes its questions and their options (use_index, bm25) from the lines "
+                "it reads, not from the command line"
+            )
+        _ask_lines(config)
+        return
+    if question is None:
+        raise typer.BadParameter("give a QUESTION, or --stdin to read them from standard input")
 
     def warn(msg: str) -> None:
         console.print(f"[yellow]warning[/]: {escape(msg)}")
@@ -316,6 +342,23 @@ def ask(
         console.print(f"[red]error[/]: {escape(str(e))}")
         raise typer.Exit(1) from e
     console.print(answer, markup=False, highlight=False)  # LLM text may contain [brackets]
+
+
+def _ask_lines(config: Path | None) -> None:
+    """``ask --stdin``: the answers go to standard output as JSON lines and nothing else does,
+    so whatever a library prints meanwhile is sent to standard error."""
+    session = _container(config).ask_session
+    out = sys.stdout
+
+    def write(line: str) -> None:
+        out.write(line + "\n")
+        out.flush()
+
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            asyncio.run(serve_lines(session, sys.stdin, write))
+    finally:
+        session.close()
 
 
 def _selected_status(port: str, name: str) -> str:

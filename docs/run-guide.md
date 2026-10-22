@@ -198,6 +198,19 @@ Before the answer you may also see lines that are harmless:
 
 None of them affects the answer. Two options change one question: `--no-index` answers with PaperQA2's own retrieval, and `--bm25 english|always|never` overrides the keyword setting. See [Spanish questions](#spanish-questions) for when to use the second.
 
+### Many questions in one process
+
+Every `docingest ask` starts Python, opens the index, copies its vectors to 32-bit floats and lists the corpus before it retrieves anything. For a script that asks many questions, `ask --stdin` does that once. It reads one JSON object per line and writes one JSON line per answer, in order:
+
+```bash
+printf '%s\n' \
+  '{"id": "1", "question": "What limits T1 in transmons?"}' \
+  '{"id": "2", "question": "coherencia transmon", "bm25": "never", "return_contexts": true}' \
+  | uv run docingest ask --stdin -c "$CONFIG" > answers.jsonl
+```
+
+The same options as on the command line go in the line (`use_index`, `bm25`), plus `whole_blocks` (true or false, instead of the `[qa]` key, for this question) and `return_contexts` (the chunks the answer model read). Each answer line holds `answer`, `warnings`, `sources`, `timings`, the `index_generation` and an `error` that is null unless that question failed; a failed question does not stop the next one. Questions run one at a time, so the model server sees what it sees from the plain command. The index is reloaded by itself when a build commits; a change to the configuration file needs a new process. In Python, `Container(cfg).ask_session` gives the same session as an object. Nothing is stored. The fields are listed in the [command reference](../packages/docingest/src/docingest/entrypoints/README.md#docingest-ask).
+
 ### Equations in answers
 
 By default PaperQA2 does not give the answer model the 10 chunks, it gives it a summary of about 100 words per chunk, and the summaries drop most LaTeX. For papers where the equations matter, set these keys in the `[qa]` table of your configuration. `lab-server.toml` already sets the first two:

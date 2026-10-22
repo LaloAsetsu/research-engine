@@ -570,7 +570,7 @@ documents, warnings = container.adapter("store").corpus()   # the whole normaliz
 |---|---|---|
 | `docingest ingest PATHS...` | Normalize files and directories into Markdown plus manifest. Exits with status 1 if any input failed, after processing the others. With `--index`, the papers stored by this run are then added to the chunk index. | `--force`, `--ocr-all`, `--max-pages N`, `--index` |
 | `docingest crawl QUERY` | Search arXiv, download sources (PDF fallback) with metadata, then ingest them. Exits with status 1 on any failure. | `--limit` (default 5), `--no-ingest`, `--max-pages N`, `--index` |
-| `docingest ask QUESTION` | Answer a question with PaperQA2 over the normalized corpus. With `[adapters] index` set, the evidence is retrieved from the chunk index and reranked first ([index mode](#paperqa2-integration)). Needs the `qa` extra. | `--config`, `--no-index`, `--bm25 english\|always\|never` |
+| `docingest ask QUESTION` | Answer a question with PaperQA2 over the normalized corpus. With `[adapters] index` set, the evidence is retrieved from the chunk index and reranked first ([index mode](#paperqa2-integration)). Needs the `qa` extra. With `--stdin`, one process answers JSON-line questions and keeps the index open between them ([`ask --stdin`](src/docingest/entrypoints/README.md#docingest-ask)). | `--config`, `--no-index`, `--bm25 english\|always\|never`, `--stdin` |
 | `docingest index build\|status\|remove DOC_ID` | The persistent chunk index of the [docingest-index](../docingest-index/README.md) package: embed the new and changed documents, show the state of the index, forget one document. Needs `[adapters] embedder` and `index` set to real adapters. | `--config`, `build --no-prune` |
 | `docingest adapters` | List every port, its selected adapter and the available ones, including installed plugins. | `--config` |
 | `docingest model-path [ROLE]` | Print the local snapshot path of the pinned `llm` (default), `embedding` or `ocr` model, downloading it if it is not cached. Used by `scripts/serve_llm.sh`. | `--config` |
@@ -625,7 +625,7 @@ docingest is organised in layers, from the pure domain at the center to the entr
 
 ```mermaid
 flowchart TD
-    EP["entrypoints: cli.py, bench_cli.py, paperqa_hook.py"] --> BS["bootstrap: REGISTRY, entry-point plugins, Container"]
+    EP["entrypoints: cli.py, bench_cli.py, ask_lines.py, paperqa_hook.py"] --> BS["bootstrap: REGISTRY, entry-point plugins, Container"]
     BS --> AD["adapters: one subpackage per port"]
     AD --> CF["config: AppConfig loaded from pipeline.toml"]
     CF --> AP["application: IngestService, CrawlService, AskService, BenchmarkRunner"]
@@ -917,6 +917,7 @@ pytest runs with `--strict-markers`; the markers are `model`, `network` and `slo
   - Circuits as data: `GateList.circuits` holds each circuit as `CircuitSteps` (`GateOp` items), and `CircuitSteps.to_dict()` gives the `circuit/1` format for quantum-sim (128-wire limit per gate, never stored). The circuit readers deny by default: a consumption check marks every command, option, argument, cell, row and text run of a circuit's source as understood or allowed to have no effect, and anything left, as well as text outside the circuit environments, makes the circuit `partial` with an `unparsed` item that names it. A `\cw` classical wire, a late `\lstick` that is not a ket (one that holds a ket stays a `text` item and the circuit stays `parsed`; quantum-sim refuses it as a ket after a gate), a `\wire` mark with dots, a doubly declared `yquant` name and options that carry content are unparsed instead of being read as a quantum wire, a legend or a plain gate.
   - Routing: the math-page rule, `[routing] math_to_ocr`, off by default.
   - `ask`: BM25 on the LaTeX of a question in any language; `[qa] skip_summary` with a copy rule in the answer prompt; gate lists after circuit blocks (also returned as data, `GateList.circuits`, in the `circuit/1` format of `CircuitSteps.to_dict()`); the Eq. (n) lookup; a retry with fewer sources when the answer prompt is too long for the model; `[qa] whole_blocks`, off by default.
+  - `ask` over many questions: `AskSession` (`Container.ask_session`) keeps the index, its float32 copy and the corpus listing open between questions and reloads them when `CommittedState.generation` changes; `docingest ask --stdin` answers JSON-line questions with it; `whole_blocks`, `use_index` and `bm25` can be chosen per question; the result holds the answer, the contexts the answerer read, the sources, the warnings, the timings and the index generation.
 
 ## License
 

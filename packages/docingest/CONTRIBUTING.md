@@ -110,7 +110,7 @@ Paths are relative to the package folder, `packages/docingest`. The repository r
 | `src/docingest/config.py` | `AppConfig` and its sections, loaded from `config/pipeline.toml` |
 | `src/docingest/adapters/<area>/` | implementations, one subpackage per area: `detection`, `pdf`, `ocr`, `images`, `converters`, `store`, `sources`, `qa`, `retrieval`, `datasets`, plus `models` (the shared Hugging Face resolver) |
 | `src/docingest/bootstrap.py` | the composition root: `REGISTRY`, entry-point plugins, `Container` |
-| `src/docingest/entrypoints/` | `cli.py` (typer), `bench_cli.py` (`docingest bench ...`), `paperqa_hook.py` |
+| `src/docingest/entrypoints/` | `cli.py` (typer), `bench_cli.py` (`docingest bench ...`), `ask_lines.py` (`docingest ask --stdin`), `paperqa_hook.py` |
 | `config/` | `pipeline.toml`, `benchmark.toml`, `examples/` |
 | `scripts/` | `check.sh` (the quality gates) and the data, server and benchmark helpers |
 | `tests/` | `unit/`, `contract/`, `integration/`, `fixtures/`, `fakes.py`, `builders.py`, `conftest.py` |

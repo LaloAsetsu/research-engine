@@ -3,6 +3,8 @@
 The embedder, index, reranker and answerer are fakes registered as plugins: no model and no
 network. The index is built by ``docingest index build`` so the whole path is exercised."""
 
+import json
+
 import pytest
 from builders import LONG, one_line
 from fakes import FakeEmbedder, FakeIndex, FakeQA, FakeReranker
@@ -192,3 +194,56 @@ def test_the_plain_path_still_fails_the_way_it_did(tmp_path, parts):
     cfg.write_text(f'output_dir = "{tmp_path / "empty"}"\n[adapters]\nqa = "fake"\n')
     result = CliRunner(env=WIDE).invoke(app, ["ask", "q", "-c", str(cfg)])
     assert result.exit_code == 1 and isinstance(result.exception, RuntimeError)
+
+
+# ------------------------------------------------------------------ ask --stdin
+
+
+def lines(*requests):
+    return "".join(json.dumps(r) + "\n" for r in requests)
+
+
+def test_stdin_answers_many_questions_in_one_process_and_opens_the_index_once(corpus, parts):
+    runner, cfg = corpus
+    indexed = with_index(cfg)
+    assert runner.invoke(app, ["index", "build", "-c", str(indexed)]).exit_code == 0
+    closed = parts["index"].closed
+    result = runner.invoke(
+        app,
+        ["ask", "--stdin", "-c", str(indexed)],
+        input=lines(
+            {"question": "the qubit architecture works well", "id": "a", "return_contexts": True},
+            {"question": "attention is all you need", "id": "b", "bm25": "never"},
+        ),
+    )
+    assert result.exit_code == 0, result.output
+    out = [json.loads(x) for x in result.stdout.splitlines()]
+    assert [o["id"] for o in out] == ["a", "b"] and all(o["error"] is None for o in out)
+    assert len(out[0]["contexts"]) == 2 and "contexts" not in out[1]
+    assert parts["index"].keywords[-2:] == [None, "never"]
+    assert parts["index"].closed == closed + 1  # once, when the session ends
+
+
+def test_stdin_keeps_everything_but_the_answer_lines_off_standard_output(corpus, parts):
+    runner, cfg = corpus
+    result = runner.invoke(
+        app, ["ask", "--stdin", "-c", str(cfg)], input=lines({"question": "what is attention"})
+    )
+    assert result.exit_code == 0, result.output
+    [only] = result.stdout.splitlines()
+    assert json.loads(only)["answer"].startswith("answer to") and parts["qa"].contexts is None
+
+
+def test_stdin_with_a_question_or_per_question_options_on_the_command_line_is_a_usage_error(
+    corpus, parts
+):
+    runner, cfg = corpus
+    for extra in (["q"], ["--no-index"], ["--bm25", "never"]):
+        result = runner.invoke(app, ["ask", "--stdin", *extra, "-c", str(cfg)], input="")
+        assert result.exit_code == 2 and "--stdin takes its questions" in one_line(result.output)
+
+
+def test_ask_without_a_question_or_stdin_is_a_usage_error(corpus, parts):
+    runner, cfg = corpus
+    result = runner.invoke(app, ["ask", "-c", str(cfg)])
+    assert result.exit_code == 2 and "give a QUESTION" in one_line(result.output)

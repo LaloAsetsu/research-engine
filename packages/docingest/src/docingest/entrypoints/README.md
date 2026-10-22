@@ -7,6 +7,7 @@ This package holds the **driving adapters**: the code that turns a user action i
 | `cli.py` | The Typer application `app`, installed as the `docingest` console script (`[project.scripts] docingest = "docingest.entrypoints.cli:app"` in `pyproject.toml`). Commands: `ingest`, `crawl`, `make-scan`, `eval-ocr`, `ask`, `adapters`, `model-path`. Mounts `bench` and `index`. |
 | `bench_cli.py` | The Typer sub-application `bench_app`, mounted as `docingest bench`. It is also the benchmark's composition root: it reads `config/benchmark.toml`, builds the suite adapters and builds each candidate's OCR engine through `bootstrap.build("ocr", ...)`. |
 | `index_cli.py` | The Typer sub-application `index_app`, mounted as `docingest index`: `build`, `status`, `remove`. It builds `Container.index_service` and prints its reports; an expected failure is a one-line message and exit code 1. |
+| `ask_lines.py` | The JSON-lines front of `AskSession` for `docingest ask --stdin`: `parse_request`, `format_result`, `format_error` and `serve_lines`, which answers one request line with one answer line until the input ends. Parsing and formatting only. |
 | `paperqa_hook.py` | `parse_pdf_to_pages`, a drop-in for PaperQA2's `settings.parsing.parse_pdf`. |
 | `__init__.py` | Package marker. |
 
@@ -50,7 +51,7 @@ flowchart LR
     root --> crawl["crawl QUERY"]
     root --> makescan["make-scan SRC OUT"]
     root --> evalocr["eval-ocr SCANNED_PDF"]
-    root --> ask["ask QUESTION"]
+    root --> ask["ask QUESTION or --stdin"]
     root --> adapters["adapters"]
     root --> modelpath["model-path [ROLE]"]
     root --> index["index"]
@@ -76,7 +77,9 @@ flowchart LR
     CS --> IS
     evalocr["docingest eval-ocr"] --> IS
     evalocr --> MET["application.metrics.score"]
-    ask["docingest ask"] --> AS["AskService.ask, retrieve with an index"]
+    ask["docingest ask QUESTION"] --> AS["AskService.ask, retrieve with an index"]
+    askstdin["docingest ask --stdin"] --> SL["ask_lines.serve_lines"]
+    SL --> SES["AskSession.ask, then AskService.complete and answer_from"]
     index["docingest index"] --> IXS["IndexService.build, status, remove"]
     makescan["docingest make-scan"] --> MS["adapters.datasets.synthetic.make_scan"]
     adapters["docingest adapters"] --> REG["bootstrap.REGISTRY and entry-point plugins"]
@@ -306,20 +309,21 @@ For comparing several OCR models on many pages, use `docingest bench` instead.
 ### `docingest ask`
 
 ```
-docingest ask [OPTIONS] QUESTION
+docingest ask [OPTIONS] [QUESTION]
 ```
 
 Answer a question with PaperQA2 over the normalized corpus (needs the 'qa' extra).
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `QUESTION` | text | yes | The question. Quote it in the shell. |
+| `QUESTION` | text | yes, except with `--stdin` | The question. Quote it in the shell. Not given with `--stdin`. |
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `--config`, `-c` | file | `config/pipeline.toml` | Pipeline configuration (`output_dir`, `[qa]` and, with an index, `[adapters]`, `[index]`, `[embedder]`, `[reranker]`). |
 | `--no-index` | flag | off | Use PaperQA2's own retrieval even when a chunk index is configured. |
 | `--bm25` | `english`, `always` or `never` | the `[index] bm25` setting | When the index adds keyword matching (BM25) to the dense search, for this question. An error (exit 2) without a configured index or with `--no-index`. |
+| `--stdin` | flag | off | Read questions as JSON lines from standard input and write one JSON line per answer; see below. Not combined with `QUESTION`, `--no-index` or `--bm25` (exit 2): the lines carry their own options. |
 
 **What it does.** `AskService.ask` reads the corpus from the store: for every document id it takes the canonical result, or else the largest partial or degraded one, and prints a `warning:` line for each document that has no complete result or has an unreadable manifest. It then hands the documents to the question-answering adapter (`[adapters] qa`, `paperqa` by default), which chunks each document page by page, embeds the chunks and asks the LLM configured in `[qa]`. The formatted answer with citations is printed. Nothing is ingested by this command.
 
@@ -328,6 +332,25 @@ Answer a question with PaperQA2 over the normalized corpus (needs the 'qa' extra
 With the default `[qa]` settings the LLM is the pinned `[ocr]` model served locally at `http://127.0.0.1:8080/v1` by `scripts/serve_llm.sh` (see [../../../scripts/README.md](../../../scripts/README.md)); start it first. `config/examples/ollama-qa.toml` uses Ollama models instead. The environment variables `DOCINGEST_LLM` and `DOCINGEST_EMBEDDING` override the LLM and embedding (see [../../../config/README.md](../../../config/README.md#environment-variables)).
 
 **Exit behaviour.** 0 on success. 1 when there are no ingested documents (``no ingested documents; run `docingest ingest` first``), when the `qa` extra is not installed, or when the LLM or embedding call fails; with an index, 1 also for an expected retrieval failure (a `DocingestError`: an index of another embedder, an empty or uncommitted index, an index without an embedder, an invalid `[index]`, `[embedder]` or `[reranker]` table, a reranker that scores the wrong number of chunks, a model server that does not answer), printed as `error: ...` without a traceback. Any other exception, including one raised while PaperQA2 answers, shows its traceback as on the plain path. 2 for usage errors.
+
+**`--stdin`.** One process, one open index: `AskSession` keeps the float32 copy of the vectors and the corpus listing between questions and reloads them when the index has a new commit (`CommittedState.generation`), so only the first question pays for them (about 1.4 s and 0.45 s at 1,249 papers, plus the start of the process). Each input line is a JSON object, each output line the answer to the line at the same position; blank lines are skipped, and the end of the input ends the loop with exit 0. Questions are answered one at a time. Nothing is stored. Standard output holds the answer lines and nothing else; anything a library prints meanwhile goes to standard error. A configuration edit is not picked up: start a new process.
+
+| Request field | Type | Default | Meaning |
+|---|---|---|---|
+| `question` | text | required | The question |
+| `id` | text | none | Echoed in the answer line, to match answers in a stream |
+| `use_index` | true or false | true | `false` is `--no-index` |
+| `bm25` | `"english"`, `"always"`, `"never"` or null | the `[index] bm25` setting | As `--bm25` |
+| `whole_blocks` | true, false or null | the `[qa] whole_blocks` setting | Complete the display equations, code blocks and tables that a chunk cuts; `true` needs `[qa] skip_summary` |
+| `return_contexts` | true or false | false | Also return the chunks the answerer read |
+
+Any other field is an error. The answer line has `id`, `answer` (what the one-shot command prints), `warnings` (the `warning:` lines it would print), `error` (null, or `{"kind", "message"}`), `sources` (doc ids of the papers the chunks come from, by first appearance), `index_generation` (the index commit the question was retrieved from; null without an index or when the adapter cannot name its commits), `timings` (`retrieve_s`, `answer_s`, `wall_s`, in seconds; null on an error) and, with `return_contexts`, `contexts` (a list of `doc_id`, `name`, `first_page`, `last_page`, `start`, `is_reference`, `text`). A line that is not a request, an option the question cannot use, a failing index or a model server that is down give an answer line with `answer` null and the `error`; the loop goes on with the next line.
+
+```bash
+printf '%s\n' '{"id": "1", "question": "What limits T1 in transmons?"}' \
+  '{"id": "2", "question": "coherencia transmon", "bm25": "never", "return_contexts": true}' \
+  | uv run docingest ask --stdin --config config/examples/lab-server.toml
+```
 
 **Examples.**
 
