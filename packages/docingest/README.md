@@ -660,7 +660,7 @@ Ports and their built-in adapters:
 | `embedder`, `index`, `reranker` | `Embedder`, `ChunkIndex`, `Reranker` | `none`: `NoEmbedder`, `NoIndex`, `NoReranker` (the defaults; real ones come from plugins) | `adapters/retrieval/none.py` |
 | set in `config/benchmark.toml` | `BenchmarkSuite` | `synthetic`: `SyntheticSuite`; `olmocr-bench`: `OlmOcrBenchSuite` | `adapters/datasets/` |
 
-The layering is enforced by seven import-linter contracts that run in CI (`uv run lint-imports`): inward-only layers, independent adapter subpackages, a pure domain, an application layer free of concrete libraries, no import of a plugin package, adapters imported only by `bootstrap` and `entrypoints`, and no import of the separate `quantum_sim` package. Adapter modules are imported lazily inside their factories, so heavy optional dependencies (mlx-vlm, Docling, PaperQA2) load only when that adapter is selected and used.
+The layering is enforced by seven import-linter contracts that run in CI (`uv run lint-imports`): inward-only layers, independent adapter subpackages, a pure domain, an application layer free of concrete libraries, no import of a plugin package, adapters imported only by `bootstrap` and `entrypoints`, and no import of the separate `quantum_sim`, `research_api` or `qa_bench` packages. Adapter modules are imported lazily inside their factories, so heavy optional dependencies (mlx-vlm, Docling, PaperQA2) load only when that adapter is selected and used.
 
 Details: [docs/architecture.md](docs/architecture.md), [ADR 0001](docs/adr/0001-hexagonal-architecture.md), [ADR 0002](docs/adr/0002-per-page-routing-and-content-addressed-cache.md), [ADR 0003](docs/adr/0003-latex-first-for-arxiv.md).
 

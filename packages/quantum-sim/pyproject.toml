@@ -97,7 +97,7 @@ forbidden_modules = ["numpy"]
 # The other direction (docingest never imports quantum_sim) is a contract in docingest's
 # pyproject.toml, because each package's gates run with only that package installed.
 [[tool.importlinter.contracts]]
-name = "quantum_sim never imports docingest or its plugins"
+name = "quantum_sim never imports docingest, its plugins, research_api or qa_bench"
 type = "forbidden"
 source_modules = ["quantum_sim"]
-forbidden_modules = ["docingest", "docingest_index"]
+forbidden_modules = ["docingest", "docingest_index", "research_api", "qa_bench"]

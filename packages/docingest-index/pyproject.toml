@@ -81,7 +81,7 @@ reportMissingTypeStubs = false
 
 [tool.importlinter]
 root_packages = ["docingest_index", "docingest"]
-include_external_packages = false
+include_external_packages = true
 exclude_type_checking_imports = true
 
 # The plugin sees docingest through its ports, its domain and its configuration only: not
@@ -96,3 +96,9 @@ forbidden_modules = [
     "docingest.bootstrap",
     "docingest.entrypoints",
 ]
+
+[[tool.importlinter.contracts]]
+name = "docingest_index never imports research_api or qa_bench"
+type = "forbidden"
+source_modules = ["docingest_index"]
+forbidden_modules = ["research_api", "qa_bench"]

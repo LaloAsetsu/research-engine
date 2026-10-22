@@ -156,10 +156,10 @@ source_modules = ["docingest"]
 forbidden_modules = ["docingest_index"]
 
 [[tool.importlinter.contracts]]
-name = "docingest never imports quantum_sim (a separate package; neither depends on the other)"
+name = "docingest never imports quantum_sim, research_api or qa_bench (separate packages)"
 type = "forbidden"
 source_modules = ["docingest"]
-forbidden_modules = ["quantum_sim"]
+forbidden_modules = ["quantum_sim", "research_api", "qa_bench"]
 
 [[tool.importlinter.contracts]]
 name = "Only the composition root and entrypoints wire concrete adapters"

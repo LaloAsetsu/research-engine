@@ -146,7 +146,7 @@ The layering is enforced by seven import-linter contracts in `[tool.importlinter
 | 4 | Application depends on ports, not on concrete libraries | `forbidden` | `docingest.application` and `docingest.ports` may not import `pypdfium2`, `mlx`, `mlx_vlm`, `paperqa`, `docling`, `pypandoc`, `huggingface_hub`, `httpx`, `typer`, `rich`. |
 | 5 | docingest never imports a plugin package (plugins are found by entry point) | `forbidden` | `docingest` may not import `docingest_index`. The plugin package has a contract of its own, in its `pyproject.toml`: it may import only `docingest.ports`, `docingest.domain` and `docingest.config`. |
 | 6 | Only the composition root and entrypoints wire concrete adapters | `protected` | Only `docingest.bootstrap`, `docingest.entrypoints` and the adapters themselves may import `docingest.adapters`. |
-| 7 | docingest never imports quantum_sim (a separate package; neither depends on the other) | `forbidden` | `docingest` may not import `quantum_sim`, the circuit simulator of `packages/quantum-sim`. That package has the reverse contract in its own `pyproject.toml` (see [ADR 0005](adr/0005-own-numpy-circuit-simulator.md)). |
+| 7 | docingest never imports quantum_sim, research_api or qa_bench (separate packages) | `forbidden` | `docingest` may not import `quantum_sim`, the circuit simulator of `packages/quantum-sim`, nor `research_api` (the HTTP API) or `qa_bench` (the benchmark package). Those packages have the reverse contracts in their own `pyproject.toml` (see [ADR 0005](adr/0005-own-numpy-circuit-simulator.md)). |
 
 Global settings that matter:
 

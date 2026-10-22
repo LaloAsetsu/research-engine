@@ -174,7 +174,7 @@ Equality of two circuits of 11 to 20 wires applies both to 8 random states drawn
 | `api.py` | `run`, `check`, `refusal`: the result format | `domain`, `engine`, `formats`, `angles`, numpy |
 | `entrypoints.py` | the `quantum-sim` command | `api`, `domain` |
 
-Three import-linter contracts in `pyproject.toml` keep this layering (`entrypoints`, `api`, `formats`, then `engine` beside `labels`, then `gates` beside `angles`, then `domain`), keep numpy out of `domain`, `angles`, `labels` and `formats`, and forbid importing docingest or docingest-index. The reverse direction, docingest never importing `quantum_sim`, is a contract in docingest's `pyproject.toml`.
+Three import-linter contracts in `pyproject.toml` keep this layering (`entrypoints`, `api`, `formats`, then `engine` beside `labels`, then `gates` beside `angles`, then `domain`), keep numpy out of `domain`, `angles`, `labels` and `formats`, and forbid importing docingest, docingest-index, research_api or qa_bench. The reverse direction, docingest never importing `quantum_sim`, is a contract in docingest's `pyproject.toml`.
 
 ## Tests and checks
 

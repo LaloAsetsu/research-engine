@@ -142,7 +142,7 @@ flowchart LR
 | `latex.py` | `latex_text`, `has_latex`: the LaTeX of a question, for BM25 on non-English formula questions |
 | `factories.py` | The three `(AppConfig) -> adapter` functions that the entry points name |
 
-The import-linter contract in `pyproject.toml` lets this package import only `docingest.ports`, `docingest.domain` and `docingest.config`.
+Two import-linter contracts in `pyproject.toml` let this package import only `docingest.ports`, `docingest.domain` and `docingest.config`, and forbid it to import `research_api` or `qa_bench`.
 
 ## Tests and checks
 
