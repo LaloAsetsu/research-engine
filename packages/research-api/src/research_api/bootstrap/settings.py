@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import tomllib
 from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, field_validator
 
 # Tailscale hands out addresses from the CGNAT block (IPv4) and a unique-local block (IPv6).
 _TAILSCALE_NETWORKS = (
     ipaddress.ip_network("100.64.0.0/10"),
     ipaddress.ip_network("fd7a:115c:a1e0::/48"),
 )
+
+
+_DEFAULT_PORT = {"http": 80, "https": 443}
+_ORIGIN = re.compile(
+    r"(?P<scheme>[A-Za-z]+)://(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::(?P<port>[0-9]{1,5}))?/?"
+)
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+_ORIGIN_FORM = "must look like http://host:port or https://host"
 
 
 class SettingsError(ValueError):
@@ -50,13 +59,51 @@ def is_tailscale(host: str) -> bool:
     )
 
 
+def _origin_text(scheme: str, host: str, port: int) -> str:
+    """An origin as a browser sends it in ``Origin``: default port left out."""
+    return f"{scheme}://{host}" + ("" if port == _DEFAULT_PORT[scheme] else f":{port}")
+
+
+def normalize_origin(value: str) -> str:
+    """The ``Origin`` header a browser would send for this origin, or a ``ValueError``.
+
+    The scheme and host are lowercased, an IPv6 host is written in its short form, the port loses
+    its leading zeros and is dropped when it is the default one. Anything a browser could not
+    send (an empty or zero port, a space, ``;``, a trailing dot, a numeric host that is not a
+    plain IPv4 address) is refused.
+    """
+    parts = urlsplit(value)
+    if parts.path not in ("", "/") or "?" in value or "#" in value or "@" in parts.netloc:
+        raise ValueError("must be an origin only: no path, query, fragment or credentials")
+    found = _ORIGIN.fullmatch(value)
+    if found is None or found["scheme"].lower() not in _DEFAULT_PORT:
+        raise ValueError(_ORIGIN_FORM)
+    scheme = found["scheme"].lower()
+    host = found["host"].lower()
+    port = int(found["port"]) if found["port"] else _DEFAULT_PORT[scheme]
+    if not 1 <= port <= 65535:
+        raise ValueError("must have a port from 1 to 65535")
+    try:
+        if host.startswith("["):
+            host = f"[{ipaddress.IPv6Address(host[1:-1])}]"
+        elif re.fullmatch(r"[0-9.]+", host):
+            host = str(ipaddress.IPv4Address(host))
+    except ValueError:
+        raise ValueError(_ORIGIN_FORM) from None
+    if not host.startswith("[") and (
+        len(host) > 253 or not all(_LABEL.fullmatch(label) for label in host.split("."))
+    ):
+        raise ValueError(_ORIGIN_FORM)
+    return _origin_text(scheme, host, port)
+
+
 class Settings(BaseModel):
     """Every key is optional; a mistyped one is an error (``extra="forbid"``)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     bind_host: str = "127.0.0.1"
-    port: int = Field(default=8090, ge=1, le=65535)
+    port: StrictInt = Field(default=8090, ge=1, le=65535)
     public_origin: str | None = None
 
     @field_validator("bind_host")
@@ -71,22 +118,17 @@ class Settings(BaseModel):
     @field_validator("public_origin")
     @classmethod
     def _origin_is_an_origin(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        parts = urlsplit(value)
-        if parts.scheme not in ("http", "https") or not parts.hostname:
-            raise ValueError("must look like http://host:port or https://host")
-        if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
-            raise ValueError("must be an origin only: no path, query, fragment or credentials")
-        return value.rstrip("/")
+        return None if value is None else normalize_origin(value)
 
     @property
     def origin(self) -> str:
         """The origin browsers use, which a write request must match."""
         if self.public_origin is not None:
             return self.public_origin
-        host = f"[{self.bind_host}]" if ":" in self.bind_host else self.bind_host
-        return f"http://{host}:{self.port}"
+        address = _address(self.bind_host)
+        assert address is not None  # the validator accepts loopback and Tailscale addresses only
+        host = f"[{address}]" if address.version == 6 else str(address)
+        return _origin_text("http", host, self.port)
 
     @classmethod
     def defaults(cls) -> Self:

@@ -77,11 +77,95 @@ def test_an_origin_without_a_trailing_slash_is_kept_clean() -> None:
         "http://tool.example/app",
         "http://tool.example?x=1",
         "http://user@tool.example",
+        "http://:pw@tool.example",
+        "http://tool.example?",
+        "http://tool.example#",
+        "http://tool.example:99999",
+        "http://tool.example:port",
     ],
 )
 def test_a_value_that_is_not_an_origin_is_refused(origin: str) -> None:
     with pytest.raises(ValueError, match="origin"):
         Settings(public_origin=origin)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://host:",
+        "http://host:0",
+        "http://host:00",
+        "http://host:+80",
+        "http://host:8 0",
+        "http://host:123456",
+        "http://h ost",
+        "http://host;x",
+        "http://host,x",
+        "http://host\n",
+        "http://ho\nst",
+        "http://\thost",
+        " http://host",
+        "http://host ",
+        "http://host.",
+        "http://host..example",
+        "http://.host",
+        "http://-host",
+        "http://host-",
+        "http://ho_st",
+        "http://h\u00f4st",
+        "http://host:\uff18\uff10",
+        "http://" + "a" * 64 + ".example",
+        "http://1234",
+        "http://1.2.3",
+        "http://010.1.1.1",
+        "http://256.1.1.1",
+        "http://[::1",
+        "http://[::g]",
+        "http://[::1]x",
+        "http://[::1%25en0]",
+        "http://[]",
+        "http:///host",
+        "http://host:80:80",
+        "https:/host",
+    ],
+)
+def test_a_value_a_browser_never_sends_as_origin_is_refused(origin: str) -> None:
+    with pytest.raises(ValueError, match="public_origin"):
+        Settings(public_origin=origin)
+
+
+@pytest.mark.parametrize(
+    ("given", "origin"),
+    [
+        ("http://HOST:8090", "http://host:8090"),
+        ("HTTP://host", "http://host"),
+        ("Https://Tool.Example/", "https://tool.example"),
+        ("http://host:080", "http://host"),
+        ("http://host:80", "http://host"),
+        ("https://host:443", "https://host"),
+        ("https://host:80", "https://host:80"),
+        ("http://host:08090", "http://host:8090"),
+        ("http://127.0.0.1:8090", "http://127.0.0.1:8090"),
+        ("http://[::1]:8090", "http://[::1]:8090"),
+        ("http://[0:0:0:0:0:0:0:1]:8090", "http://[::1]:8090"),
+        ("http://[FD7A:115C:A1E0::5]", "http://[fd7a:115c:a1e0::5]"),
+        ("http://tool-2.example.org:65535", "http://tool-2.example.org:65535"),
+        ("http://" + "a" * 63 + ".example", "http://" + "a" * 63 + ".example"),
+    ],
+)
+def test_an_origin_is_written_the_way_a_browser_sends_it(given: str, origin: str) -> None:
+    settings = Settings(public_origin=given)
+    assert settings.public_origin == settings.origin == origin
+
+
+def test_the_default_origin_leaves_out_the_default_port() -> None:
+    assert Settings(port=80).origin == "http://127.0.0.1"
+
+
+@pytest.mark.parametrize("port", [True, "8090", 8090.0])
+def test_a_port_must_be_an_integer(port: object) -> None:
+    with pytest.raises(ValueError, match="port"):
+        Settings.model_validate({"port": port})
 
 
 @pytest.mark.parametrize(
