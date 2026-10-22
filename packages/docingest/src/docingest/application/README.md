@@ -33,7 +33,7 @@ case.
 |---|---|---|---|
 | `ingest.py` | `IngestService`, `IngestOptions`, `PIPELINE_VERSION`, `SIDECAR_SUFFIX`, `sha256_file`, `read_sidecar`, `retitle_markdown`, `Log` | Turn one file (PDF, image, office, LaTeX, text) into Markdown plus a `DocumentManifest`, with a content-addressed cache | `bootstrap.Container.ingest`, `docingest ingest`, `docingest eval-ocr`, the PaperQA2 hook, `CrawlService` |
 | `crawl.py` | `CrawlService`, `CrawlReport` | Search a remote source, download each record, write a metadata sidecar, ingest it | `bootstrap.Container.crawl`, `docingest crawl` |
-| `ask.py` | `AskService`, `Retrieval`, `EquationLookup`, `WholeBlocks`, `retrieve`, `cap_per_paper`, `with_whole_blocks`, `with_gate_lists`, `with_equation_lookup`, `with_block_notes`, `with_equation_headers`, `MAX_PER_NUMBER`, `MAX_ADDED`, `BLOCK_CHUNKS` | Answer a question over every stored document, or from the chunk index when one is configured | `bootstrap.Container.ask`, `docingest ask` |
+| `ask.py` | `AskService`, `AskSession`, `AskOptions`, `AskResult`, `AskTimings`, `Retrieval`, `EquationLookup`, `WholeBlocks`, `retrieve`, `cap_per_paper`, `with_whole_blocks`, `with_gate_lists`, `with_equation_lookup`, `with_block_notes`, `with_equation_headers`, `MAX_PER_NUMBER`, `MAX_ADDED`, `BLOCK_CHUNKS` | Answer a question over every stored document, or from the chunk index when one is configured | `bootstrap.Container.ask`, `Container.ask_session`, `docingest ask` |
 | `index.py` | `IndexService`, `IndexStatus`, `BuildReport`, `content_key`, `document_chunks`, `BATCH_CHUNKS` | Chunk every stored document like `ask` does, embed the new and changed ones, drop the vanished ones, and report the state of the index | `bootstrap.Container.index_service`, `docingest index` |
 | `benchmark.py` | `BenchmarkRunner`, `CandidateRun`, `RunMismatchError`, `score_run`, `needs_scoring`, `load_scores`, `rank`, `compare`, `throughput`, `build_summary`, `render_report`, `write_report`, `read_manifest`, `read_telemetry`, `telemetry_path`, `telemetry_stamp`, `latest_by_sample`, `machine_info`, `library_versions` | Transcribe benchmark samples with each OCR candidate (resumable), record telemetry, score, and write `summary.json` and `report.md` | `docingest bench run`, `bench score`, `bench report` (in `entrypoints/bench_cli.py`); `scripts/bench_docs.py` reads `load_scores` and `compare` |
 | `metrics.py` | `score`, `normalize`, `plain_text`, `latex_to_text`, `word_f1`, `char3_f1`, `running_lines`, `strip_furniture`, `bootstrap_ci`, `FURNITURE_ZONE` | Format-neutral text comparison: CER, WER, word F1, character 3-gram F1 | the synthetic benchmark suite, `docingest eval-ocr` |
@@ -854,9 +854,9 @@ for key, error in report.failures:
 
 ## `ask.py`: question answering over the corpus
 
-`AskService(*, store, qa, retrieval=None, circuit_lists=False, equation_lookup=None, whole_blocks=None)` has one coroutine and one property. `circuit_lists`, `equation_lookup` and `whole_blocks` are not settings of their own: `Container.ask` passes `[qa] skip_summary` and, for the lookup, an `EquationLookup(chunk_chars, overlap, sources)` made from `[qa] chunk_chars`, `overlap` and `answer_max_sources`, and for the blocks a `WholeBlocks(chunk_chars, sources)` made from `[qa] chunk_chars` and `answer_max_sources` (`None` for the lookup when `skip_summary` is false; `None` for the blocks unless `skip_summary` and `[qa] whole_blocks` are both true, and `whole_blocks` is off by default).
+`AskService(*, store, qa, retrieval=None, circuit_lists=False, equation_lookup=None, whole_blocks=None, whole_blocks_default=True)` has one coroutine and one property, and a few methods that `AskSession` shares (`settle`, `complete`, `answer_from`, `read_corpus` with `answer_alone`, `retrieval`). `circuit_lists`, `equation_lookup` and `whole_blocks` are not settings of their own: `Container.ask` passes `[qa] skip_summary` and, for the lookup, an `EquationLookup(chunk_chars, overlap, sources)` made from `[qa] chunk_chars`, `overlap` and `answer_max_sources`, and for the blocks a `WholeBlocks(chunk_chars, sources)` made from `[qa] chunk_chars` and `answer_max_sources` (`None` for the lookup and the blocks when `skip_summary` is false). `[qa] whole_blocks` (off by default) is `whole_blocks_default`: whether a question that does not choose completes the blocks. A question can choose (`whole_blocks=True` or `False`), which needs the `WholeBlocks` settings, so `skip_summary`.
 
-`async ask(question, warn=print, *, use_index=True, keywords=None) -> str`
+`async ask(question, warn=print, *, use_index=True, keywords=None, whole_blocks=None) -> str`
 
 `has_index` is true when a `retrieval` callable was given (`[adapters] index` is set).
 
@@ -988,6 +988,35 @@ answer = asyncio.run(Container(load_config()).ask.ask("What is scaled dot-produc
 
 The default `qa` adapter needs the `qa` extra and a language model server; see the
 [main README](../../../README.md).
+
+### `AskSession`: many questions over an index that stays open
+
+`AskService.ask` closes the index after each question, so the next one pays again for what
+grows with the corpus: the float32 copy of the vectors (1.4 s at 1,249 papers) and the listing of
+the corpus (0.45 s). `AskSession(service, *, clock=time.perf_counter)` keeps both between
+questions (`Container.ask_session`, one per container, so it reads the configuration once).
+
+`async ask(question, options=None, warn=None, on_phase=None) -> AskResult`
+
+| Part | Behaviour |
+|---|---|
+| `AskOptions(use_index=True, keywords=None, whole_blocks=None)` | What one question may change: the index, the keyword mode and the completion of cut blocks. An option the question cannot use is a `ValueError`, as in `AskService.ask` |
+| `AskResult` | `answer` (what `AskService.ask` returns), `contexts` (the chunks the answerer read, as it read them), `sources` (doc ids by first appearance), `warnings`, `index_generation`, `timings` (`AskTimings`: `retrieve_s`, `answer_s`, `wall_s`) |
+| `on_phase` | Called in the caller's event loop with `"retrieving"` when a question that uses the index starts waiting for its turn at the retrieval, and with `"answering"` when the chunks are ready and the answerer is called. A question that does not use the index has only `"answering"`. A question that fails earlier (options refused, no index to search) has none of the phases it did not reach. For a caller that tells its own caller where the question is (the API's server-sent events) |
+| Reload | Before a question, `ChunkIndex.committed().generation` is compared with the one loaded. When it differs, the index is closed (the next search opens the new commit and copies its vectors once) and the corpus is listed again. An index that returns no generation is reloaded only by `reload()`. Papers ingested without a new commit are not seen until then, and the warning about documents missing from the index is as stale as the listing. A question that does not use the index lists the corpus afresh |
+| Concurrency | The listing, the readiness check, the query embedding, the search and the reranking run one question at a time, in a worker thread, behind a lock. The completion of the chunks (it reads the cited papers' Markdown) and, for a question that does not use the index, the listing and the reading of every paper run in a worker thread too, outside the lock, so a caller's event loop never waits for the disk. The answerer runs outside the lock, so a caller can have several answers pending; it should not when the numbers are compared, because a model server that batches requests changes them. `warn` may therefore be called from a worker thread |
+| `warm_up()` | Opens the index, lists the corpus and makes the float32 copy with one search, so that the first question does not pay for it; does nothing without an index |
+| `reload()`, `close()` | Forget the listing and close the index; the session stays usable |
+| Errors | Raised as `AskService.ask` raises them; the session stays usable |
+
+`retrieve_s` runs from taking the lock to the start of the answerer: the search and the
+reranking with the lock held, then the completion of the chunks, which runs after it is released.
+The wait for another question is in `wall_s` only. `index_generation` is read just before the
+search: a commit that lands in between shows up at the next question. When that search is the one
+that opens the index (the first question, or the first after a reload) a commit that lands
+between the read and the open is searched but named by the older generation, and the next question
+reloads once for nothing; the answer is not affected. Nothing is stored: no request log and no
+answer cache.
 
 ## `index.py`: keep the chunk index in step with the corpus
 

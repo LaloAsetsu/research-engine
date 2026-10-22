@@ -17,7 +17,7 @@ from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .application.ask import AskService, EquationLookup, Retrieval, WholeBlocks
+from .application.ask import AskService, AskSession, EquationLookup, Retrieval, WholeBlocks
 from .application.crawl import CrawlService
 from .application.index import IndexService
 from .application.ingest import IngestService, Log
@@ -231,11 +231,19 @@ class Container:
             if self.cfg.qa.skip_summary
             else None,
             # and for the rest of a display equation, code block or table that a chunk cuts, which
-            # is also opt in
+            # is also opt in: [qa] whole_blocks says whether a question that does not choose
+            # completes them
             whole_blocks=WholeBlocks(self.cfg.qa.chunk_chars, self.cfg.qa.answer_max_sources)
-            if self.cfg.qa.skip_summary and self.cfg.qa.whole_blocks
+            if self.cfg.qa.skip_summary
             else None,
+            whole_blocks_default=self.cfg.qa.whole_blocks,
         )
+
+    @cached_property
+    def ask_session(self) -> AskSession:
+        """Questions over an index that stays open between them (see ``AskSession``). Reads the
+        configuration once: edit it and build a new container."""
+        return AskSession(self.ask)
 
     def _retrieval(self) -> Retrieval:
         if not self.configured("embedder"):

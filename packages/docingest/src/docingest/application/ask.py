@@ -24,14 +24,23 @@ In the same case (``equation_lookup``), a question that names an equation number
 given the chunk of each of the first papers among the retrieved ones that holds that number,
 under a header that names the paper (see ``domain.equations``): equation numbers are local to a
 paper, and no search can weigh a number that every paper has.
+
+``AskService.ask`` is one question: it opens the index and closes it again. ``AskSession`` is
+many: it keeps the index and the corpus listing open between questions and returns an
+``AskResult`` (the answer, the chunks it was made from, the sources, the warnings, the timings
+and the index commit) instead of text.
 """
 
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
 from bisect import bisect_right
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import Literal
 
 from ..domain.blocks import Kind, complete, partial_note, whole_blocks
 from ..domain.chunking import NAME_LENGTH, PAGE_BREAK, Chunk
@@ -52,6 +61,7 @@ from ..domain.errors import IndexMismatchError, IndexNotReadyError, RetrievalErr
 from ..domain.text import split_pages
 from ..ports import (
     ChunkIndex,
+    CommittedState,
     DocumentStore,
     Embedder,
     KeywordMode,
@@ -62,6 +72,7 @@ from ..ports import (
 from .index import document_chunks
 
 BUILD_HINT = "run `docingest index build`"
+Phase = Literal["retrieving", "answering"]
 # The equation lookup adds at most this many chunks for one number, and this many in all. A
 # number every paper has is a guess about which paper is meant: the first two papers of the
 # ranking are the ones the retrieval is surest of, and four chunks are the 40% of a ten-chunk
@@ -116,6 +127,47 @@ class WholeBlocks:
     sources: int  # [qa] answer_max_sources: only these first chunks are completed
 
 
+@dataclass(frozen=True)
+class AskOptions:
+    """What one question may change about the configured setup."""
+
+    use_index: bool = True  # False: the answerer's own retrieval, even with an index configured
+    keywords: KeywordMode | None = None  # overrides the index's keyword setting
+    # Completes the display equations, code blocks and tables that a chunk cuts; None keeps
+    # ``[qa] whole_blocks``. Needs ``[qa] skip_summary``, like the setting.
+    whole_blocks: bool | None = None
+
+
+@dataclass(frozen=True)
+class AskTimings:
+    # From taking the lock to the start of the answerer: the listing, the search and the
+    # reranking with the lock held, then (the lock released) the completion of the chunks. 0 when
+    # the answerer retrieves for itself.
+    retrieve_s: float
+    answer_s: float  # the answerer; with no index, also the reading of the corpus it is given
+    wall_s: float  # the whole call, including the wait for the lock
+
+
+@dataclass(frozen=True)
+class AskResult:
+    """An answer with what it was made from."""
+
+    answer: str  # as ``AskService.ask`` returns it
+    # The chunks the answerer read, as it read them (completed blocks, gate lists, notes and
+    # headers included), best first. Empty when the answerer retrieved for itself.
+    contexts: tuple[Chunk, ...]
+    sources: tuple[str, ...]  # doc ids of the papers the contexts come from, by first appearance
+    warnings: tuple[str, ...]  # what the one-shot ``ask`` prints as ``warning:``
+    # The index commit the question was retrieved from, read just before the search: a commit
+    # that lands in between is seen by the next question. When the search is the one that opens
+    # the index (the first question, or the first after a reload) a commit that lands between
+    # the read and the open is searched but named by the older generation, and the next question
+    # reloads once for nothing; the answer is not affected. None without an index or when the
+    # adapter cannot name its commits.
+    index_generation: str | None
+    timings: AskTimings
+
+
 class AskService:
     def __init__(
         self,
@@ -126,6 +178,7 @@ class AskService:
         circuit_lists: bool = False,
         equation_lookup: EquationLookup | None = None,
         whole_blocks: WholeBlocks | None = None,
+        whole_blocks_default: bool = True,
     ):
         """``retrieval`` is called only for a question that uses the index, so a configuration
         problem with it does not stop one that does not (``use_index=False``).
@@ -134,13 +187,16 @@ class AskService:
         summary would not keep the list. ``equation_lookup`` adds the chunk of an equation number
         that the question names (see ``with_equation_lookup``); it is for the same answerer, and
         so is ``whole_blocks``, which completes the display equations, code blocks and tables
-        that a chunk cuts (see ``with_whole_blocks``) and is also opt in (``[qa] whole_blocks``)."""
+        that a chunk cuts (see ``with_whole_blocks``). ``whole_blocks_default`` (``[qa]
+        whole_blocks``, off by default) says whether a question completes them when it does not
+        choose, so a service with the settings can still answer one question each way."""
         self.store = store
         self.qa = qa
         self._retrieval = retrieval
         self._circuit_lists = circuit_lists
         self._equation_lookup = equation_lookup
         self._whole_blocks = whole_blocks
+        self._whole_blocks_default = whole_blocks_default
 
     @property
     def has_index(self) -> bool:
@@ -154,31 +210,83 @@ class AskService:
         *,
         use_index: bool = True,
         keywords: KeywordMode | None = None,
+        whole_blocks: bool | None = None,
     ) -> str:
         """``use_index=False`` answers with the answerer's own retrieval even when an index is
-        configured. ``keywords`` overrides the index's keyword setting for this question."""
+        configured. ``keywords`` overrides the index's keyword setting for this question and
+        ``whole_blocks`` the setting of the same name; both apply to the index only."""
+        options = AskOptions(use_index, keywords, whole_blocks)
         documents, warnings = self.store.corpus()
         for w in warnings:
             warn(w)
         if not documents:
             raise RuntimeError("no ingested documents; run `docingest ingest` first")
+        blocks = self.settle(options)
         if self._retrieval is None or not use_index:
-            if keywords is not None:
-                raise ValueError("keywords applies to the index, which this question does not use")
-            return await self.qa.ask(
-                question, [(d, self.store.markdown(d)) for d in documents], warn
-            )
+            return await self.answer_alone(question, self.read_corpus(documents), warn)
         retrieval = self._retrieval()
         try:
             contexts, sources = retrieve(retrieval, question, documents, warn, keywords)
         finally:
             retrieval.index.close()
+        contexts, sources = self.complete(question, contexts, sources, warn, blocks)
+        return await self.answer_from(question, contexts, sources, warn)
+
+    def retrieval(self) -> Retrieval:
+        """The two-stage retrieval of the configuration; ``has_index`` must hold."""
+        if self._retrieval is None:
+            raise RuntimeError("no index is configured")
+        return self._retrieval()
+
+    def settle(self, options: AskOptions) -> WholeBlocks | None:
+        """Check ``options`` against the setup and return the settings of the completion of
+        blocks this question uses (None: it does not complete them). ``ValueError`` for an
+        option the question cannot use."""
+        if self._retrieval is None or not options.use_index:
+            if options.keywords is not None:
+                raise ValueError("keywords applies to the index, which this question does not use")
+            if options.whole_blocks is not None:
+                raise ValueError(
+                    "whole_blocks applies to the index, which this question does not use"
+                )
+            return None
+        if options.whole_blocks and self._whole_blocks is None:
+            raise ValueError(
+                "whole_blocks needs [qa] skip_summary: only an answerer that reads the chunks "
+                "as they are can use the completed blocks"
+            )
+        on = self._whole_blocks_default if options.whole_blocks is None else options.whole_blocks
+        return self._whole_blocks if on else None
+
+    def read_corpus(self, documents: list[StoredDocument]) -> list[tuple[StoredDocument, str]]:
+        """The Markdown of every document, for an answerer that retrieves for itself. Reads
+        every paper, so a caller with an event loop to keep running calls it in a thread."""
+        return [(d, self.store.markdown(d)) for d in documents]
+
+    async def answer_alone(
+        self,
+        question: str,
+        corpus: list[tuple[StoredDocument, str]],
+        warn: Callable[[str], None],
+    ) -> str:
+        """The answerer retrieves its own evidence from the whole corpus (``read_corpus``)."""
+        return await self.qa.ask(question, corpus, warn)
+
+    def complete(
+        self,
+        question: str,
+        contexts: list[Chunk],
+        sources: list[StoredDocument],
+        warn: Callable[[str], None],
+        blocks: WholeBlocks | None,
+    ) -> tuple[list[Chunk], list[StoredDocument]]:
+        """The retrieved chunks as the answerer reads them: blocks completed (``blocks``), the
+        chunk of a named equation added, gate lists, notes and headers, and the papers they
+        come from."""
         labels: Labels = {}
         notes: Notes = {}
-        if self._whole_blocks is not None:  # first: the lookup sees the completed chunks
-            contexts, notes = with_whole_blocks(
-                contexts, sources, self.store, warn, blocks=self._whole_blocks
-            )
+        if blocks is not None:  # first: the lookup sees the completed chunks
+            contexts, notes = with_whole_blocks(contexts, sources, self.store, warn, blocks=blocks)
         if self._equation_lookup is not None:
             contexts, labels = with_equation_lookup(
                 contexts,
@@ -187,7 +295,7 @@ class AskService:
                 self.store,
                 warn,
                 lookup=self._equation_lookup,
-                completed=self._whole_blocks is not None,
+                completed=blocks is not None,
             )
             kept = {c.doc_id for c in contexts}
             sources = [d for d in sources if d.manifest.doc_id in kept]
@@ -198,8 +306,169 @@ class AskService:
             contexts = with_block_notes(contexts, notes)
         if labels:
             contexts = with_equation_headers(contexts, labels, sources)
+        return contexts, sources
+
+    async def answer_from(
+        self,
+        question: str,
+        contexts: list[Chunk],
+        sources: list[StoredDocument],
+        warn: Callable[[str], None],
+    ) -> str:
         # The answerer needs only the manifests of the papers the chunks come from.
         return await self.qa.ask(question, [(d, "") for d in sources], warn, contexts=contexts)
+
+
+@dataclass(frozen=True)
+class _Found:
+    chunks: list[Chunk]
+    sources: list[StoredDocument]
+    generation: str | None
+    locked: float  # when the lock was taken
+
+
+class AskSession:
+    """Questions one after another over an index that stays open.
+
+    ``AskService.ask`` closes the index after every question, so the next one pays for opening
+    it again: the float32 copy of the vectors and the listing of the corpus, both of which grow
+    with the corpus. A session keeps them and reloads them only when the index has a new commit
+    (``CommittedState.generation``) or on ``reload``. With an adapter that does not name its
+    commits, only ``reload`` does it, and a configuration edit needs a new session.
+
+    Retrieval (the corpus listing, the readiness check, the embedding of the question, the
+    search and the reranking) runs one question at a time in a worker thread, so a caller's
+    event loop keeps running; the answerer runs without the lock, so several ``ask`` calls
+    can wait for the model at once. Callers that compare answers keep to one at a time: a
+    model server that batches requests changes the numbers. Nothing is stored: no request log
+    and no answer cache.
+    """
+
+    def __init__(self, service: AskService, *, clock: Callable[[], float] = time.perf_counter):
+        self._service = service
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._corpus: tuple[list[StoredDocument], list[str]] | None = None
+        self._generation: str | None = None
+
+    async def ask(
+        self,
+        question: str,
+        options: AskOptions | None = None,
+        warn: Callable[[str], None] | None = None,
+        on_phase: Callable[[Phase], None] | None = None,
+    ) -> AskResult:
+        """Answer ``question``. ``warn`` also gets each warning as it happens, possibly from a
+        worker thread; they are all in the result too. ``on_phase`` is called in the caller's
+        event loop with ``"retrieving"`` when a question that uses the index starts waiting for
+        its turn at the retrieval, and with ``"answering"`` when the chunks are ready and the
+        answerer is called (a question that does not use the index only has the second). Errors
+        are raised as ``AskService.ask`` raises them; the session stays usable."""
+        started = self._clock()
+        service = self._service
+        options = options or AskOptions()
+        seen: list[str] = []
+
+        def note(message: str) -> None:
+            seen.append(message)
+            if warn is not None:
+                warn(message)
+
+        def phase(name: Phase) -> None:
+            if on_phase is not None:
+                on_phase(name)
+
+        blocks = service.settle(options)
+        if not service.has_index or not options.use_index:
+            documents, warnings = await asyncio.to_thread(service.store.corpus)
+            for w in warnings:
+                note(w)
+            if not documents:
+                raise RuntimeError("no ingested documents; run `docingest ingest` first")
+            answering = self._clock()
+            phase("answering")
+            corpus = await asyncio.to_thread(service.read_corpus, documents)
+            answer = await service.answer_alone(question, corpus, note)
+            done = self._clock()
+            return AskResult(
+                answer, (), (), tuple(seen), None, AskTimings(0.0, done - answering, done - started)
+            )
+        phase("retrieving")
+        found = await asyncio.to_thread(self._retrieve, question, options, note)
+        # outside the lock: it reads the cited papers' Markdown, and another question may search
+        contexts, sources = await asyncio.to_thread(
+            service.complete, question, found.chunks, found.sources, note, blocks
+        )
+        answering = self._clock()
+        phase("answering")
+        answer = await service.answer_from(question, contexts, sources, note)
+        done = self._clock()
+        return AskResult(
+            answer,
+            tuple(contexts),
+            tuple(d.manifest.doc_id for d in sources),
+            tuple(seen),
+            found.generation,
+            AskTimings(answering - found.locked, done - answering, done - started),
+        )
+
+    async def warm_up(self) -> None:
+        """Open the index, list the corpus and make the float32 copy now, with one search, so
+        that the first question does not pay for them. Does nothing without an index."""
+        if self._service.has_index:
+            await asyncio.to_thread(self._warm_up)
+
+    def reload(self) -> None:
+        """Forget the corpus listing and close the index: the next question reads both again.
+        For papers ingested without a new index commit, which no generation announces."""
+        with self._lock:
+            self._corpus = None
+            self._generation = None
+            if self._service.has_index:
+                self._service.retrieval().index.close()
+
+    def close(self) -> None:
+        """Release the index and the listing. The session stays usable: the next question
+        opens them again."""
+        self.reload()
+
+    def _listing(
+        self, retrieval: Retrieval
+    ) -> tuple[list[StoredDocument], list[str], CommittedState]:
+        """The corpus listing and the commit it belongs to; reloads both (and drops the
+        index's float32 copy) when the index has another commit than the one loaded. Called
+        with the lock held."""
+        state = retrieval.index.committed()
+        generation = state.generation
+        changed = generation is not None and generation != self._generation
+        if self._corpus is None or changed:
+            if self._corpus is not None:  # open since the last load: let go of that commit
+                retrieval.index.close()  # the next search opens the new one and copies it once
+            self._corpus = self._service.store.corpus()
+            self._generation = generation
+        return self._corpus[0], self._corpus[1], state
+
+    def _retrieve(self, question: str, options: AskOptions, note: Callable[[str], None]) -> _Found:
+        with self._lock:
+            locked = self._clock()
+            retrieval = self._service.retrieval()
+            documents, warnings, state = self._listing(retrieval)
+            for w in warnings:
+                note(w)
+            if not documents:
+                raise RuntimeError("no ingested documents; run `docingest ingest` first")
+            chunks, sources = retrieve(
+                retrieval, question, documents, note, options.keywords, committed=state
+            )
+            return _Found(chunks, sources, state.generation, locked)
+
+    def _warm_up(self) -> None:
+        with self._lock:
+            retrieval = self._service.retrieval()
+            documents, _, _ = self._listing(retrieval)
+            if documents:
+                vector = retrieval.embedder.embed_query("warm-up")
+                retrieval.index.search("warm-up", vector, 1)
 
 
 def retrieve(
@@ -208,12 +477,15 @@ def retrieve(
     documents: list[StoredDocument],
     warn: Callable[[str], None],
     keywords: KeywordMode | None = None,
+    *,
+    committed: CommittedState | None = None,
 ) -> tuple[list[Chunk], list[StoredDocument]]:
     """The chunks to answer from, best first, and the documents they come from (in order of
     first appearance). Raises ``IndexMismatchError`` or ``IndexNotReadyError`` when the index
-    cannot answer for this corpus and embedder."""
+    cannot answer for this corpus and embedder. ``committed`` is the index's state when the
+    caller has read it just now; otherwise it is read here."""
     by_id = {d.manifest.doc_id: d for d in documents}
-    _check_ready(retrieval, by_id, warn)
+    _check_ready(retrieval, by_id, warn, committed)
     vector = retrieval.embedder.embed_query(question)
     hits = retrieval.index.search(question, vector, retrieval.candidates, keywords=keywords)
     chunks = [h.chunk for h in hits if h.chunk.doc_id in by_id]
@@ -687,7 +959,10 @@ def cap_per_paper(chunks: list[Chunk], cap: int) -> list[Chunk]:
 
 
 def _check_ready(
-    retrieval: Retrieval, corpus: dict[str, StoredDocument], warn: Callable[[str], None]
+    retrieval: Retrieval,
+    corpus: dict[str, StoredDocument],
+    warn: Callable[[str], None],
+    committed: CommittedState | None = None,
 ) -> None:
     index = retrieval.index
     held, configured = index.embedder_fingerprint, retrieval.embedder.fingerprint
@@ -699,7 +974,7 @@ def _check_ready(
         )
     # Before every question, so it reads what the last commit left for search, not every
     # stored document (``stats()`` and ``keys()``, which ``index status`` and ``build`` use).
-    state = index.committed()
+    state = committed if committed is not None else index.committed()
     if not state.documents:
         stats = index.stats()  # only to word the error; no answer follows, so a full scan is fine
         if stats.documents == 0:

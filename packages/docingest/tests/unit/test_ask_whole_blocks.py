@@ -335,7 +335,15 @@ def test_the_chunks_keep_their_order_and_only_the_cut_ones_change():
 
 
 def build(
-    pages, picks, *, blocks=BLOCKS, circuit_lists=False, lookup=None, contexts=10, store=None
+    pages,
+    picks,
+    *,
+    blocks=BLOCKS,
+    circuit_lists=False,
+    lookup=None,
+    contexts=10,
+    store=None,
+    default=True,
 ):
     store = store or stored(pages)
     embedder = FakeEmbedder()
@@ -358,6 +366,7 @@ def build(
         circuit_lists=circuit_lists,
         equation_lookup=lookup,
         whole_blocks=blocks,
+        whole_blocks_default=default,
     )
     return store, qa, svc
 
@@ -376,11 +385,38 @@ def test_the_answerer_gets_the_completed_chunks():
     assert qa.contexts[1] == at(store, A, 520)
 
 
-def test_the_switch_is_off_by_default_and_with_it_off_the_chunks_are_as_the_index_has_them():
+def test_without_the_settings_the_chunks_are_as_the_index_has_them():
     store, qa, svc = build({A: [laid((285, EQUATION, ""))]}, [(A, 0)], blocks=None)
     ask(svc)
     assert qa.contexts == [at(store, A, 0)]
     assert AskService(store=InMemoryStore(), qa=FakeQA())._whole_blocks is None
+
+
+def test_a_question_can_turn_the_completion_on_or_off_whatever_the_setting_says():
+    text = laid((285, EQUATION, ""))
+    whole_text = text[: text.index(EQUATION) + len(EQUATION)]
+    store, qa, off = build({A: [text]}, [(A, 0)], default=False)
+    ask(off)
+    assert qa.contexts == [at(store, A, 0)]
+    ask(off, whole_blocks=True)
+    assert qa.contexts is not None and qa.contexts[0].text == whole_text
+    _, qa, on = build({A: [text]}, [(A, 0)], default=True)
+    ask(on, whole_blocks=False)
+    assert qa.contexts == [at(store, A, 0)]
+    ask(on, whole_blocks=None)
+    assert qa.contexts is not None and qa.contexts[0].text == whole_text
+
+
+def test_the_completion_cannot_be_asked_for_without_skip_summary_or_without_the_index():
+    _, _, no_settings = build({A: [pad(600)]}, [(A, 0)], blocks=None)
+    with pytest.raises(ValueError, match="needs \\[qa\\] skip_summary"):
+        ask(no_settings, whole_blocks=True)
+    ask(no_settings, whole_blocks=False)  # off is what it does anyway
+    _, _, svc = build({A: [pad(600)]}, [(A, 0)])
+    with pytest.raises(ValueError, match="whole_blocks applies to the index"):
+        ask(svc, use_index=False, whole_blocks=False)
+    with pytest.raises(ValueError, match="whole_blocks applies to the index"):
+        ask(AskService(store=stored({A: [pad(600)]}), qa=FakeQA()), whole_blocks=True)
 
 
 def test_a_question_that_does_not_use_the_index_is_not_touched():
@@ -685,7 +721,7 @@ def test_the_answer_still_comes_when_the_completion_fails_and_the_user_is_told()
 @pytest.mark.parametrize(
     ("skip", "key"), [(True, True), (True, False), (False, True), (False, False)]
 )
-def test_the_container_turns_the_completion_on_with_the_key_and_skip_summary_only(skip, key):
+def test_the_container_has_the_completion_with_skip_summary_and_turns_it_on_with_the_key(skip, key):
     cfg = AppConfig.model_validate(
         {
             "qa": {
@@ -698,13 +734,14 @@ def test_the_container_turns_the_completion_on_with_the_key_and_skip_summary_onl
         }
     )
     service = Container(cfg, log=lambda _: None, overrides={"store": InMemoryStore()}).ask
-    assert service._whole_blocks == (WholeBlocks(700, 6) if skip and key else None)
+    assert service._whole_blocks == (WholeBlocks(700, 6) if skip else None)
+    assert service._whole_blocks_default is key
 
 
 def test_the_container_leaves_the_other_additions_to_skip_summary_alone():
     cfg = AppConfig.model_validate({"qa": {"skip_summary": True}})
     service = Container(cfg, log=lambda _: None, overrides={"store": InMemoryStore()}).ask
-    assert service._whole_blocks is None
+    assert service._whole_blocks_default is False  # the settings are there, the key is off
     assert service._circuit_lists and service._equation_lookup is not None
 
 

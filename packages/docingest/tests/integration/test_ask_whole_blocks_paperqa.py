@@ -198,10 +198,8 @@ def test_with_the_key_off_the_prompt_is_the_one_the_gate_lists_alone_give(llm_ca
 def test_the_key_is_off_by_default(llm_calls):
     cfg = AppConfig.model_validate({"qa": {"skip_summary": True}})
     assert cfg.qa.whole_blocks is False
-    assert (
-        Container(cfg, log=lambda _: None, overrides={"store": InMemoryStore()}).ask._whole_blocks
-        is None
-    )
+    service = Container(cfg, log=lambda _: None, overrides={"store": InMemoryStore()}).ask
+    assert service._whole_blocks_default is False  # the settings are there, the key is off
 
 
 def test_the_prompt_grows_by_the_added_characters_only(llm_calls, monkeypatch):
