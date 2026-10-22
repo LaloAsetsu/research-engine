@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qa-score/1",
+  "title": "qa-score/1: one line of a score file",
+  "description": "JSON lines. Line 1 is the header; every other line is an item, group or compare record.",
+  "oneOf": [{"$ref": "#/$defs/header"}, {"$ref": "#/$defs/item"}, {"$ref": "#/$defs/group"}, {"$ref": "#/$defs/compare"}],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "doc_id": {"type": "string", "pattern": "^[0-9a-f]{16}([0-9a-f]{48})?$"},
+    "md5": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "metric": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "group_name": {"type": "string", "pattern": "^(all|[a-z_]+=[^=]+)$"},
+    "interval": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2},
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "created", "scorer", "set", "runs", "bootstrap"],
+      "properties": {
+        "format": {"const": "qa-score/1"},
+        "created": {"type": "string", "format": "date-time"},
+        "scorer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "md5"],
+          "properties": {"name": {"type": "string"}, "md5": {"$ref": "#/$defs/md5"}, "mathnorm": {"type": "string"}}
+        },
+        "set": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "md5"],
+          "properties": {"name": {"type": "string"}, "md5": {"$ref": "#/$defs/md5"}}
+        },
+        "runs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["run_id", "file", "md5"],
+            "properties": {
+              "run_id": {"$ref": "#/$defs/id"},
+              "file": {"type": "string"},
+              "md5": {"$ref": "#/$defs/md5"},
+              "label": {"type": "string"}
+            }
+          }
+        },
+        "reviews": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "md5"],
+          "properties": {"file": {"type": "string"}, "md5": {"$ref": "#/$defs/md5"}}
+        },
+        "bootstrap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resamples", "seed", "level", "cluster"],
+          "properties": {
+            "resamples": {"type": "integer", "minimum": 1},
+            "seed": {"type": "integer"},
+            "level": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+            "cluster": {"enum": ["id", "paper", "mirror_pair"]},
+            "engine": {"enum": ["python_random", "numpy_pcg64"]}
+          }
+        },
+        "noise_floor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["base_run", "var_run"],
+          "properties": {"base_run": {"$ref": "#/$defs/id"}, "var_run": {"$ref": "#/$defs/id"}}
+        },
+        "notes": {"type": "string"}
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record", "run_id", "id", "repeat", "metrics"],
+      "properties": {
+        "record": {"const": "item"},
+        "run_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "repeat": {"type": "integer", "minimum": 1},
+        "metrics": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/metric"},
+          "additionalProperties": {"type": ["number", "boolean", "null"]}
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["i", "exact", "lenient"],
+            "properties": {
+              "i": {"type": "integer", "minimum": 0},
+              "paper": {"$ref": "#/$defs/doc_id"},
+              "exact": {"type": "boolean"},
+              "lenient": {"type": "boolean"},
+              "unchecked": {"type": "boolean"},
+              "word_only": {"type": "boolean"},
+              "in_contexts": {"type": "boolean"}
+            }
+          }
+        },
+        "grades": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["what", "grade", "by"],
+            "properties": {
+              "what": {"enum": ["answer", "synthesis"]},
+              "grade": {"enum": ["right", "partial", "wrong", "not_attempted"]},
+              "by": {"enum": ["auto", "agent", "human"]},
+              "grader": {"type": "string"},
+              "note": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record", "run_id", "group", "metric", "n", "mean"],
+      "properties": {
+        "record": {"const": "group"},
+        "run_id": {"$ref": "#/$defs/id"},
+        "group": {"$ref": "#/$defs/group_name"},
+        "metric": {"$ref": "#/$defs/metric"},
+        "n": {"type": "integer", "minimum": 0},
+        "mean": {"type": ["number", "null"]},
+        "ci": {"$ref": "#/$defs/interval"}
+      }
+    },
+    "compare": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record", "base_run", "var_run", "group", "metric", "n", "base", "var", "diff", "ci", "up", "down"],
+      "properties": {
+        "record": {"const": "compare"},
+        "base_run": {"$ref": "#/$defs/id"},
+        "var_run": {"$ref": "#/$defs/id"},
+        "group": {"$ref": "#/$defs/group_name"},
+        "metric": {"$ref": "#/$defs/metric"},
+        "n": {"type": "integer", "minimum": 0},
+        "base": {"type": "number"},
+        "var": {"type": "number"},
+        "diff": {"type": "number"},
+        "ci": {"$ref": "#/$defs/interval"},
+        "up": {"type": "integer", "minimum": 0},
+        "down": {"type": "integer", "minimum": 0},
+        "floor": {"type": "number", "minimum": 0},
+        "counts": {"type": "boolean"}
+      }
+    }
+  }
+}

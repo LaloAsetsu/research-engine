@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reviews/1",
+  "title": "reviews/1: one line of a reviews.jsonl file",
+  "description": "JSON lines, append only. Line 1 is the header; every other line is one review decision.",
+  "oneOf": [{"$ref": "#/$defs/header"}, {"$ref": "#/$defs/item_review"}, {"$ref": "#/$defs/answer_review"}],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "md5": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "set", "created"],
+      "properties": {
+        "format": {"const": "reviews/1"},
+        "set": {"type": "string", "minLength": 1},
+        "created": {"type": "string", "format": "date-time"}
+      }
+    },
+    "common": {
+      "type": "object",
+      "required": ["item_id", "target", "reviewer", "role", "verdict", "date"],
+      "properties": {
+        "item_id": {"$ref": "#/$defs/id"},
+        "reviewer": {"type": "string", "minLength": 1},
+        "role": {"enum": ["human", "checker"]},
+        "note": {"type": "string"},
+        "date": {"type": "string", "format": "date-time"}
+      }
+    },
+    "item_review": {
+      "allOf": [{"$ref": "#/$defs/common"}],
+      "type": "object",
+      "unevaluatedProperties": false,
+      "properties": {
+        "target": {"const": "item"},
+        "verdict": {"enum": ["accept", "edit", "reject"]},
+        "set_md5": {"$ref": "#/$defs/md5"},
+        "edit": {"type": "object", "minProperties": 1, "propertyNames": {"not": {"enum": ["id", "ext"]}}}
+      },
+      "if": {"properties": {"verdict": {"enum": ["edit", "reject"]}}},
+      "then": {"required": ["note"], "properties": {"note": {"minLength": 1}}},
+      "else": {"properties": {"edit": false}}
+    },
+    "answer_review": {
+      "allOf": [{"$ref": "#/$defs/common"}],
+      "type": "object",
+      "unevaluatedProperties": false,
+      "required": ["run_id", "repeat", "what"],
+      "properties": {
+        "target": {"const": "answer"},
+        "run_id": {"$ref": "#/$defs/id"},
+        "repeat": {"type": "integer", "minimum": 1},
+        "what": {"enum": ["answer", "synthesis"]},
+        "verdict": {"enum": ["right", "partial", "wrong", "not_attempted"]}
+      }
+    }
+  }
+}

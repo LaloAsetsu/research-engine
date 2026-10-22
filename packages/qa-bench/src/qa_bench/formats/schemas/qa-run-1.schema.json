@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qa-run/1",
+  "title": "qa-run/1: one line of a run file",
+  "description": "JSON lines. Line 1 is the header, every other line is one answer (one question, one repeat) of one run.",
+  "oneOf": [{"$ref": "#/$defs/header"}, {"$ref": "#/$defs/item"}],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "doc_id": {"type": "string", "pattern": "^[0-9a-f]{16}([0-9a-f]{48})?$"},
+    "md5": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "file_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "md5"],
+      "properties": {"file": {"type": "string"}, "md5": {"$ref": "#/$defs/md5"}}
+    },
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "run_id", "created", "set", "arm", "model", "code", "corpus"],
+      "properties": {
+        "format": {"const": "qa-run/1"},
+        "run_id": {"$ref": "#/$defs/id"},
+        "created": {"type": "string", "format": "date-time"},
+        "started": {"type": "string", "format": "date-time"},
+        "ended": {"type": "string", "format": "date-time"},
+        "set": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "md5"],
+          "properties": {"name": {"type": "string"}, "file": {"type": "string"}, "md5": {"$ref": "#/$defs/md5"}}
+        },
+        "arm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {"enum": ["bare", "harness", "oracle", "agentv1"]},
+            "variant": {"type": "string"},
+            "prompt_md5": {"$ref": "#/$defs/md5"},
+            "config": {"$ref": "#/$defs/file_ref"},
+            "overrides": {"type": "object"},
+            "contexts_from": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["run_id", "md5"],
+              "properties": {"run_id": {"$ref": "#/$defs/id"}, "md5": {"$ref": "#/$defs/md5"}}
+            }
+          }
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": {"type": "string"},
+            "weights": {"type": "string"},
+            "revision": {"type": "string"},
+            "endpoint": {"type": "string"},
+            "temperature": {"type": "number", "minimum": 0},
+            "max_tokens": {"type": "integer", "minimum": 1}
+          }
+        },
+        "code": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runner"],
+          "properties": {
+            "docingest": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"},
+            "runner": {"type": "string"}
+          }
+        },
+        "corpus": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {"id": {"type": "string"}, "index": {"type": "string"}, "fingerprint": {"type": "string"}}
+        },
+        "seeds": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "repeats": {"type": "integer", "minimum": 1},
+        "concurrency": {"type": "integer", "minimum": 1},
+        "notes": {"type": "string"}
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doc_id"],
+      "properties": {
+        "doc_id": {"$ref": "#/$defs/doc_id"},
+        "name": {"type": "string"},
+        "start": {"type": "integer", "minimum": 0},
+        "first_page": {"type": "integer", "minimum": 1},
+        "last_page": {"type": "integer", "minimum": 1},
+        "is_reference": {"type": "boolean"},
+        "score": {"type": "number"},
+        "text": {"type": "string"}
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repeat", "answer", "contexts"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "repeat": {"type": "integer", "minimum": 1},
+        "answer": {"type": ["string", "null"]},
+        "citations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "doc_id"],
+            "properties": {
+              "key": {"type": "string"},
+              "doc_id": {"$ref": "#/$defs/doc_id"},
+              "first_page": {"type": "integer", "minimum": 1},
+              "last_page": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        "contexts": {"type": "array", "items": {"$ref": "#/$defs/context"}},
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["doc_id", "start", "score"],
+            "properties": {
+              "doc_id": {"$ref": "#/$defs/doc_id"},
+              "start": {"type": "integer", "minimum": 0},
+              "score": {"type": "number"},
+              "is_reference": {"type": "boolean"}
+            }
+          }
+        },
+        "timings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wall_s": {"type": "number", "minimum": 0},
+            "retrieve_s": {"type": "number", "minimum": 0},
+            "rerank_s": {"type": "number", "minimum": 0},
+            "answer_s": {"type": "number", "minimum": 0}
+          }
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "llm_requests": {"type": "integer", "minimum": 0},
+            "prompt_tokens": {"type": "integer", "minimum": 0},
+            "completion_tokens": {"type": "integer", "minimum": 0},
+            "rerank_requests": {"type": "integer", "minimum": 0},
+            "retries": {"type": "integer", "minimum": 0},
+            "truncated": {"type": "boolean"}
+          }
+        },
+        "answer_prompt_md5": {"$ref": "#/$defs/md5"},
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["exit", "http_400", "timeout", "unreadable", "other"]},
+            "exit_code": {"type": "integer"},
+            "message": {"type": "string"}
+          }
+        },
+        "ext": {"type": "object"}
+      }
+    }
+  }
+}

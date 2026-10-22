@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package: [docingest, docingest-index, quantum-sim, research-api]
+        package: [docingest, docingest-index, quantum-sim, research-api, qa-bench]
         include:
           - package: quantum-sim
             lint_paths: src tests tools
@@ -35,7 +35,7 @@ jobs:
     runs-on: macos-latest
     strategy:
       matrix:
-        package: [docingest, docingest-index, quantum-sim, research-api]
+        package: [docingest, docingest-index, quantum-sim, research-api, qa-bench]
     defaults:
       run:
         working-directory: packages/${{ matrix.package }}

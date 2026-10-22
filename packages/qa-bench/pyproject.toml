@@ -1,0 +1,95 @@
+[project]
+name = "qa-bench"
+version = "0.1.0"
+description = "The question-answer benchmark formats (question sets, runs, scores, reviews): schemas, readers and writers, converters of older sets, and a validator"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "etxsA", email = "93368439+etxsA@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+# The formats are JSON Schema (draft 2020-12) files; jsonschema is the one runtime dependency.
+dependencies = [
+    "jsonschema>=4.25",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.15",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-cov>=7",
+    "ruff>=0.16",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "-ra"]
+
+[tool.coverage.run]
+source = ["qa_bench"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT", "PL", "C4"]
+ignore = [
+    "PLR2004",  # magic values are fine in tests and thresholds
+    "PLR0913",  # converters take the set name, corpus and clock as keywords
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR0913", "PT018", "E501"]
+
+[tool.pyright]
+include = ["src"]
+venvPath = "../.."  # the workspace root, where uv keeps the shared .venv
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+
+[tool.importlinter]
+root_packages = ["qa_bench"]
+include_external_packages = true
+exclude_type_checking_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: review rules, then the formats; a module imports only the layers below it"
+type = "layers"
+layers = [
+    "qa_bench.reviews",
+    "qa_bench.formats",
+]
+
+[[tool.importlinter.contracts]]
+name = "The formats and the review rules use the standard library and jsonschema only"
+type = "forbidden"
+source_modules = [
+    "qa_bench.formats",
+    "qa_bench.reviews",
+]
+forbidden_modules = ["httpx", "numpy", "docingest", "docingest_index", "quantum_sim"]
+
+# The other directions (docingest and quantum_sim never import qa_bench) are contracts in their
+# own pyproject.toml files, because each package's gates run with only that package installed.
+[[tool.importlinter.contracts]]
+name = "qa_bench never imports the web API, docingest or the simulator"
+# Stricter than the plan needs: the harness arm may use docingest. When the run scheduler (PR 9)
+# adds that arm, narrow this contract to the modules that do not need docingest; do not remove it.
+type = "forbidden"
+source_modules = ["qa_bench"]
+forbidden_modules = ["research_api", "docingest", "docingest_index", "quantum_sim"]

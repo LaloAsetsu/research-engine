@@ -1,0 +1,6 @@
+{"format": "reviews/1", "set": "example-set/v1", "created": "2026-01-03T09:00:00+00:00"}
+{"item_id": "EX-001", "target": "item", "reviewer": "reviewer-a", "role": "human", "verdict": "reject", "note": "first reading: unclear", "date": "2026-01-03T10:00:00+00:00", "set_md5": "e0e43cc2dc293452e3a13e838e29fb97"}
+{"item_id": "EX-001", "target": "item", "reviewer": "reviewer-b", "role": "human", "verdict": "accept", "date": "2026-01-03T11:00:00+00:00", "set_md5": "e0e43cc2dc293452e3a13e838e29fb97"}
+{"item_id": "EX-004", "target": "item", "reviewer": "reviewer-a", "role": "human", "verdict": "edit", "edit": {"answer": "8.6 ms (Hahn echo)"}, "note": "add the method", "date": "2026-01-03T10:30:00+00:00", "set_md5": "e0e43cc2dc293452e3a13e838e29fb97"}
+{"item_id": "EX-003", "target": "item", "reviewer": "reviewer-a", "role": "human", "verdict": "reject", "note": "the search terms miss a spelling", "date": "2026-01-03T10:45:00+00:00", "set_md5": "e0e43cc2dc293452e3a13e838e29fb97"}
+{"item_id": "EX-005", "target": "item", "reviewer": "checker-agent", "role": "checker", "verdict": "reject", "note": "agent doubt", "date": "2026-01-03T12:00:00+00:00"}

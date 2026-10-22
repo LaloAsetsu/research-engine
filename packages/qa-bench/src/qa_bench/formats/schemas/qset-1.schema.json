@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qset/1",
+  "title": "qset/1: one line of a question-set file",
+  "description": "JSON lines. Line 1 is the header, every other line is one item.",
+  "oneOf": [{"$ref": "#/$defs/header"}, {"$ref": "#/$defs/item"}],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "doc_id": {"type": "string", "pattern": "^[0-9a-f]{16}([0-9a-f]{48})?$"},
+    "md5": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "complex": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2},
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "set", "created"],
+      "properties": {
+        "format": {"const": "qset/1"},
+        "set": {"type": "string", "minLength": 1},
+        "created": {"type": "string", "format": "date-time"},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "md5"],
+          "properties": {"file": {"type": "string"}, "md5": {"$ref": "#/$defs/md5"}}
+        },
+        "notes": {"type": "string"}
+      }
+    },
+    "passage": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "source_file": {"type": "string"},
+        "src_start": {"type": "integer", "minimum": 0},
+        "src_end": {"type": "integer", "minimum": 0},
+        "src_block_start": {"type": "integer", "minimum": 0},
+        "source_text": {"type": "string"},
+        "pdf_page": {"type": "integer", "minimum": 1},
+        "printed_page": {"type": "string", "minLength": 1},
+        "block_index": {"type": "integer", "minimum": 0},
+        "number": {"type": "string", "minLength": 1},
+        "md_file": {"type": "string"},
+        "md_start": {"type": "integer", "minimum": 0},
+        "md_end": {"type": "integer", "minimum": 0},
+        "md_text": {"type": "string"},
+        "md_method": {"enum": ["exact", "overlap", "anchor", "tag"]},
+        "md_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "md_context_coverage": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "gold_paper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doc_id", "passages"],
+      "properties": {
+        "doc_id": {"$ref": "#/$defs/doc_id"},
+        "arxiv": {"type": "string"},
+        "doc": {"type": "string", "minLength": 1},
+        "passages": {"type": "array", "items": {"$ref": "#/$defs/passage"}}
+      }
+    },
+    "key_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value"],
+      "properties": {
+        "type": {"enum": ["expr", "text", "num"]},
+        "value": {"type": ["string", "number"]},
+        "alts": {"type": "array", "items": {"type": "string"}},
+        "unit": {"type": ["string", "null"]},
+        "rel": {"type": "number", "minimum": 0},
+        "paper": {"$ref": "#/$defs/doc_id"}
+      },
+      "if": {"properties": {"type": {"const": "num"}}},
+      "then": {"required": ["rel"], "properties": {"value": {"type": "number"}, "alts": false}},
+      "else": {"properties": {"value": {"type": "string"}, "unit": false, "rel": false}}
+    },
+    "circuit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wires": {"type": "integer", "minimum": 1},
+        "allowed_gates": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "target_kind": {"enum": ["state", "unitary", "identity"]},
+        "target": {
+          "oneOf": [
+            {"type": "string"},
+            {"type": "array", "items": {"$ref": "#/$defs/complex"}, "minItems": 2},
+            {"type": "array", "items": {"type": "array", "items": {"$ref": "#/$defs/complex"}, "minItems": 2}, "minItems": 2}
+          ]
+        },
+        "equality": {"enum": ["exact", "up to global phase"]},
+        "input_state": {"type": "string"},
+        "global_phase": {"$ref": "#/$defs/complex"},
+        "claim": {"type": "string"}
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "lang", "form", "corpus", "gold_papers"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "lang": {"enum": ["en", "es"]},
+        "lang_origin": {"enum": ["native", "mirror"]},
+        "mirror_of": {"$ref": "#/$defs/id"},
+        "question": {"type": "string", "minLength": 1},
+        "answer": {"type": "string"},
+        "rationale": {"type": "string"},
+        "form": {"enum": ["single", "multi_compare", "multi_synthesis", "multi_conflict", "multi_chain", "multi_list",
+                          "unanswerable", "neardup", "circuit_verify", "circuit_create", "circuit_claim"]},
+        "content": {"enum": ["math", "circuit", "other"]},
+        "corpus": {"type": "string", "minLength": 1},
+        "split": {"enum": ["dev", "test"]},
+        "gold_papers": {"type": "array", "items": {"$ref": "#/$defs/gold_paper"}},
+        "key_facts": {"type": "array", "items": {"$ref": "#/$defs/key_fact"}},
+        "synthesis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "statement", "rubric"],
+          "properties": {
+            "kind": {"enum": ["order", "agree", "disagree", "not_comparable", "chain", "list", "combine"]},
+            "statement": {"type": "string"},
+            "rubric": {"type": "string"}
+          }
+        },
+        "necessity": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/doc_id"},
+          "additionalProperties": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 1}
+        },
+        "choices": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["distractors"],
+          "properties": {
+            "distractors": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            "unsure": {"type": "string"},
+            "shuffle_seed": {"type": "integer"}
+          }
+        },
+        "circuit": {"$ref": "#/$defs/circuit"},
+        "found_by": {"enum": ["citation", "authors", "topic", "fact"]},
+        "confusers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["doc_id", "relation"],
+            "properties": {
+              "doc_id": {"$ref": "#/$defs/doc_id"},
+              "arxiv": {"type": "string"},
+              "relation": {"enum": ["companion", "follow-up", "review", "confusable fact"]},
+              "answers_too": {"type": "boolean"}
+            }
+          }
+        },
+        "search_record": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["corpus", "terms"],
+          "properties": {
+            "corpus": {"type": "string"},
+            "terms": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            "date": {"type": "string", "format": "date"}
+          }
+        },
+        "tags": {"type": "object", "additionalProperties": {"type": "string"}},
+        "writer": {"type": "string"},
+        "written_from": {"enum": ["latex", "pdf", "markdown"]},
+        "written": {"type": "string", "format": "date"},
+        "reviewer": {"type": "string"},
+        "notes": {"type": "string"},
+        "ext": {"type": "object"}
+      },
+      "allOf": [
+        {"if": {"not": {"properties": {"form": {"const": "circuit_claim"}}}}, "then": {"required": ["question"]}},
+        {"if": {"properties": {"lang_origin": {"const": "mirror"}}, "required": ["lang_origin"]}, "then": {"required": ["mirror_of"]}},
+        {"if": {"properties": {"form": {"pattern": "^multi_"}}}, "then": {"properties": {"gold_papers": {"minItems": 2}}}},
+        {"if": {"properties": {"form": {"enum": ["multi_compare", "multi_synthesis", "multi_conflict", "multi_chain"]}}},
+         "then": {"required": ["synthesis", "necessity"]}},
+        {"if": {"properties": {"form": {"enum": ["unanswerable", "multi_list"]}}}, "then": {"required": ["search_record"]}},
+        {"if": {"properties": {"form": {"const": "unanswerable"}}}, "then": {"properties": {"gold_papers": {"maxItems": 0}}}},
+        {"if": {"properties": {"form": {"pattern": "^circuit_"}}},
+         "then": {"required": ["circuit"], "properties": {"content": {"const": "circuit"}}}},
+        {"if": {"properties": {"form": {"enum": ["circuit_create", "circuit_claim"]}}},
+         "then": {"properties": {"circuit": {"required": ["target_kind", "target"]}}}},
+        {"if": {"properties": {"form": {"const": "circuit_create"}}},
+         "then": {"properties": {"circuit": {"required": ["wires", "allowed_gates", "equality"]}}}},
+        {"if": {"properties": {"form": {"const": "circuit_verify"}}},
+         "then": {"required": ["answer"], "properties": {"answer": {"enum": ["yes", "no"]}}}}
+      ]
+    }
+  }
+}
