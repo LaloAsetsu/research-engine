@@ -379,6 +379,7 @@ class FakeIndex:
         self.fingerprint = fingerprint
         self.embedder_fingerprint = embedder_fingerprint
         self.committed_at: str | None = None
+        self.commits = 0  # the generation: one per commit()
         self.closed = 0  # how many times close() was called
         self.committed_calls = 0
         self.begun = 0  # how many times begin_write() was called
@@ -405,6 +406,7 @@ class FakeIndex:
         self._staged.pop(doc_id, None)
 
     def commit(self) -> None:
+        self.commits += 1
         self._committed = dict(self._staged)
         self.committed_at = "2026-01-01T00:00:00+00:00"
 
@@ -424,7 +426,11 @@ class FakeIndex:
 
     def committed(self) -> CommittedState:
         self.committed_calls += 1
-        return CommittedState(frozenset(self._committed), self._staged != self._committed)
+        return CommittedState(
+            frozenset(self._committed),
+            self._staged != self._committed,
+            generation=f"g{self.commits}" if self.commits else None,
+        )
 
     def search(
         self, question: str, vector: Vector, k: int, *, keywords: KeywordMode | None = None

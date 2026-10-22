@@ -287,6 +287,27 @@ def test_committed_agrees_with_stats_and_keys_in_every_state(index, embedder):
     check(set(), pending=False)  # committed empty
 
 
+def test_the_generation_names_the_commit_when_the_adapter_can_tell(index, embedder):
+    def store(doc_id, key):
+        chunks = chunks_of(doc_id)
+        index.upsert(doc_id, key, chunks, embedder.embed_documents([c.text for c in chunks]))
+
+    seen = [index.committed().generation]  # before any commit: nothing to name
+    store(PAPER_A, "k1")
+    assert index.committed().generation == seen[0]  # a write is not a commit
+    index.commit()
+    seen.append(index.committed().generation)
+    assert index.committed().generation == seen[1]  # the same commit, the same name
+    store(PAPER_B, "k1")
+    index.commit()
+    seen.append(index.committed().generation)
+    if seen[1] is None:  # an adapter that cannot tell never does
+        assert seen[2] is None
+    else:
+        assert isinstance(seen[1], str) and seen[1] and seen[2] != seen[1]
+        assert seen[0] is None or seen[0] not in seen[1:]
+
+
 def test_upsert_replaces_everything_indexed_for_the_document(index, embedder):
     fill(index, embedder)
     new = chunk_pages(PAPER_A, {1: "Replaced text about graphs."}, chunk_chars=60, overlap=10)

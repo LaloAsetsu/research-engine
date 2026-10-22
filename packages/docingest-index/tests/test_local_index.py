@@ -999,6 +999,27 @@ def test_the_check_before_a_question_opens_no_shard(tmp_path, monkeypatch):
     assert make(tmp_path / "other").committed().pending is False  # nothing there at all
 
 
+def test_the_check_before_a_question_names_the_commit_by_the_generation_of_ids_json(tmp_path):
+    reader = committed_pair(tmp_path)
+    first = reader().committed().generation
+    ids = json.loads((reader().folder / "search" / "ids.json").read_text())
+    assert first == ids["generation"] and first
+    assert reader().committed().generation == first  # reading changes nothing
+    writer = make(tmp_path / "idx")
+    writer.upsert(DOC_C, "k1", [chunk(DOC_C, "third paper")], [unit(0, 0, 1, 0)])
+    assert reader().committed().generation == first  # an uncommitted write is not a commit
+    writer.commit()
+    assert reader().committed().generation not in (None, first)
+    assert make(tmp_path / "other").committed().generation is None  # nothing there at all
+
+
+def test_a_commit_that_changes_nothing_still_names_a_new_generation(tmp_path):
+    reader = committed_pair(tmp_path)
+    first = reader().committed().generation
+    make(tmp_path / "idx").commit()
+    assert reader().committed().generation not in (None, first)
+
+
 def test_the_check_before_a_question_reads_the_old_search_folder_during_a_swap(tmp_path):
     committed_pair(tmp_path)
     folder = make(tmp_path / "idx").folder

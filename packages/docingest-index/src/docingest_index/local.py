@@ -269,7 +269,9 @@ class LocalIndex:
             return CommittedState(frozenset(), pending=bool(stored))
         built = found[1]["shards"]
         return CommittedState(
-            frozenset(s["doc_id"] for s in built), pending={s["stem"] for s in built} != stored
+            frozenset(s["doc_id"] for s in built),
+            pending={s["stem"] for s in built} != stored,
+            generation=found[1].get("generation"),
         )
 
     def search(

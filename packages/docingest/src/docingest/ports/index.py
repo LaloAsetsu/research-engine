@@ -40,6 +40,10 @@ class CommittedState:
     documents: frozenset[str]  # ids of the documents in the last commit
     # Same meaning as ``IndexStats.pending``: what ``keys()`` reports differs from the commit.
     pending: bool
+    # Names the commit: it changes with every commit and only then. A long-lived reader (see
+    # ``AskSession``) reopens the index when it differs from the one it loaded. ``None`` for an
+    # adapter that cannot tell, which such a reader then reloads only on request.
+    generation: str | None = None
 
 
 @runtime_checkable
