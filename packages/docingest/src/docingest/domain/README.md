@@ -760,7 +760,7 @@ Why it is here and not in the chunker: a chunker that keeps equations, code bloc
 
 Measured on 1,249 papers (95 million characters, 40,609 blocks): display equations have a median of 179 characters with their caption, 99th percentile 1,063, maximum 39,797; code blocks 511, 5,202 and 7,723; tables 735, 3,690 and 11,786. 99.6% of the blocks are at most three chunks (2,700 characters) long. The scan of the whole corpus took 11 s of CPU.
 
-Tests compare the time of an input with that of one four times larger (CPU time, a ratio), and check by property that an extension is always text of one block that no other chunk holds.
+Tests compare the time of an input with that of one four times larger (CPU time, a ratio, measured by `tests/timing.py`), and check by property that an extension is always text of one block that no other chunk holds.
 
 ## errors.py
 

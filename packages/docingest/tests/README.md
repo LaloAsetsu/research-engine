@@ -28,6 +28,7 @@ tests/
 ├── conftest.py      opt-in marker gating, sys.path setup, the cfg fixture
 ├── fakes.py         in-memory fakes for the ports (behaviour, not mocks)
 ├── builders.py      tiny document builders: minimal PDFs and image PDFs
+├── timing.py        assert_linear (cost grows in proportion to the input) and timeout_notes
 ├── unit/            domain rules and application services with fakes
 ├── contract/        one behavioural test suite per port, run against fakes and real adapters
 ├── integration/     real adapters, real files, local HTTP servers, the CLI
@@ -125,6 +126,7 @@ flowchart LR
 | `test_scan_layer_routing.py` | Scans that carry an OCR text layer through `IngestService`: read by OCR with the reason in the manifest, born-digital and figure pages untouched, the rule off, the text layer as the fallback when the OCR output is rejected, no text-layer structure for a page read by OCR and flat text for the fallback page, the keys in the PDF cache key |
 | `test_services.py` | `AskService` (plain path) and `CrawlService` with fakes |
 | `test_stats.py` | `application.stats`: paired bootstrap, `quantile`, `bootstrap_ci` |
+| `test_timing.py` | `tests/timing.py` on a fake clock: linear work passes after three rounds, quadratic work fails all three attempts, a burst of load in one attempt or one round is not held against the code, the floor and the ceiling, the collector switched off and back, `timeout_notes` |
 | `test_text.py` | `domain.text`: garbled-text detection, the math-symbol and equals-sign counts (the edges of every symbol block, `ϕ`, `ˆ`, `™`), de-hyphenation, page splitting |
 | `test_structure.py` | `domain.structure`, `furniture` and `headings` on synthetic lines: running headers and page numbers, paragraphs, hyphenation, headings, footnotes |
 | `test_quantum_sim_fixtures.py` | The `circuit/1` documents saved in `packages/quantum-sim/tests/fixtures/bridge/` are what `gate_list` returns for the LaTeX sources next to them (the other half of quantum-sim's bridge tests; docingest never imports `quantum_sim`), and an unknown command or a text token put in any of those sources is never read as `parsed` |
@@ -218,6 +220,39 @@ The module docstring states the rule: the fakes are real implementations of the 
 | `FakeQA()` | `QuestionAnswerer` | Async `ask()` returns `f"answer to {question!r} from {len(documents)} docs"` | `seen` holds the source names of the documents it received, `markdown` their Markdown texts, `contexts` the chunks it was given |
 
 There is no shared fake for `BenchmarkSuite`. `tests/unit/test_benchmark.py` defines `MemSuite` (samples whose reference is their id, scored by exact match), `TaggedSuite` (images tagged with their sample id) and `EchoOcr` (a `FakeOcr` subclass that returns that id, can fail every Nth call and counts `unload()` calls), plus the `spec()` and `runner()` helpers for `BenchmarkRunner`. A new unit test in `tests/unit/` can import them with `from test_benchmark import ...`, as `test_bench_fixes.py` does.
+
+### timing.py
+
+Two helpers for the tests that would otherwise read a clock. Neither test layer reads the wall clock (the only seconds left are the CPU ceilings of `assert_linear`, which pin the cost of the old slow code): a test that asserts elapsed seconds fails on a loaded laptop and on a shared CI runner for reasons that have nothing to do with the code.
+
+| Helper | What it does |
+|---|---|
+| `assert_linear(fn, small, big, *, factor=8, floor=0.05, ceiling=None, rounds=5, attempts=3)` | Passes when `fn(big)` costs less than `max(factor * cost of fn(small), floor)` in CPU time of the test process, `big` being four times `small`. Linear work costs about 4 times as much and quadratic work 16 times, so 8 separates them. `ceiling` is an extra absolute limit in seconds on `fn(big)`, kept by the tests that pin the cost of the old slow code. `run_job` is the `fn` for inputs that are already a function to call |
+| `timeout_notes(conversion)` | The notes of a `Conversion` that say pandoc ran out of time (`pandoc timed out after Ns`, `no time left for this run`), from the paper's warnings and from those of each segment. Not every timeout leaves such a note, so it names the timeouts and `conversion.degraded` covers the rest |
+
+How `assert_linear` copes with a machine that is not quiet:
+
+1. The two sizes run one after the other, round by round (small, big, small, big, ...), so a burst of load slows both and not only the one that happened to run during it.
+2. The fastest run of each size is kept. From the third round on, a check that passes stops there, so a quiet machine pays three rounds of each size.
+3. A check that still fails after five rounds is measured again, up to three attempts in all, and the test fails only when every attempt fails, with every measurement in the message. Quadratic work fails every attempt.
+4. The cyclic garbage collector is off during the runs, so a big heap (the other tests of a session import PaperQA2) does not make a linear scan look slower on the larger input.
+
+What this does not catch is a slowdown of less than about twice that is still linear: these tests guard the growth of the cost, and speed belongs to the benchmark scripts. When you add a linear-time test, build both inputs first and pass them in, so building them is not measured:
+
+```python
+from timing import assert_linear
+
+
+@pytest.mark.parametrize("make", UNITS.values(), ids=UNITS)
+def test_reading_is_linear_in_the_size_of_the_source(make):
+    assert_linear(gate_list, make(N // 4), make(N), ceiling=10)
+```
+
+For work that needs setup, make the setup part of the input: have a function build the store and return the function that runs the work, and pass `run_job` as `fn` (see `test_the_lookup_is_linear_in_the_size_of_the_paper`).
+
+`packages/docingest-index/tests/test_latex.py` has the same method as a private function, because packages do not import each other's tests.
+
+The integration tests that run the real pandoc, or a shell script standing in for it, check what the converter records and not how long it took. A hang ends in the converter's timeout, which marks the result `degraded`, so those tests assert that the result is not `degraded` (the converter sets it for every timeout that ends in a result, so it covers a paper whose pieces all time out) and `timeout_notes(conv) == []` (which says which run it was), next to the checks each test already had. `timeout_notes` alone would miss a paper whose pieces all time out, which ends with the first error as its only note. Two tests count instead of time: `test_a_slow_pandoc_cannot_take_longer_than_the_timeout_in_total` has the stand-in append a line to a log for every run it gets and asserts that the sections which started fit the shared budget (a slower machine starts fewer, so it still passes; without the shared budget all twelve start), and `test_timeout_falls_back_to_plain_text` has the stand-in write its PID, then asserts that the process is gone once `convert` returned.
 
 ### builders.py
 
