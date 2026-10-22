@@ -9,12 +9,13 @@ import gzip
 import io
 import os
 import re
+import signal
 import tarfile
-import time
 from pathlib import Path
 
 import pytest
 from fakes import FakeOcr
+from timing import timeout_notes
 
 from docingest.adapters.converters.pandoc_latex import PandocLatexConverter
 from docingest.bootstrap import Container
@@ -149,9 +150,9 @@ def test_self_referential_style_macros_do_not_hang(tmp_path):
         "\\renewcommand{\\normalsize}{\\@setfontsize\\normalsize\\@xpt\\@xipt}\n"
         "\\begin{document}\n\\normalsize\n\\section{Fine}\nConverted quickly.\n\\end{document}\n"
     )
-    t0 = time.perf_counter()
     conv = PandocLatexConverter(LatexConfig(timeout_s=30)).convert(src)
-    assert time.perf_counter() - t0 < 10
+    # a loop ends in the timeout: the paper would be plain text and the converter would say so
+    assert not conv.degraded and timeout_notes(conv) == []
     assert conv.method == PageMethod.LATEX and "Converted quickly." in text_of(conv)
     assert any("\\normalsize" in w for w in conv.warnings)
 
@@ -268,10 +269,10 @@ def test_saved_and_redefined_macros_keep_their_meaning_and_convert_quickly(tmp_p
             "\\section{Idiom}\nThe macro prints \\X here.\n"
         )
     )
-    t0 = time.perf_counter()
     conv = PandocLatexConverter(LatexConfig(timeout_s=30)).convert(src)
-    assert time.perf_counter() - t0 < 10
-    assert conv.method == PageMethod.LATEX and not conv.degraded
+    # a loop ends in the timeout: the paper would be plain text and the converter would say so
+    assert not conv.degraded and timeout_notes(conv) == []
+    assert conv.method == PageMethod.LATEX
     assert "The macro prints \\[base\\]here." in text_of(
         conv
     )  # no space before "here" in pandoc 3.9
@@ -286,12 +287,32 @@ def fake_pandoc(tmp_path: Path, script: str) -> str:
     return str(exe)
 
 
+def _is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)  # signal 0 only checks that the process exists
+    except ProcessLookupError:
+        return False
+    return True
+
+
 @pytest.mark.skipif(os.name != "posix", reason="shell-script stand-in for pandoc")
 def test_timeout_falls_back_to_plain_text(tmp_path):
-    cfg = LatexConfig(timeout_s=1, pandoc_path=fake_pandoc(tmp_path, "exec sleep 20"))
-    t0 = time.perf_counter()
-    conv = PandocLatexConverter(cfg).convert(PAPER / "main.tex")
-    assert time.perf_counter() - t0 < 10
+    # `exec` makes the shell the sleeping process, so the PID it writes is the one to look for
+    # (30 s, not longer: a regression that leaves it running must not leave it for minutes).
+    pids = tmp_path / "pids.txt"
+    script = f"echo $$ >> {pids}\nexec sleep 30"
+    cfg = LatexConfig(timeout_s=1, pandoc_path=fake_pandoc(tmp_path, script))
+    try:
+        conv = PandocLatexConverter(cfg).convert(PAPER / "main.tex")
+    finally:
+        started = [int(pid) for pid in pids.read_text().split()] if pids.exists() else []
+        running = [pid for pid in started if _is_running(pid)]
+        for pid in running:
+            os.kill(pid, signal.SIGKILL)
+    # a timeout is the machine's, so pandoc is not tried again (0 only if the timeout killed
+    # the shell before it wrote its PID)
+    assert len(started) <= 1
+    assert running == []  # the timeout stopped the pandoc it timed out, it did not wait for it
     assert conv.method == PageMethod.LATEX_PLAINTEXT
     assert conv.engine.startswith("pylatexenc ")
     assert "pandoc timed out after 1s; used the pylatexenc plain-text fallback" in conv.warnings
@@ -509,9 +530,8 @@ def test_real_arxiv_sources(name, title, min_segments):
     src = SAMPLES / name
     if not src.is_file():
         pytest.skip(f"set DOCINGEST_LATEX_SAMPLES to a folder with {name}")
-    t0 = time.perf_counter()
     conv = CONVERTER.convert(src)
-    assert time.perf_counter() - t0 < 30
-    assert conv.method == PageMethod.LATEX and conv.title == title and not conv.degraded
+    assert not conv.degraded and timeout_notes(conv) == []  # how long it takes: benchmark scripts
+    assert conv.method == PageMethod.LATEX and conv.title == title
     assert len(conv.segments) >= min_segments
     assert text_of(conv).count("$") >= 20  # math survives as $...$

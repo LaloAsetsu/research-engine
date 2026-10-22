@@ -4,13 +4,14 @@ guard for a reference list pandoc drops (real pandoc, pylatexenc, invented sourc
 ``tests/unit/test_latex_sections.py`` covers the same logic with pandoc replaced by a rule.
 """
 
+import math
 import os
 import re
-import time
 from pathlib import Path
 
 import pytest
 from fakes import FakeOcr
+from timing import timeout_notes
 
 from docingest.adapters.converters import latex_source
 from docingest.adapters.converters.pandoc_latex import PandocLatexConverter
@@ -138,12 +139,12 @@ def test_malformed_sections_do_not_hang(tmp_path):
         + "".join(sections)
         + "\\end{document}\n"
     )
-    t0 = time.perf_counter()
     conv = PandocLatexConverter(LatexConfig(timeout_s=20)).convert(tmp_path / "main.tex")
-    assert time.perf_counter() - t0 < 30
+    # a hang ends in the converter's timeout, which marks the result degraded: no run timed out or
+    # ran out of the shared budget, so none of the twelve runs (and the first one on the whole paper) hung
+    assert not conv.degraded and timeout_notes(conv) == []
     assert conv.method in (PageMethod.LATEX, PageMethod.LATEX_PLAINTEXT)
     assert len(conv.segments) >= 12
-    assert not conv.degraded
 
 
 @needs_pandoc
@@ -273,13 +274,19 @@ def fake_pandoc(tmp_path: Path, script: str) -> str:
 
 @posix
 def test_a_slow_pandoc_cannot_take_longer_than_the_timeout_in_total(tmp_path):
-    # The whole paper and the preamble fail or pass at once; each section takes 0.6 s.
+    # The whole paper and the preamble fail or pass at once; each section takes 0.6 s. The
+    # sections share one budget of 2 s, so at most 4 of them start (the fourth is cut off) and
+    # the others never run. Without the shared budget all 12 would start: 12 x 0.6 s = 7.2 s.
+    # The test counts the runs the converter starts instead of timing them: a slower machine
+    # starts fewer, so it cannot fail for being slow.
+    log = tmp_path / "runs.log"
     script = (
         "input=$(cat)\n"
         'case "$input" in *"\\section{S0}"*"\\section{S1}"*)'
-        ' echo "Error at (line 1, column 1): stub" >&2; exit 64;; esac\n'
-        'case "$input" in *"\\section"*) sleep 0.6;'
+        f' echo whole >> {log}; echo "Error at (line 1, column 1): stub" >&2; exit 64;; esac\n'
+        f'case "$input" in *"\\section"*) echo section >> {log}; sleep 0.6;'
         " printf '{}\\n@@docingest-body@@\\n# Piece\\n\\n%s\\n' \"$input\" | head -c 400; exit 0;; esac\n"
+        f"echo preamble >> {log}\n"
         "printf '{}\\n@@docingest-body@@\\n'"
     )
     cfg = LatexConfig(timeout_s=2, pandoc_path=fake_pandoc(tmp_path, script))
@@ -287,12 +294,15 @@ def test_a_slow_pandoc_cannot_take_longer_than_the_timeout_in_total(tmp_path):
     (tmp_path / "main.tex").write_text(
         f"\\documentclass{{article}}\n\\begin{{document}}\n{body}\\end{{document}}\n"
     )
-    t0 = time.perf_counter()
     conv = PandocLatexConverter(cfg).convert(tmp_path / "main.tex")
-    assert time.perf_counter() - t0 < 6  # 12 x 0.6 s would be 7 s
+    runs = log.read_text().split()
+    started = runs.count("section")
+    assert runs[:2] == ["whole", "preamble"] and started + 2 == len(runs)
+    assert started <= math.ceil(2 / 0.6) + 1  # 12 without the shared budget
     assert conv.degraded  # the sections left over are plain text for want of time
     assert len(conv.segments) == 12
-    assert any(s.method == PageMethod.LATEX_PLAINTEXT for s in conv.segments)
+    left_over = [s for s in conv.segments if s.method == PageMethod.LATEX_PLAINTEXT]
+    assert len(left_over) >= 12 - started  # every section that never started
     assert any(s.method is None for s in conv.segments)
 
 

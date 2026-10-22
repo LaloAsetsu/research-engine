@@ -6,9 +6,9 @@ text, and plain text for the whole paper.
 """
 
 import re
-import time
 
 import pytest
+from timing import timeout_notes
 
 from docingest.adapters.converters.pandoc_latex import REVISION, PandocLatexConverter
 from docingest.config import LatexConfig
@@ -334,9 +334,9 @@ def test_unbalanced_and_unclosed_circuits_do_not_stop_the_conversion(tmp_path):
     broken = (
         f"\\Qcircuit @C=1em {{ & \\gate{{H}} & \\qw\n\n{PROSE}\n\\begin{{quantikz}} \\gate{{X}}\n"
     )
-    t0 = time.perf_counter()
     conv = convert(tmp_path, paper(("Setup", broken + figure(YQUANT, "Fine."))))
-    assert time.perf_counter() - t0 < 60
+    # a stall ends in the timeout, and every timeout that ends in a result sets degraded (not every one leaves a note)
+    assert not conv.degraded and timeout_notes(conv) == []
     assert YQUANT in blocks(conv)
     assert "lanterns" in text_of(conv)
 
