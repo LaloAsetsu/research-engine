@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 
 import pytest
 from fastapi import APIRouter
@@ -11,6 +12,7 @@ from starlette.exceptions import HTTPException
 
 from research_api.bootstrap import Container
 from research_api.domain.errors import (
+    BadRequestError,
     ConflictError,
     FieldError,
     ForbiddenError,
@@ -26,6 +28,7 @@ from research_api.domain.errors import (
 from research_api.entrypoints.http import build_app, create_app
 
 PROBLEM = "application/problem+json"
+ClientFor = Callable[..., TestClient]
 
 
 def test_health(client: TestClient) -> None:
@@ -88,6 +91,7 @@ def app_with_routes(container: Container):
     @extra.get("/raise/{kind}")
     def raise_it(kind: str) -> None:
         raise {
+            "bad": BadRequestError("duplicate key"),
             "unauth": UnauthenticatedError("sign in"),
             "forbidden": ForbiddenError("no"),
             "missing": NotFoundError("no such set"),
@@ -109,13 +113,14 @@ def app_with_routes(container: Container):
 
 
 @pytest.fixture
-def probe(app_with_routes) -> TestClient:
-    return TestClient(app_with_routes, raise_server_exceptions=False)
+def probe(app_with_routes, client_for: ClientFor) -> TestClient:
+    return client_for(app_with_routes)
 
 
 @pytest.mark.parametrize(
     ("kind", "status", "slug"),
     [
+        ("bad", 400, "bad-request"),
         ("unauth", 401, "unauthenticated"),
         ("forbidden", 403, "forbidden"),
         ("missing", 404, "not-found"),
@@ -173,12 +178,33 @@ def test_a_bad_path_parameter_keeps_its_source(probe: TestClient) -> None:
     assert body["errors"][0]["path"] == "/path/n"
 
 
-def test_malformed_json_is_a_problem(probe: TestClient) -> None:
+def test_malformed_json_is_a_400_problem(probe: TestClient) -> None:
     response = probe.post(
         "/api/v1/items", content=b"{not json", headers={"content-type": "application/json"}
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
     assert response.headers["content-type"] == PROBLEM
+    body = response.json()
+    assert body["type"] == "urn:research-api:problem:bad-request"
+    assert "errors" not in body
+    assert "not json" not in response.text
+
+
+def test_json_that_parses_but_has_the_wrong_shape_stays_a_422(probe: TestClient) -> None:
+    response = probe.post("/api/v1/items", json=["not", "an", "object"])
+    assert response.status_code == 422
+
+
+def test_an_unmapped_domain_error_is_a_logged_500_without_its_detail(
+    probe: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.ERROR, logger="research_api"):
+        response = probe.get("/api/v1/raise/other")
+    body = response.json()
+    assert response.status_code == 500
+    assert "odd" not in response.text
+    assert len(body["error_id"]) == 32
+    assert any(body["error_id"] in record.getMessage() for record in caplog.records)
 
 
 def test_an_unexpected_error_hides_its_cause_and_gives_an_id(
@@ -210,24 +236,32 @@ def test_openapi_describes_problems_with_the_problem_media_type(app_with_routes)
     assert "ValidationError" not in schemas
     assert {"Problem", "ProblemField", "Health", "Status"} <= set(schemas)
     assert "ValidationError" not in json.dumps(schema)
+    problem = schemas["Problem"]["properties"]
+    assert "null" not in json.dumps(problem)
+    assert problem["errors"]["items"] == {"$ref": "#/components/schemas/ProblemField"}
+    assert problem["error_id"]["type"] == "string"
 
 
 def test_openapi_is_built_once(app_with_routes) -> None:
     assert app_with_routes.openapi() is app_with_routes.openapi()
 
 
-def test_an_http_status_without_a_phrase_still_gets_a_title(container: Container) -> None:
+def test_an_http_status_without_a_phrase_still_gets_a_title(
+    container: Container, client_for: ClientFor
+) -> None:
     app = build_app(container)
 
     @app.get("/odd")
     def odd() -> None:
         raise HTTPException(599)
 
-    response = TestClient(app).get("/odd")
+    response = client_for(app).get("/odd")
     assert response.status_code == 599
     assert response.json()["title"] == "Error"
 
 
-def test_the_factory_builds_the_app_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_factory_builds_the_app_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, client_for: ClientFor
+) -> None:
     monkeypatch.setenv("RESEARCH_API_FAKE", "1")
-    assert TestClient(create_app()).get("/api/v1/health").json() == {"ok": True}
+    assert client_for(create_app()).get("/api/v1/health").json() == {"ok": True}

@@ -17,6 +17,12 @@ class ResearchApiError(Exception):
         self.detail = detail
 
 
+class BadRequestError(ResearchApiError):
+    """The request cannot be read at all: malformed JSON, a duplicate key in a circuit."""
+
+    slug = "bad-request"
+
+
 class UnauthenticatedError(ResearchApiError):
     """No session, an expired one, or a wrong login."""
 

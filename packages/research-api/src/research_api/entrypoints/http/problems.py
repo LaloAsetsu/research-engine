@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ...domain.errors import (
+    BadRequestError,
     ConflictError,
     FieldError,
     ForbiddenError,
@@ -34,6 +35,7 @@ TYPE_PREFIX = "urn:research-api:problem:"
 log = logging.getLogger("research_api")
 
 _STATUS_OF: dict[type[ResearchApiError], int] = {
+    BadRequestError: 400,
     UnauthenticatedError: 401,
     ForbiddenError: 403,
     NotFoundError: 404,
@@ -95,6 +97,8 @@ def problem(
 
 async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ResearchApiError)
+    if status_of(exc) == 500:
+        return await _on_unexpected(request, exc)
     headers: dict[str, str] = {}
     retry_after = getattr(exc, "retry_after_s", None)
     if retry_after is not None:
@@ -111,6 +115,13 @@ async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
 
 async def _on_validation_error(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, RequestValidationError)
+    if any(err["type"] == "json_invalid" for err in exc.errors()):
+        return problem(
+            request,
+            status=400,
+            slug=BadRequestError.slug,
+            detail="The request body is not valid JSON.",
+        )
     errors = []
     for err in exc.errors():
         loc = tuple(err["loc"])
@@ -180,3 +191,8 @@ def use_problem_media_in_openapi(schema: dict[str, Any]) -> None:
                     content[PROBLEM_MEDIA] = content.pop("application/json")
     schemas.pop("HTTPValidationError", None)
     schemas.pop("ValidationError", None)
+    # The handlers leave absent fields out instead of sending null, so the schema says so.
+    properties = schemas["Problem"]["properties"]
+    for name in ("errors", "error_id"):
+        options = [o for o in properties[name].pop("anyOf") if o != {"type": "null"}]
+        properties[name].update(options[0])
