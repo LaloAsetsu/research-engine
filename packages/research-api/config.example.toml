@@ -8,5 +8,6 @@ bind_host = "127.0.0.1"
 port = 8090
 
 # The origin people type in the browser, used later to check where a write request came from.
-# Defaults to http://<bind_host>:<port>.
+# Written the way a browser sends it: lowercase, and no port when it is the default one (80 for
+# http, 443 for https). Defaults to http://<bind_host>:<port>.
 public_origin = "http://127.0.0.1:8090"
