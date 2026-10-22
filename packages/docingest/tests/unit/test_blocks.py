@@ -5,13 +5,12 @@ Every text here is invented. Offsets are never typed by hand: a helper finds the
 text, so a test reads as "this piece is a block of this kind".
 """
 
-import gc
-import time
 from itertools import pairwise
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from timing import assert_linear
 
 from docingest.domain import blocks as blocks_module
 from docingest.domain.blocks import (
@@ -976,22 +975,10 @@ def test_completing_is_linear_in_the_number_of_blocks():
         text, spans = args
         complete(spans, whole_blocks(text, caption_max=900), limit=2700)
 
-    small, big = build(250), build(1000)
-    t_small, t_big = seconds(work, small), seconds(work, big)
-    assert t_big < max(8 * t_small, 0.05), (t_small, t_big)
+    assert_linear(work, build(250), build(1000))
 
 
 # --------------------------------------------------------------------------- linear time
-
-
-def seconds(fn, text) -> float:
-    best = float("inf")
-    for _ in range(3):  # best of 3: the least disturbed run
-        gc.collect()
-        t0 = time.process_time()  # CPU time: waiting for a busy CPU is not counted
-        fn(text)
-        best = min(best, time.process_time() - t0)
-    return best
 
 
 def scan(text: str) -> None:
@@ -1043,6 +1030,4 @@ BAD = {
 
 @pytest.mark.parametrize("make", BAD.values(), ids=BAD)
 def test_scanning_is_linear_in_the_size_of_the_text(make):
-    small, big = seconds(scan, make(N // 4)), seconds(scan, make(N))
-    assert big < 10
-    assert big < max(8 * small, 0.05), (small, big)
+    assert_linear(scan, make(N // 4), make(N), ceiling=10)

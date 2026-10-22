@@ -8,11 +8,11 @@ import gzip
 import io
 import re
 import tarfile
-import time
 import tracemalloc
 from pathlib import Path
 
 import pytest
+from timing import assert_linear
 
 from docingest.adapters.converters import latex_source
 from docingest.adapters.converters.latex_source import (
@@ -206,20 +206,10 @@ def test_verbatim_parts():
 N_UNCLOSED = 16_000  # ~280 KB: the lazy-regex versions took 10+ s here, quadratically more
 
 
-def _seconds(fn, arg) -> float:
-    best = float("inf")
-    for _ in range(2):  # best of 2, in CPU time: waiting for a busy CPU is not counted
-        t0 = time.process_time()
-        fn(arg)
-        best = min(best, time.process_time() - t0)
-    return best
-
-
 def _linear(fn, make) -> None:
     """Quadrupling the input must cost far less than 16x (quadratic), in CPU time."""
-    small, big = _seconds(fn, make(N_UNCLOSED // 4)), _seconds(fn, make(N_UNCLOSED))
-    assert big < 10  # backstop: the old regexes took 10+ s at this size
-    assert big < max(8 * small, 0.05), (small, big)
+    # backstop: the old regexes took 10+ s at this size
+    assert_linear(fn, make(N_UNCLOSED // 4), make(N_UNCLOSED), ceiling=10)
 
 
 def test_unclosed_verbatim_flattens_in_linear_time(tmp_path):

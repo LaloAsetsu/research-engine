@@ -3,11 +3,10 @@ chunk cuts, completed from the paper's text before the answerer reads the chunks
 invented papers."""
 
 import asyncio
-import gc
-import time
 
 import pytest
 from fakes import FakeEmbedder, FakeQA, FixedIndex, InMemoryStore, add_doc
+from timing import assert_linear, run_job
 
 import docingest.application.ask as ask_module
 from docingest.application.ask import (
@@ -724,23 +723,8 @@ def test_the_text_added_to_a_chunk_is_at_most_the_bound_on_each_side():
 # ------------------------------------------------------------------ linear time
 
 
-def best_cpu(fn):
-    best = float("inf")
-    collecting = gc.isenabled()
-    gc.disable()
-    try:
-        for _ in range(3):
-            t0 = time.process_time()
-            fn()
-            best = min(best, time.process_time() - t0)
-    finally:
-        if collecting:
-            gc.enable()
-    return best
-
-
 def test_completing_is_linear_in_the_size_of_the_paper():
-    def cpu(n):
+    def job(n):
         body = "".join(
             f"{pad(400)}\n\n{EQUATION}\n\n{FENCED}\n\n{NEXT}\n\n{TABLE}\n\n" for _ in range(n)
         )
@@ -752,7 +736,6 @@ def test_completing_is_linear_in_the_size_of_the_paper():
         def run():
             with_whole_blocks(picks, docs, store, lambda _: None, blocks=BLOCKS)
 
-        return best_cpu(run)
+        return run
 
-    small, big = cpu(40), cpu(160)
-    assert big < max(8 * small, 0.05), (small, big)
+    assert_linear(run_job, job(40), job(160))

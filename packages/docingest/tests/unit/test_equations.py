@@ -1,10 +1,8 @@
 """domain.equations: the equation numbers a question names, where a paper writes them, which chunk
 holds an equation, and the header of an added chunk. Invented text only."""
 
-import gc
-import time
-
 import pytest
+from timing import assert_linear, run_job
 
 from docingest.domain.chunking import PAGE_BREAK, Chunk, chunk_pages
 from docingest.domain.equations import (
@@ -182,16 +180,15 @@ def test_a_numbers_are_returned_as_written_and_canonical_compares_spellings():
 
 
 def test_a_very_long_question_is_read_in_one_pass():
-    def cpu(n):
+    def job(n):
         q = "Eq. (2) and (3) in the lamp paper, equation of lamps, " * n
 
         def run():
             equation_references(q)
 
-        return best_cpu(run)
+        return run
 
-    small, big = cpu(400), cpu(1600)
-    assert big < max(8 * small, 0.05)
+    assert_linear(run_job, job(400), job(1600))
 
 
 # ------------------------------------------------------------------ the paper: where a number is
@@ -364,29 +361,27 @@ def test_the_search_ends_when_every_number_is_found():
 
 
 def test_finding_equations_is_linear_in_the_size_of_the_text():
-    def cpu(n):
+    def job(n):
         doc = ("$$ x_i = y_i + z_i \\tag{12}$$ words words \\tag{ \\tag{ " * n) + "$$ q \\tag{9}$$"
 
         def run():
             find_equations(doc, ["9", "77"])
 
-        return best_cpu(run)
+        return run
 
-    small, big = cpu(2500), cpu(10000)
-    assert big < max(8 * small, 0.05)
+    assert_linear(run_job, job(2500), job(10000))
 
 
 def test_a_text_full_of_dollar_pairs_does_not_slow_the_start_search():
-    def cpu(n):
+    def job(n):
         doc = ("$$$$$$$$ " * n) + "\\tag{9}"
 
         def run():
             find_equations(doc, ["9"])
 
-        return best_cpu(run)
+        return run
 
-    small, big = cpu(2500), cpu(10000)
-    assert big < max(8 * small, 0.05)
+    assert_linear(run_job, job(2500), job(10000))
 
 
 # ------------------------------------------------------------------ the paper named by the question
@@ -634,22 +629,3 @@ def test_a_long_title_is_cut_and_whitespace_is_one_space():
 
 def test_the_header_keeps_latex_braces_of_a_title_as_they_are():
     assert "$\\ket{0}$" in equation_header(["2"], "f" * 64, "States $\\ket{0}$")
-
-
-# ------------------------------------------------------------------ helpers
-
-
-def best_cpu(fn):
-    """Best of 3 runs in CPU time, with the cyclic collector off (see test_circuits)."""
-    best = float("inf")
-    collecting = gc.isenabled()
-    gc.disable()
-    try:
-        for _ in range(3):
-            t0 = time.process_time()
-            fn()
-            best = min(best, time.process_time() - t0)
-    finally:
-        if collecting:
-            gc.enable()
-    return best

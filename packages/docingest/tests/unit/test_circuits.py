@@ -5,12 +5,11 @@ it. The last sections check that no input makes the reader raise, that every ite
 a known operation or says ``unparsed``, and that its time grows in proportion to the source.
 """
 
-import gc
 import random
 import re
-import time
 
 import pytest
+from timing import assert_linear
 
 from docingest.domain.circuits import (
     MAX_STEPS,
@@ -1671,24 +1670,6 @@ def test_circuit_code_blocks_and_chunks_never_raise_on_odd_text():
 N = 6_000
 
 
-def seconds(fn, text) -> float:
-    """Best of 3 runs in CPU time, with the cyclic collector off: with a big heap (the other
-    tests of a session import PaperQA2) collections cost more per allocation than with a small
-    one, which would make a linear scan look slower on the larger input."""
-    best = float("inf")
-    collecting = gc.isenabled()
-    gc.disable()
-    try:
-        for _ in range(3):
-            t0 = time.process_time()  # CPU time: waiting for a busy CPU is not counted
-            fn(text)
-            best = min(best, time.process_time() - t0)
-    finally:
-        if collecting:
-            gc.enable()
-    return best
-
-
 def row(cells: int, cell: str = "\\gate{H}") -> str:
     return " & ".join([cell] * cells)
 
@@ -1739,9 +1720,7 @@ UNITS = {
 
 @pytest.mark.parametrize("make", UNITS.values(), ids=UNITS)
 def test_reading_is_linear_in_the_size_of_the_source(make):
-    small, big = seconds(gate_list, make(N // 4)), seconds(gate_list, make(N))
-    assert big < 10
-    assert big < max(8 * small, 0.05), (small, big)
+    assert_linear(gate_list, make(N // 4), make(N), ceiling=10)
 
 
 BLOCK_UNITS = {
@@ -1756,9 +1735,7 @@ BLOCK_UNITS = {
 
 @pytest.mark.parametrize("make", BLOCK_UNITS.values(), ids=BLOCK_UNITS)
 def test_finding_the_code_blocks_is_linear_in_the_size_of_the_text(make):
-    small = seconds(circuit_code_blocks, make(N * 2 // 4))
-    big = seconds(circuit_code_blocks, make(N * 2))
-    assert big < max(8 * small, 0.05), (small, big)
+    assert_linear(circuit_code_blocks, make(N * 2 // 4), make(N * 2))
 
 
 def test_adding_lists_to_a_chunk_costs_in_proportion_to_the_blocks_it_holds():
@@ -1767,8 +1744,7 @@ def test_adding_lists_to_a_chunk_costs_in_proportion_to_the_blocks_it_holds():
         blocks = circuit_code_blocks(doc)
         return add_gate_lists(doc, 0, doc, blocks)
 
-    small, big = seconds(work, N // 8), seconds(work, N // 2)
-    assert big < max(8 * small, 0.05), (small, big)
+    assert_linear(work, N // 8, N // 2)
 
 
 def test_the_list_of_a_long_circuit_is_not_longer_than_a_multiple_of_its_source():

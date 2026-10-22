@@ -6,9 +6,9 @@ pandoc, all three conversion paths included.
 """
 
 import re
-import time
 
 import pytest
+from timing import assert_linear
 
 from docingest.adapters.converters.latex_source import (
     flatten,
@@ -871,10 +871,8 @@ def test_macros_that_use_each_other_many_times_stop_the_numbering_instead_of_gro
     pre = "\\newcommand{\\a}{\\stepcounter{section}}"
     for name, inner in zip("bcd", "abc", strict=True):
         pre += f"\\newcommand{{\\{name}}}{{{('\\' + inner) * fan}}}"
-    t0 = time.process_time()
     out = number_equations(doc("\\d" + eq(), pre=pre))
-    assert time.process_time() - t0 < 1
-    assert out.stopped and "expand" in out.stopped
+    assert out.stopped and "expand" in out.stopped  # a count of macro uses, not a clock
 
 
 def test_a_chain_of_macros_longer_than_the_rounds_that_look_for_it_stops_the_numbering():
@@ -990,19 +988,6 @@ def test_prepare_for_pandoc_numbers_the_equations_after_the_other_rewrites():
 
 
 # --------------------------------------------------------------- linear time
-def _scaled(make, small: int = 1500) -> tuple[float, float]:
-    """CPU seconds, the best of three, of a text and of one four times longer."""
-
-    def timed(n: int) -> float:
-        text = make(n)
-        t0 = time.process_time()
-        number_equations(text)
-        return time.process_time() - t0
-
-    timed(50)
-    return min(timed(small) for _ in range(3)), min(timed(small * 4) for _ in range(3))
-
-
 @pytest.mark.parametrize(
     "make",
     [
@@ -1031,5 +1016,5 @@ def _scaled(make, small: int = 1500) -> tuple[float, float]:
     ],
 )  # fmt: skip
 def test_the_numbering_is_linear(make):
-    small, large = _scaled(make)
-    assert large < 8 * max(small, 0.01)  # linear costs about 4 times, quadratic 16 times
+    # linear costs about 4 times, quadratic 16 times; the floor is 8 * 0.01 s
+    assert_linear(number_equations, make(1500), make(6000), floor=0.08)

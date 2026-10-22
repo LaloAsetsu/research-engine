@@ -7,10 +7,10 @@ all three conversion paths included.
 
 import random
 import re
-import time
 from itertools import pairwise
 
 import pytest
+from timing import assert_linear
 
 from docingest.adapters.converters import latex_source
 from docingest.adapters.converters.latex_source import (
@@ -728,15 +728,6 @@ def test_the_circuit_source_is_not_changed_by_the_comment_free_text_around_it():
 N = 12_000
 
 
-def seconds(fn, text) -> float:
-    best = float("inf")
-    for _ in range(2):
-        t0 = time.process_time()
-        fn(text)
-        best = min(best, time.process_time() - t0)
-    return best
-
-
 UNITS = {
     "unclosed quantikz": lambda n: "\\begin{quantikz} \\gate{H}\n" * n,
     "unclosed Qcircuit groups": lambda n: "\\Qcircuit @C=1em { & \\gate{H} \\qw\n" * n,
@@ -777,9 +768,7 @@ UNITS = {
 
 @pytest.mark.parametrize("make", UNITS.values(), ids=UNITS)
 def test_scanning_is_linear_in_the_size_of_the_text(make):
-    small, big = seconds(protect_circuits, make(N // 4)), seconds(protect_circuits, make(N))
-    assert big < 10
-    assert big < max(8 * small, 0.05), (small, big)
+    assert_linear(protect_circuits, make(N // 4), make(N), ceiling=10)
 
 
 # ------------------------------------------------------- the plain-text path

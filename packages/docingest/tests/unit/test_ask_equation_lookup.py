@@ -2,11 +2,10 @@
 to the retrieved chunks under a header that names the paper. Fakes only; invented papers."""
 
 import asyncio
-import gc
-import time
 
 import pytest
 from fakes import FakeEmbedder, FakeQA, FixedIndex, InMemoryStore, add_doc
+from timing import assert_linear, run_job
 
 import docingest.application.ask as ask_module
 from docingest.application.ask import (
@@ -1117,23 +1116,8 @@ def test_the_container_passes_the_chunk_settings_the_index_is_built_with():
 # ------------------------------------------------------------------ linear time
 
 
-def best_cpu(fn):
-    best = float("inf")
-    collecting = gc.isenabled()
-    gc.disable()
-    try:
-        for _ in range(3):
-            t0 = time.process_time()
-            fn()
-            best = min(best, time.process_time() - t0)
-    finally:
-        if collecting:
-            gc.enable()
-    return best
-
-
 def test_the_lookup_is_linear_in_the_size_of_the_paper():
-    def cpu(n_pages):
+    def job(n_pages):
         store = InMemoryStore()
         words = [(pad(4000, "a"), f"P{i}") for i in range(n_pages - 1)]
         add_doc(store, A, [*words, (pad(100, "a") + equation("a", "9"), "Last")])
@@ -1145,7 +1129,6 @@ def test_the_lookup_is_linear_in_the_size_of_the_paper():
                 lead, docs, "Eq. (9)?" + ASKED, store, lambda _: None, lookup=LOOKUP
             )
 
-        return best_cpu(run)
+        return run
 
-    small, big = cpu(15), cpu(60)
-    assert big < max(8 * small, 0.05)
+    assert_linear(run_job, job(15), job(60))

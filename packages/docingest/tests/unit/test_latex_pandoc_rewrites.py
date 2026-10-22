@@ -8,9 +8,9 @@ shapes through the real pandoc.
 """
 
 import re
-import time
 
 import pytest
+from timing import assert_linear
 
 from docingest.adapters.converters.latex_source import (
     clean_citation_keys,
@@ -394,15 +394,4 @@ N_UNCLOSED = 8_000
     ],
 )
 def test_unclosed_constructs_are_rewritten_in_linear_time(unit):
-    def seconds(n: int) -> float:
-        text = unit * n
-        best = float("inf")
-        for _ in range(2):
-            t0 = time.process_time()
-            prepare_for_pandoc(text)
-            best = min(best, time.process_time() - t0)
-        return best
-
-    small, big = seconds(N_UNCLOSED // 4), seconds(N_UNCLOSED)
-    assert big < 5
-    assert big < max(8 * small, 0.05), (small, big)
+    assert_linear(prepare_for_pandoc, unit * (N_UNCLOSED // 4), unit * N_UNCLOSED, ceiling=5)

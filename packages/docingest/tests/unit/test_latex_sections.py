@@ -8,9 +8,9 @@ same cases through the real pandoc. Every fixture is invented.
 """
 
 import re
-import time
 
 import pytest
+from timing import assert_linear
 
 from docingest.adapters.converters import pandoc_latex
 from docingest.adapters.converters.latex_source import (
@@ -179,27 +179,22 @@ def test_bibliography_blocks_are_the_lists_rewrite_bibliography_wrote():
 
 
 def test_helpers_are_linear_on_pathological_input():
-    def seconds(k: int) -> float:
-        bad = (
+    def bad(k: int) -> str:
+        return (
             "\\section{ x " * (10 * k)
             + "\\begin{document}" * k
             + "\\section*{References}\n\\begin{enumerate}\n" * k
         )
-        best = float("inf")
-        for _ in range(3):  # best of 3: the least disturbed run
-            t0 = time.process_time()  # CPU time: waiting for a busy CPU is not counted
-            section_units(bad)
-            split_document(bad)
-            macro_context(bad)
-            bibliography_blocks(bad)
-            best = min(best, time.process_time() - t0)
-        return best
 
-    # Quadrupling the input must cost far less than 16x. Only the ratio of two runs is checked, in
-    # CPU time of this process, so other load on the machine barely moves it; the floor keeps a
-    # timer-sized `small` from making the ratio noise.
-    small, big = seconds(1000), seconds(4000)
-    assert big < max(8 * small, 0.05), (small, big)
+    def helpers(text: str) -> None:
+        section_units(text)
+        split_document(text)
+        macro_context(text)
+        bibliography_blocks(text)
+
+    # Quadrupling the input must cost far less than 16x. Only the ratio of two runs is checked
+    # (see tests/timing.py).
+    assert_linear(helpers, bad(1000), bad(4000))
 
 
 # ------------------------------------------------- section by section
