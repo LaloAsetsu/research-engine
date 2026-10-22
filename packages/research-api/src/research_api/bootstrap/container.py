@@ -7,11 +7,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
-from typing import Literal
 
 from ..adapters.clock import SystemClock
 from ..adapters.fake import FixedClock
 from ..application.status import ReportStatus
+from ..domain.status import Mode
 from ..ports.clock import Clock
 from .settings import Settings, SettingsError, is_loopback, load_settings
 
@@ -21,7 +21,7 @@ FAKE_ENV = "RESEARCH_API_FAKE"
 
 @dataclass(frozen=True)
 class Container:
-    mode: Literal["live", "fake"]
+    mode: Mode
     settings: Settings
     version: str
     clock: Clock
@@ -33,7 +33,7 @@ def build_container(settings: Settings, *, fake: bool = False) -> Container:
     if fake and not is_loopback(settings.bind_host):
         raise SettingsError("fake mode serves test data and may only bind a loopback address")
     clock: Clock = FixedClock() if fake else SystemClock()
-    mode = "fake" if fake else "live"
+    mode: Mode = "fake" if fake else "live"
     api_version = version("research-api")
     return Container(
         mode=mode,

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ..domain.status import ServerStatus
+from ..domain.status import Mode, ServerStatus
 from ..ports.clock import Clock
 
 
 class ReportStatus:
-    def __init__(self, *, clock: Clock, mode: str, version: str, started_at: datetime) -> None:
+    def __init__(self, *, clock: Clock, mode: Mode, version: str, started_at: datetime) -> None:
         self._clock = clock
-        self._mode = mode
+        self._mode: Mode = mode
         self._version = version
         self._started_at = started_at
 
