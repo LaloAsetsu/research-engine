@@ -411,13 +411,13 @@ flowchart TD
     LONGER -->|"yes"| FALLBACK["return fallback: method latex_plaintext, engine pylatexenc, degraded if the failure was environmental"]
     LONGER -->|"no"| SOME
     NOTE --> SOME
-    SOME -->|"yes"| SHORT["return pandoc result: method latex, reason added to warnings, not degraded"]
+    SOME -->|"yes"| SHORT["return pandoc result: method latex, reason added to warnings, degraded if the failure was environmental (a timeout while sectioning)"]
     SOME -->|"no"| RAISE["raise ConversionError with the reason and earlier warnings"]
 ```
 
 Consequences:
 
-- `degraded` is `True` only when the fallback result is returned and the failure was environmental. A timeout on a busy machine, a killed pandoc or a missing binary therefore never becomes the cached conversion of a paper; the result is stored under `_degraded/` and the next run tries pandoc again.
+- `degraded` is `True` only when the failure was environmental and a fallback ran: the pylatexenc result, or the short pandoc result kept after it. A timeout on a busy machine, a killed pandoc or a missing binary therefore never becomes the cached conversion of a paper; the result is stored under `_degraded/` and the next run tries pandoc again.
 - A fallback caused by the document itself (a parse error, too little text) is deterministic and is cached normally. So is a paper converted section by section, unless a piece was left to plain text for want of time.
 - With `fallback = false`, pandoc's result is still returned when it kept some text (too little text only adds the reason to the warnings). Any other failure raises `ConversionError`, for example `main.tex: pandoc exited with code 64: ...`.
 - A document with no text at all (for example only comments) raises `ConversionError` with `pandoc produced no text`.

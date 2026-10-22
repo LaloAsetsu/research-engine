@@ -799,6 +799,31 @@ def test_every_piece_timing_out_leaves_a_result_that_is_not_kept(tmp_path):
     assert conv.method == PageMethod.LATEX_PLAINTEXT and conv.degraded
 
 
+@pytest.mark.parametrize(
+    ("plain", "stalls", "degraded"),
+    [("raises", True, True), ("raises", False, False), ("shorter", True, True)],
+)
+def test_the_little_text_of_the_whole_paper_is_not_kept_when_a_timeout_ended_the_fallback(
+    tmp_path, monkeypatch, plain, stalls, degraded
+):
+    class Terse(StubPandoc):
+        def markdown(self, latex, drop_list):
+            return "x" if "\\section{B}" in latex else super().markdown(latex, drop_list)
+
+    def boom(self, latex):
+        raise RuntimeError("pylatexenc bug")
+
+    fake = boom if plain == "raises" else lambda self, latex: _Attempt([], None, [])
+    monkeypatch.setattr(PandocLatexConverter, "_plaintext", fake)
+    stub = Terse()
+    stalled = _Failure("pandoc timed out after 100s", environmental=True)
+    stub.failures = [None, stalled if stalls else _Failure("exit 64")]
+    conv = run(stub, sections("A", "B"), tmp_path)
+    assert conv.method == PageMethod.LATEX and conv.degraded is degraded
+    if plain == "raises":
+        assert any("pylatexenc failed: pylatexenc bug" in w for w in conv.warnings)
+
+
 def test_a_complete_list_in_the_segment_of_a_lost_one_stays(tmp_path):
     # The heading of the lost first list is glued onto the heading of the complete second one.
     class DropsTheFirstList(StubPandoc):

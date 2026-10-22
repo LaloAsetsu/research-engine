@@ -236,7 +236,13 @@ class PandocLatexConverter:
                     degraded=failure.environmental,
                 )
         if attempt is not None and got:
-            return _conversion(attempt, PageMethod.LATEX, self.engine, [*warnings, problem])
+            return _conversion(
+                attempt,
+                PageMethod.LATEX,
+                self.engine,
+                [*warnings, problem],
+                degraded=failure.environmental,
+            )
         context = f" ({'; '.join(warnings)})" if warnings else ""
         raise ConversionError(f"{name}: {problem}{context}")
 

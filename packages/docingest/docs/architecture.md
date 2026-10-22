@@ -1074,7 +1074,7 @@ flowchart TD
     FB -->|"yes"| PLAIN["Conversion method = latex_plaintext with a warning, degraded = True only for an environment failure"]
     DOCF -->|"fallback on, two pieces or more"| SECT["convert section by section; only the failing sections become plain text (their segments carry method = latex_plaintext)"]
     FB -->|"no"| SOME{"pandoc produced some text?"}
-    SOME -->|"yes"| KEEP["Conversion method = latex with a warning"]
+    SOME -->|"yes"| KEEP["Conversion method = latex with a warning, degraded = True only after a timeout while sectioning"]
     SOME -->|"no"| RAISE["raise ConversionError"]
 ```
 
