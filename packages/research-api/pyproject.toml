@@ -47,6 +47,9 @@ addopts = ["--strict-markers", "-ra"]
 [tool.coverage.run]
 source = ["research_api"]
 branch = true
+# Alembic loads the migration scripts by file path; tests/test_persistence.py checks what they
+# build (the tables equal the models, down and up again), which is the point of running them.
+omit = ["*/adapters/persistence/migrations/*"]
 
 [tool.coverage.report]
 show_missing = true

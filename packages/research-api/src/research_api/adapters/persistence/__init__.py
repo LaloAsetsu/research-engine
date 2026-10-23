@@ -1,1 +1,5 @@
-"""Adapter: SQLAlchemy persistence (users, jobs, catalog). Empty until a use case needs it."""
+"""Persistence adapter: SQLite through SQLAlchemy, with Alembic migrations."""
+
+from .database import Database
+
+__all__ = ["Database"]
