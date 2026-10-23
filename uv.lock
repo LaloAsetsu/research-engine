@@ -3608,6 +3608,11 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+qa = [
+    { name = "docingest", extra = ["qa"] },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "httpx" },
@@ -3622,6 +3627,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.20" },
     { name = "docingest", editable = "packages/docingest" },
+    { name = "docingest", extras = ["qa"], marker = "extra == 'qa'", editable = "packages/docingest" },
     { name = "fastapi", specifier = ">=0.159" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.1" },
     { name = "pydantic", specifier = ">=2.14" },
@@ -3629,6 +3635,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.1" },
     { name = "uvicorn", specifier = ">=0.54" },
 ]
+provides-extras = ["qa"]
 
 [package.metadata.requires-dev]
 dev = [
