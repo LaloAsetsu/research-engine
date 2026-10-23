@@ -1,8 +1,8 @@
 # research-api
 
-The HTTP API of the research engine. A FastAPI service built in the same hexagonal style as [docingest](../docingest/README.md): the rules sit in a pure core, the libraries sit in adapters, and import-linter contracts keep it that way. It serves the web app with cited answers, the papers they cite, the circuit check and the question sets, and will serve benchmark runs, using docingest and [quantum-sim](../quantum-sim/README.md) as libraries.
+The HTTP API of the research engine. A FastAPI service built in the same hexagonal style as [docingest](../docingest/README.md): the rules sit in a pure core, the libraries sit in adapters, and import-linter contracts keep it that way. It serves the web app with cited answers, the papers they cite, the circuit check, question sets and benchmark runs, using docingest and [quantum-sim](../quantum-sim/README.md) as libraries.
 
-It has the layers, the import contracts, the settings loader, a fake mode, the error format, the OpenAPI export, the circuit check endpoints and the sign-in part: accounts in SQLite, Argon2id password hashes, cookie sessions with a CSRF check, a login rate limit, two roles, the `users` command and the private data folder, and the ask path: questions answered one at a time by docingest, followed as server-sent events, with the cited papers readable at a page (see [Asking and reading papers](#asking-and-reading-papers)), and the question sets: a catalog of `qset/1` files with drafts, items edited under `If-Match`, validation, import, export, reviews and freezing. Everything else (benchmarks) arrives in later pull requests, each adding use cases, ports and adapters inside this structure.
+It has the layers, the import contracts, the settings loader, a fake mode, the error format, the OpenAPI export, the circuit check endpoints, the sign-in part (accounts in SQLite, Argon2id password hashes, cookie sessions with a CSRF check, a login rate limit, two roles, the `users` command and the private data folder), the ask path (questions answered one at a time by docingest, followed as server-sent events, with the cited papers readable at a page: see [Asking and reading papers](#asking-and-reading-papers)) and the question sets: a catalog of `qset/1` files with drafts, items edited under `If-Match`, validation, import, export, reviews and freezing, and the benchmark jobs: runs of the arms `bare` and `harness` on a frozen set (`oracle` waits for docingest, see [Benchmark jobs](#benchmark-jobs)), one at a time in the lane the asks use, with progress, a log, cancel, resume and recovery after a stop, and scorings that compare runs with the qa-bench scorer. The web screens arrive in their own pull requests, each adding use cases, ports and adapters inside this structure.
 
 ## Run it
 
@@ -11,6 +11,7 @@ uv sync --locked --all-extras             # from the repository root
 cd packages/research-api
 uv run research-api serve --fake          # test data, 127.0.0.1:8090 (--port N for another port)
 uv run research-api serve --fake --ask-pause 0   # the same, with the fake engine answering at once
+uv run research-api serve --fake --bench-pause 0 # and the fake benchmark answering at once
 curl -s http://127.0.0.1:8090/api/v1/health
 curl -s http://127.0.0.1:8090/api/v1/status
 ```
@@ -41,9 +42,10 @@ Start from [`config.example.toml`](config.example.toml). Keep your copy outside 
 | `login_max_failures` | `5` | Failed sign-ins allowed per username in the window (1 to 100). One client address gets four times as many. |
 | `login_window_minutes` | `15` | The window of the two limits above (1 to 1440). |
 | `[circuit_caps]` | see [Circuit check](#circuit-check) | A table with `max_body_bytes`, `max_ops` and `timeout_s`. Each is checked against a range, and a key that is not one of the three is an error. |
+| `[[models]]` | none | The models a benchmark run may ask: `name` (what the server serves it as), `endpoint` (the address up to `/v1`, no credentials, query or fragment: a key never goes here), and optionally `label` and `revision`. See [Benchmark jobs](#benchmark-jobs). A name listed twice is an error. |
 | `docingest_config` | none | Absolute path of the docingest settings file that names the papers (`output_dir`), the index and the model servers. A file that does not exist or cannot be read stops the start. Without the key everything works except asking questions and reading papers: `/status` says so and an ask ends with a `503`. The file is read once, so a change needs a restart (the index itself is reloaded by itself when a build commits). |
 
-A key that is not in the table is an error. Later pull requests add their keys here (model servers, circuit limits, backups).
+A key that is not in the table is an error. Later pull requests add their keys here (backups).
 
 To run under another process manager: `uvicorn research_api.entrypoints.http:create_app --factory`, with `RESEARCH_API_CONFIG` (or `RESEARCH_API_FAKE=1`) in the environment. The `serve` command turns uvicorn's access log off (a raw access log would hold paths and query strings) and its forwarded-address handling off (uvicorn would otherwise believe an `X-Forwarded-For` header sent from this machine, and so let any account on a shared server pick the address the rate limit sees). The factory sets up the service's log file and silences the access log itself, but only the command line of uvicorn can turn off the forwarded headers: pass `--no-proxy-headers`.
 
@@ -56,7 +58,7 @@ All paths are under `/api/v1`.
 | Method and path | Who | Does |
 |---|---|---|
 | `GET /health` | anyone | `{"ok": true}`, for a start script or a load check. |
-| `GET /status` | member | `mode` (`live` or `fake`, an enum in the contract), `api_version`, `started_at`, `uptime_s`, `ready`, and `ask`: `state` (`warming_up`, `ready` or `unavailable`), a fixed-text `reason` when unavailable, `index_generation`, `queued` (asks waiting for the GPU lane) and `busy`. It is for members because it shows when someone is asking (`/health` is the open one). In live mode `index_generation` is empty until the first question has been answered. Model-server probes join it later. |
+| `GET /status` | member | `mode` (`live` or `fake`, an enum in the contract), `api_version`, `started_at`, `uptime_s`, `ready`, and `ask`: `state` (`warming_up`, `ready` or `unavailable`), a fixed-text `reason` when unavailable, `index_generation`, `queued` (asks waiting for the GPU lane) and `busy`; and `bench`: `running_job`, `queued_runs`, `scoring` and `queued_scores`. It is for members because it shows when someone is asking (`/health` is the open one). In live mode `index_generation` is empty until the first question has been answered. Model-server probes join it later. |
 | `POST /auth/login` | anyone | `{username, password}`. `204` and two cookies. `401` with one message for a wrong password, an unknown name and a disabled account; `429` with `Retry-After` past the limit. |
 | `POST /auth/logout` | signed in | Ends the session, clears both cookies, `204`. |
 | `GET /auth/me` | signed in | `{username, display_name, role, must_change_password, language}`. Works while a password change is pending. |
@@ -85,6 +87,20 @@ All paths are under `/api/v1`.
 | `POST /sets/{name}/versions/{version}/reviews` | signed in | `{item_id, verdict, note?, edit?}`: accept, edit or reject one item of a draft. `If-Match` with the `etag` of the draft you read is required: `428` without it or with `*`, `409` when the draft changed since (read it again). A list of tags is allowed as for item writes (see Drafts, versions and freezing): the review goes through when one of them is the current tag, and the stored md5 is then the current one. The server fills in the reviewer (you), the role `human`, the date and the set md5 (the one you read). |
 | `GET /sets/{name}/versions/{version}/freeze` | signed in | What freezing would do, by item, and the `etag` of that plan (`ETag` header and `plan.etag`). Nothing changes. Refuses what the freeze would refuse (`422`, naming the item by id). |
 | `POST /sets/{name}/versions/{version}/freeze` | owner or admin | Applies the reviews and closes the version for good. `If-Match` with the plan's `etag` is required: `428` without it, `409` when a decision or an item changed since the plan was read. |
+| `GET /models` | signed in | The models of the settings, each probed with a two second timeout: `{name, label, revision, available}`. |
+| `POST /runs` | signed in | `{set: {name, version}, arms: [{name, variant?, overrides?}], models: [name], repeats?, notes?}`. `202` and one queued job for each arm and model. `409` for a draft, `404` for an unknown set, `422` for a bad arm, model or repeats, `503` for a model or an arm that is not available, `429` past twelve open jobs. |
+| `GET /jobs` | signed in | Jobs, newest first. Filters `state`, `kind`, `mine`; `limit` (at most 200), `offset`. |
+| `GET /jobs/{id}` | signed in | One job: `state`, `settled`, `progress {done, total}`, its times, `error`, and for a queued run its `position` and `waiting_for`. Poll it every two seconds until `settled`. |
+| `GET /jobs/{id}/log?offset=` | signed in | Plain text lines with times, from a byte offset; the headers `X-Log-Next-Offset` and `X-Log-Size` say where to go on. |
+| `POST /jobs/{id}/cancel` | owner or admin | A queued job is cancelled at once; a running run becomes `cancelling` and stops before its next question. `409` for a job that has ended. |
+| `POST /jobs/{id}/resume` | owner or admin | Queues a `cancelled` or `interrupted` job again; a run continues after the answers it has. `409` for any other state. |
+| `GET /runs` | signed in | Every `qa-run/1` file in the runs folder, whoever made it: set, arm, model, times, `answers`, `errors`, `complete`, and the job that made it. |
+| `GET /runs/{run_id}` | signed in | One run. |
+| `GET /runs/{run_id}/items` | signed in | The lines of a run with the question and the reference answer of the set. Filters `filter` (`all`, `errors`, `answered`), `id`; `offset`, `limit`, `contexts=false` to leave the chunks out. |
+| `POST /scores` | signed in | `{set, runs: [run_id], pairs?: [[base, variant]], noise?: [a, b], group_by?, groups?, bootstrap_engine?, number_words?}`. `202` and a job for the CPU lane that writes one `qa-score/1` file. `409` for a run that has not ended, `422` for a run that does not fit the set. |
+| `GET /scores` | signed in | The scores made, newest first. |
+| `GET /scores/{score_id}` | signed in | The header, the `group` records (mean and 95% interval per run, group and metric) and the `compare` records (difference, interval, up and down, noise floor). |
+| `GET /scores/{score_id}/items` | signed in | The `item` records: the metrics of each answer and the keys it hit. Filters `run_id`, `id`; `offset`, `limit`. |
 
 Accounts are made, disabled, reset and given a role with the `users` command, never over HTTP (see Sign-in below).
 
@@ -326,43 +342,104 @@ Per item, the review state is computed, not stored: `none`, `needs_second` (acce
 
 An import is at most 20 MiB (the unzipped size for a gzip file: zeros shrink a thousand to one, so the upload size says nothing; the unzipping is linear in the upload and a file of more than 1000 gzip members is a `422`, since empty members of 20 bytes would otherwise make a 20 MiB upload cost minutes of the single process), an item body 1 MiB and a review 256 KiB; a body over its limit is a `413` before it is read in full. The cap follows the route, not the end of the path, so an item called `import` gets the item cap. The caller is checked first: a request with no session is a `401` whatever its body, and costs no body read. A JSON body is read as text and a key written twice is a `400`, as qa-bench refuses it in a file. An item id is at most 200 characters, since the routes cannot name a longer one. The service runs one process, so the lock above is enough; a second process on the same data folder would need a database transaction around each write. A catalog listing reads each version's file for its review count, which is cheap for the sets of hundreds of items this is made for.
 
+## Benchmark jobs
+
+A benchmark job is one run of one arm on one model over one frozen question set, or one scoring of runs. The files are the [qa-bench](../qa-bench/README.md) formats: a run is a `qa-run/1` file, a scoring a `qa-score/1` file, and a person who drops a run file made elsewhere into the runs folder sees it in `GET /runs` like any other.
+
+### The arms
+
+| Arm | Asks | Needs |
+|---|---|---|
+| `bare` | The model alone, no papers, with the closed-book prompt of R-281 word for word (its md5 `9ebdae30...` is in the header, so a run made here compares with that one). Temperature 0, 1024 tokens. | A model of `[[models]]` whose server answers. |
+| `harness` | The same engine as a person's question, so the run sees what an ask sees. `overrides` set `use_index`, `bm25` and `whole_blocks` for every question. | The answer engine ready (`docingest_config`). |
+| `oracle` | The model with the gold passages. | **Not built yet.** docingest has no public way to answer from given passages (the `answer from these chunks` method of the scope's PR 0b), so a live service refuses the arm with a `503` and says why; the fake mode has one. The arm will be a new `Arms` implementation, not a change of the job desk. |
+
+The model of a `harness` run is the one in the docingest file; the `models` list only names it in the run header.
+
+### The lanes
+
+Runs go through the same lane as the asks. A run is one job of the scheduler and its questions are tickets of the lane, one at a time, with a lower priority than an ask:
+
+* two runs never share the GPU: the second stays `queued` (with its `position`) until the first ends, first in first out;
+* an ask that arrives while a run goes on waits for the question in flight (an LLM request is never cut), then goes before the next question of the run. The run header's `notes` say how many it let through (`Interleaved asks: 2.`), because that run shared the GPU;
+* a scoring goes through the CPU lane, in a worker thread, at the same time as a run;
+* before a run starts, its model server must answer (or the engine be ready): else it waits `queued` and says why in `waiting_for`, and starts when the server is back.
+
+### States
+
+```text
+queued -> running -> done | failed | interrupted
+queued -> cancelled
+running -> cancelling -> cancelled | done
+cancelled | interrupted -> queued                  (resume)
+```
+
+`interrupted` is a run that stopped without being told to: the model server stopped answering (`error.kind` `unavailable`), or the service stopped while it ran (found at the next start, or at a clean shutdown). A job found `running` at start-up becomes `interrupted`; one found `cancelling` becomes `cancelled`; a `queued` one runs. A cancel that arrives while the last question is in flight ends the run `done`, because nothing is missing.
+
+### The run file
+
+The header is written when the run starts and the answers are appended one line at a time, flushed, so a stop leaves whole lines and at most one half line. A resume cuts the half line off, reads which `(question, repeat)` pairs the file has, and asks the first missing one: the questions go through the set once for each repeat, so a run that stops early has complete earlier repeats, and a resumed run ends with every pair exactly once. The header gets `ended` only when the run is complete; a cancelled, interrupted or stopped run has no `ended` and its `notes` end with `Partial: Cancelled at <time> with 3 of 6 answers.` A question that fails (the model refuses it, or takes too long) is recorded as an item with an `error` and the run goes on; a model server that goes away interrupts the run instead. Messages in the file and the log are fixed text: a library's own message can hold the prompt. The log of a job (`jobs/<id>.log`) never holds a question or an answer.
+
+```text
+<data_dir>/runs/<run_id>.qa-run.jsonl        run_id: <arm>-<set>-<version>-<tail of the job id>
+<data_dir>/scores/<score_id>.qa-score.jsonl  score_id: the id of its job
+<data_dir>/jobs/<job_id>.log
+```
+
+The job table (`jobs`, migration `0003`) holds who started each job, its state, its parameters as JSON and its progress; the files hold the results.
+
+### Scoring
+
+`POST /scores` names a set version, the runs to score (at most twelve, all on that version, none still running), the pairs to compare and optionally a noise pair. The job runs `qa_bench.score` and writes the file it returns, so a score made here equals the one `qa-bench score` makes from the same files (a test compares the bytes). A run that does not fit the set (another set, another md5) fails the job with qa-bench's own words.
+
+### Fake mode
+
+`serve --fake` has the three arms and two models: `fake-model`, which answers, and `fake-offline`, which is down (so the unavailable state can be seen). The answers are made up from the key facts of each question and are deterministic: each key fact has a fixed hardness and an arm finds the facts below its level (plus a little noise that changes with the repeat), so the closed-book arm finds fewest, the harness more and the oracle most, a second repeat may differ, and a score over the three has something to show. The harness cites the gold papers and the oracle's contexts are the gold passages, as `qa-bench` checks. Each answer takes `--bench-pause` seconds (only with `--fake`, default 0.25; `RESEARCH_API_FAKE_BENCH_PAUSE` for the factory), so a run of the six demo questions takes a couple of seconds. A question that contains `simulate-unavailable`, `simulate-upstream` or `simulate-crash` fails on purpose.
+
+### Limits
+
+Twelve jobs open (queued, running or being cancelled) per member (`429` with `Retry-After`), one to three arms and one to four models in a request, repeats 1 to 10, notes 1000 characters, twelve runs and twelve pairs in a scoring.
+
 ## Layout
 
 ```text
 src/research_api/
   domain/          errors, ServerStatus, auth (User, Session, the password and session rules),
                    ask (the question, the answer, the reader of a formatted answer, the life of one
-                   ask), documents (papers, pages, the short-id rule), sets (names, versions, who
-                   may edit, review states, filters), the circuit rules (strict JSON, caps).
+                   ask), documents (papers, pages, the short-id rule), the circuit rules (strict
+                   JSON, caps), sets (names, versions, who may edit, review states, filters), jobs (the state
+                   machine, ids, the order of the questions) and runs (the arms' answers, the
+                   closed-book prompt, the lines of a run file).
                    Standard library only.
   ports/           Protocols (Clock, CircuitEngine; UserRepo, SessionRepo, LoginAttempts,
-                   PasswordHasher; AskEngine; DocumentReader; SetCatalog, SetFiles, SetFormats) and
-                   the values that cross them
+                   PasswordHasher; AskEngine; DocumentReader; SetCatalog, SetFiles, SetFormats; JobRepo,
+                   BenchFiles, RunFormats, Scorer, Arms; ModelServer) and the values that cross them
   application/     use cases (ReportStatus; SignIn, SignOut, Authenticate, ChangePassword,
                    ListSessions, EndSession, ManageUsers; AskDesk and the GpuLane; ListDocuments,
                    GetDocument, ReadPage; ParseCircuit, RunCircuit, CheckCircuit,
-                   ShowCircuitConventions; ManageSets, ReviewItems, FreezeSets)
+                   ShowCircuitConventions; ManageSets, ReviewItems, FreezeSets; JobDesk, LiveArms,
+                   RunsDesk, ScoresDesk)
   adapters/        clock, fake (fake mode: clock, the invented corpus, the fake engine and reader),
                    persistence (SQLAlchemy, Alembic; users, sessions, login attempts, the set
-                   catalog), hashing (Argon2id), files (private folders, the set files), circuits
+                   catalog, the jobs), hashing (Argon2id), files (private folders, the set, run,
+                   score and log files), circuits
                    (docingest gate lists and quantum-sim, with the thread that bounds the work),
                    docingest_ask (the engine on AskSession, the paper reader, the wording of
-                   failures, the stand-ins for a service without a docingest file), bench
-                   (qa-bench: reads, checks and converts sets), and an empty folder for the
-                   adapters to come: models
+                   failures, the stand-ins for a service without a docingest file), bench (qa-bench:
+                   sets, run files, the scorer), models (OpenAI-compatible servers, httpx)
   bootstrap/       settings.py (the TOML loader and its rules), storage.py (private folders, the
                    database), seed.py (fake-mode accounts), demo_sets.py (fake-mode sets),
                    container.py (wiring, fake mode)
   entrypoints/     http/ (FastAPI app, routes, auth routes, circuit routes, ask and document routes,
-                   set routes and schemas, security dependencies, Host and Origin checks, access
-                   log, no-store, schemas, problem details), cli.py, logs.py
+                   set routes and schemas, benchmark routes and schemas, security dependencies, Host and Origin checks, access log,
+                   no-store, schemas, problem details), cli.py, logs.py
 ```
 
 The six layers import downward only: `entrypoints`, `bootstrap`, `adapters`, `application`, `ports`, `domain`. Only `bootstrap` and `entrypoints` import adapters. Use cases take their ports as keyword-only constructor arguments, as in docingest.
 
 ## Import contracts
 
-Seven rules, enforced by import-linter (`uv run lint-imports`, a gate in `scripts/check.sh` and in the Linux CI lane). Rule 5 is written as five `forbidden` contracts, one per library (or pair of libraries). Each one covers the whole package (`source_modules = ["research_api"]`) and lists as exceptions only the adapters that own the library, so the package root, `adapters/__init__.py` and any adapter added later are checked too.
+Seven rules, enforced by import-linter (`uv run lint-imports`, a gate in `scripts/check.sh` and in the Linux CI lane). Rule 5 is written as six `forbidden` contracts, one per library (or pair of libraries). Each one covers the whole package (`source_modules = ["research_api"]`) and lists as exceptions only the adapters that own the library, so the package root, `adapters/__init__.py` and any adapter added later are checked too.
 
 | # | Rule | Type |
 |---|---|---|
@@ -370,7 +447,7 @@ Seven rules, enforced by import-linter (`uv run lint-imports`, a gate in `script
 | 2 | The nine adapter areas (`clock`, `fake`, `persistence`, `docingest_ask`, `circuits`, `bench`, `hashing`, `files`, `models`) do not import each other (so `bootstrap/storage.py`, not an adapter, joins `files` and `persistence`); a test fails when a folder or module under `adapters/` is missing from the list | `independence` |
 | 3 | `domain` imports no `fastapi`, `starlette`, `sqlalchemy`, `alembic`, `pwdlib`, `argon2`, `httpx`, `uvicorn`, `docingest`, `docingest_index`, `quantum_sim`, `qa_bench` or `jsonschema` | `forbidden` |
 | 4 | `application` and `ports` import none of those: they reach docingest, quantum-sim and qa-bench only through ports | `forbidden` |
-| 5 | Only `adapters.docingest_ask` and `adapters.circuits` import `docingest`; only `adapters.circuits` imports `quantum_sim`; only `adapters.bench` imports `qa_bench`; only `adapters.hashing` imports `pwdlib` and `argon2`; only `adapters.persistence` imports `sqlalchemy` and `alembic` | `forbidden` (five) |
+| 5 | Only `adapters.docingest_ask` and `adapters.circuits` import `docingest`; only `adapters.circuits` imports `quantum_sim`; only `adapters.bench` imports `qa_bench`; only `adapters.models` imports `httpx`; only `adapters.hashing` imports `pwdlib` and `argon2`; only `adapters.persistence` imports `sqlalchemy` and `alembic` | `forbidden` (six) |
 | 6 | Only `bootstrap` and `entrypoints` import `adapters` | `protected` |
 | 7 | `research_api` never imports `docingest_index` (docingest finds its plugin by entry point) | `forbidden` |
 
@@ -386,6 +463,6 @@ When a contract fails, fix the import; do not relax the contract. Adding an adap
 ./scripts/check.sh        # ruff, ruff format, lint-imports, pyright, pytest with coverage (floor 85%)
 ```
 
-`tests/` holds one file per concern: `test_settings.py`, `test_container.py`, `test_status.py`, `test_http.py` (routes, problem details, the OpenAPI text), `test_guard.py` (the address rule), `test_cli.py` (serve, openapi), `test_contracts.py`, and for sign-in `test_auth_domain.py` (rules), `test_auth_usecases.py` (use cases over a real SQLite file and a clock the test moves), `test_auth_http.py` (cookies, CSRF, roles, the contract), `test_hosts.py`, `test_origin.py`, `test_logs.py` (including a search of the log for every secret used), `test_persistence.py` (migrations, repositories), `test_storage.py` and `test_private_files.py` (modes and ownership), `test_hashing.py`, `test_seed.py`, `test_users_cli.py`, `test_real_server.py` (a real uvicorn over a socket), and for the circuit check `test_circuits_domain.py` (strict JSON, counting, caps), `test_circuits_lane.py` (the thread, the timeout, the adapter), `test_circuits_http.py` (the four routes, duplicate keys, refusals, caps, the contract) and `test_circuits_bridge.py` (every LaTeX source of `packages/quantum-sim/tests/fixtures/bridge/` sent through `/circuits/parse`, `/circuits/run` and `/circuits/check`, expecting what quantum-sim's `test_bridge.py` expects: the saved document, the refusals, the hand-written unitaries, the drawn identities and the three-wire QFT equal to the DFT), and for asking `test_ask_domain.py` (the reader of a formatted answer, the state of an ask), `test_lanes.py`, `test_ask_desk.py` (queue, limits, cancel, retention, failures, the log), `test_asks_http.py` and `test_documents_http.py` (the routes over the fake engine), `test_asks_real_server.py` (the stream over a real socket: phases arrive while the answer is made, keep-alive, a reader that hangs up), `test_asks_openapi.py`, `test_fake_ask.py` (the invented corpus is consistent), `test_docingest_ask.py` (the engine on a real `AskSession`, the paper reader on a real docingest store, the wording of failures), `test_ask_wiring.py` and `test_ask_edges.py`, and for the question sets `test_sets_domain.py` (rules, review states, filters), `test_sets_catalog.py`, `test_sets_files.py`, `test_sets_formats.py` (qa-bench adapter, every older shape), `test_sets_usecases.py` (use cases over a real database and real files, including parallel writers), `test_sets_http.py` (roles, `If-Match`, import, reviews and the race of a reviewer who read an old text, case-only names, many-member gzip, freeze, caps, the log) and `test_demo_sets.py`. The sets fixtures under `tests/fixtures/sets/` are made up. The async tests run with `helpers.arun` (no async pytest plugin is installed); the stream tests that must hold a question use `ask_helpers.ScriptedEngine`. HTTP tests use FastAPI's `TestClient` over the fake container. Password hashing uses a cheap Argon2id cost in tests (`cheap_hashing=True`); one test checks the real default cost. Helpers are in `tests/helpers.py`. Test dependencies come from the `dev` group; `TestClient` needs `httpx`.
+`tests/` holds one file per concern: `test_settings.py`, `test_container.py`, `test_status.py`, `test_http.py` (routes, problem details, the OpenAPI text), `test_guard.py` (the address rule), `test_cli.py` (serve, openapi), `test_contracts.py`, and for sign-in `test_auth_domain.py` (rules), `test_auth_usecases.py` (use cases over a real SQLite file and a clock the test moves), `test_auth_http.py` (cookies, CSRF, roles, the contract), `test_hosts.py`, `test_origin.py`, `test_logs.py` (including a search of the log for every secret used), `test_persistence.py` (migrations, repositories), `test_storage.py` and `test_private_files.py` (modes and ownership), `test_hashing.py`, `test_seed.py`, `test_users_cli.py`, `test_real_server.py` (a real uvicorn over a socket), and for the circuit check `test_circuits_domain.py` (strict JSON, counting, caps), `test_circuits_lane.py` (the thread, the timeout, the adapter), `test_circuits_http.py` (the four routes, duplicate keys, refusals, caps, the contract) and `test_circuits_bridge.py` (every LaTeX source of `packages/quantum-sim/tests/fixtures/bridge/` sent through `/circuits/parse`, `/circuits/run` and `/circuits/check`, expecting what quantum-sim's `test_bridge.py` expects: the saved document, the refusals, the hand-written unitaries, the drawn identities and the three-wire QFT equal to the DFT), and for asking `test_ask_domain.py` (the reader of a formatted answer, the state of an ask), `test_lanes.py`, `test_ask_desk.py` (queue, limits, cancel, retention, failures, the log), `test_asks_http.py` and `test_documents_http.py` (the routes over the fake engine), `test_asks_real_server.py` (the stream over a real socket: phases arrive while the answer is made, keep-alive, a reader that hangs up), `test_asks_openapi.py`, `test_fake_ask.py` (the invented corpus is consistent), `test_docingest_ask.py` (the engine on a real `AskSession`, the paper reader on a real docingest store, the wording of failures), `test_ask_wiring.py` and `test_ask_edges.py`; and for the question sets `test_sets_domain.py` (rules, review states, filters), `test_sets_catalog.py`, `test_sets_files.py`, `test_sets_formats.py` (qa-bench adapter, every older shape), `test_sets_usecases.py` (use cases over a real database and real files, including parallel writers), `test_sets_http.py` (roles, `If-Match`, import, reviews and the race of a reviewer who read an old text, case-only names, many-member gzip, freeze, caps, the log) and `test_demo_sets.py`. The sets fixtures under `tests/fixtures/sets/` are made up. For the benchmark: `test_jobs_domain.py` (every move of the state machine, ids, parameters), `test_runs_domain.py` (the lines of a run file against the `qa-run/1` schema, the R-281 prompt md5), `test_jobs_repo.py` (the job table, racing moves, recovery), `test_bench_files.py` (private files, half lines, log offsets, the run reader), `test_models_adapter.py` (the model servers over a fake transport), `test_arms.py`, `test_fake_bench.py`, `test_job_desk.py` and `test_job_desk_edges.py` (one run at a time, asks between questions, cancel, resume exactness, recovery, model servers that go away, scorings), `test_results.py` (runs dropped in by hand, files still growing), `test_bench_scores.py` (a score equals qa-bench's), `test_jobs_http.py`, `test_jobs_openapi.py`, `test_jobs_real_server.py` (progress over a real socket, an ask between two questions, a stop and a restart) and `test_bench_wiring.py`. `tests/bench_helpers.py` has `ScriptedArms`, whose questions a test holds and fails by hand. The async tests run with `helpers.arun` (no async pytest plugin is installed); the stream tests that must hold a question use `ask_helpers.ScriptedEngine`. HTTP tests use FastAPI's `TestClient` over the fake container. Password hashing uses a cheap Argon2id cost in tests (`cheap_hashing=True`); one test checks the real default cost. Helpers are in `tests/helpers.py`. Test dependencies come from the `dev` group; `TestClient` needs `httpx`.
 
 CI runs the package in the Linux lane (ruff, format, lint-imports, pytest) and the macOS lane (pyright, pytest), like the other packages.
