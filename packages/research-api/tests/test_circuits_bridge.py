@@ -14,14 +14,16 @@ from typing import Any
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from quantum_sim import check as quantum_check
 from quantum_sim import run as quantum_run
 
 FIXTURES = Path(__file__).resolve().parents[2] / "quantum-sim" / "tests" / "fixtures" / "bridge"
 SOURCES = sorted(FIXTURES.glob("*.tex"))
 NAMES = [source.stem for source in SOURCES]
 
-# What test_bridge.py expects to be refused: a postselection, a bundle or a row of dots, a circuit
-# the reader left partial, an angle that may be a function, a ket drawn after a gate, a brace sum.
+# Copied by hand from REFUSED in quantum-sim's test_bridge.py; keep the two in step. What that file
+# expects to be refused: a postselection, a bundle or a row of dots, a circuit the reader left
+# partial, an angle that may be a function, a ket drawn after a gate, a brace sum.
 REFUSED = {
     "bundle_quantikz",
     "dots_quantikz",
@@ -71,6 +73,13 @@ def parse(client: TestClient, name: str) -> dict[str, Any]:
     return body
 
 
+def parse_one(client: TestClient, name: str) -> dict[str, Any]:
+    circuits = parse(client, name)["circuits"]
+    assert len(circuits) == 1, f"{name} gives {len(circuits)} circuits, these checks take one"
+    document: dict[str, Any] = circuits[0]
+    return document
+
+
 @pytest.mark.parametrize("name", NAMES)
 def test_parse_gives_the_saved_document(client: TestClient, name: str) -> None:
     body = parse(client, name)
@@ -81,7 +90,7 @@ def test_parse_gives_the_saved_document(client: TestClient, name: str) -> None:
 
 @pytest.mark.parametrize("name", NAMES)
 def test_run_and_check_answer_as_the_simulator_expects(client: TestClient, name: str) -> None:
-    (document,) = parse(client, name)["circuits"]
+    document = parse_one(client, name)
     as_text = json.dumps(document)
     ran = client.post("/api/v1/circuits/run", json={"circuit_json": as_text})
     assert ran.status_code == 200
@@ -101,15 +110,28 @@ def test_run_and_check_answer_as_the_simulator_expects(client: TestClient, name:
 
 @pytest.mark.parametrize("name", NAMES)
 def test_the_api_result_is_the_simulators_result(client: TestClient, name: str) -> None:
-    (document,) = parse(client, name)["circuits"]
+    document = parse_one(client, name)
     ran = client.post("/api/v1/circuits/run", json={"circuit_json": json.dumps(document)})
     assert ran.json() == json.loads(json.dumps(quantum_run({"circuit": document})))
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_the_api_check_is_the_simulators_check(client: TestClient, name: str) -> None:
+    document = parse_one(client, name)
+    as_text = json.dumps(document)
+    body: dict[str, Any] = {"circuit_json": as_text}
+    direct: dict[str, Any] = {"circuit": document}
+    if len(document["parts"]) == 1:
+        body["target"] = {"circuit_json": as_text}
+        direct = {"a": document, "b": document}
+    checked = client.post("/api/v1/circuits/check", json=body)
+    assert checked.json() == json.loads(json.dumps(quantum_check(direct)))
 
 
 @pytest.mark.parametrize("kind", ["quantikz", "qcircuit"])
 @pytest.mark.parametrize("base", sorted(HAND_UNITARIES))
 def test_the_unitary_is_the_one_written_by_hand(client: TestClient, base: str, kind: str) -> None:
-    (document,) = parse(client, f"{base}_{kind}")["circuits"]
+    document = parse_one(client, f"{base}_{kind}")
     expected = HAND_UNITARIES[base]
     request = {"circuit_json": json.dumps(document), "target": {"unitary": expected.tolist()}}
     right = client.post("/api/v1/circuits/check", json=request).json()
@@ -121,7 +143,7 @@ def test_the_unitary_is_the_one_written_by_hand(client: TestClient, base: str, k
 
 def test_the_drawn_identities_are_equal(client: TestClient) -> None:
     for name in ("hzh_equals_x_quantikz", "cnot_from_cz_quantikz"):
-        (document,) = parse(client, name)["circuits"]
+        document = parse_one(client, name)
         body = client.post(
             "/api/v1/circuits/check", json={"circuit_json": json.dumps(document)}
         ).json()
@@ -130,7 +152,7 @@ def test_the_drawn_identities_are_equal(client: TestClient) -> None:
 
 
 def test_the_qft_is_the_dft(client: TestClient) -> None:
-    (document,) = parse(client, "qft3_quantikz")["circuits"]
+    document = parse_one(client, "qft3_quantikz")
     omega = np.exp(2j * np.pi / 8)
     dft = np.array([[omega ** (j * k) for k in range(8)] for j in range(8)]) / math.sqrt(8)
     matrix = [[[float(z.real), float(z.imag)] for z in row] for row in dft]
@@ -143,7 +165,7 @@ def test_the_qft_is_the_dft(client: TestClient) -> None:
 
 def test_a_bundle_is_refused_with_the_reason_and_a_postselection_too(client: TestClient) -> None:
     for name, reason in (("bundle_quantikz", "bundle m"), ("postselect_quantikz", "output legend")):
-        (document,) = parse(client, name)["circuits"]
+        document = parse_one(client, name)
         body = client.post(
             "/api/v1/circuits/run", json={"circuit_json": json.dumps(document)}
         ).json()
