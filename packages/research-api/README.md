@@ -51,7 +51,7 @@ No documentation pages and no schema URL are served (the stock pages load script
 uv run research-api openapi > openapi.json     # OpenAPI 3.1, keys sorted, same text every run and every hash seed
 ```
 
-The export is built in fake mode, so it needs no settings file. The web app will commit it and generate its TypeScript client from it, and CI will fail when the two drift.
+The export is built in fake mode, so it needs no settings file. The [web app](../../apps/web/README.md) commits it (`apps/web/src/api/openapi.json`) and generates its TypeScript client from it, and CI fails when the two drift: after a change to the API, run `uv run research-api openapi -o ../../apps/web/src/api/openapi.json` and then `pnpm gen:api` in `apps/web`.
 
 ### Errors
 
