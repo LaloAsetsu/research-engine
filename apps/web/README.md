@@ -2,7 +2,7 @@
 
 The browser front end of the research engine. It talks to [research-api](../../packages/research-api/README.md) and nothing else, and it runs on your own machines: no analytics, no third-party scripts, no hosted fonts.
 
-It has the build, the providers, sign-in and the forced password change, the layout with a status badge, light and dark themes, Spanish and English, the TypeScript client generated from the API's OpenAPI document, and the test and CI setup. The **Circuits** screen is built (see [Circuit check](#circuit-check)). The other three screens (Ask, Benchmarks, Question sets) are placeholders that later pull requests fill in.
+It has the build, the providers, sign-in and the forced password change, the layout with a status badge, light and dark themes, Spanish and English, the TypeScript client generated from the API's OpenAPI document, and the test and CI setup. The **Circuits** screen is built (see [Circuit check](#circuit-check)) and so is the **Ask** screen (see [The Ask screen](#the-ask-screen)). The other two screens (Benchmarks, Question sets) are placeholders that later pull requests fill in.
 
 ## Run it
 
@@ -40,6 +40,7 @@ The API does not serve sign-in yet, so in development `/login` finds no `/api/v1
 | `pnpm gen:api`                      | Regenerate `src/shared/api/schema.d.ts` from `src/api/openapi.json`                                                                                                                         |
 | `pnpm contract`                     | Fail when `openapi.json` or `schema.d.ts` differ from what the API and the generator produce now (needs uv)                                                                                 |
 | `pnpm capture:circuits`             | Record the circuit endpoints' answers from a running API as test fixtures (see [Circuit check](#circuit-check))                                                                             |
+| `pnpm capture:ask`                  | Record the API's answers for the Ask tests again (needs the API in fake mode on port 8091, see the script)                                                                                  |
 | `pnpm e2e`                          | Playwright tests against the built app and the API in fake mode                                                                                                                             |
 | `scripts/check.sh [--e2e]`          | All of the above except `e2e` unless asked; the repository's `scripts/check.sh` calls it when pnpm is on the PATH. `pnpm audit` is not part of it: it needs the network and runs in CI only |
 
@@ -84,11 +85,12 @@ The API passes `quantum-sim-result/1` and `circuit/1` through as open objects, s
 ```text
 src/
   app/            router, providers, layout, top bar, error and not-found screens
-  features/       one folder per screen: auth, status, ask, benchmarks, qsets, circuits (built)
+  features/       one folder per screen: auth, status, ask and circuits (built), benchmarks, qsets
   shared/
     api/          generated types, the client, ApiError
     i18n/         es.json, en.json, language detection
     layout/       page heading, placeholder page
+    markdown/     Markdown with math for answers and papers
     forms/        labelled text field
     lib/          storage, theme, class-name helper
     stores/       Zustand store for the client-only choices (theme, language)
@@ -105,6 +107,18 @@ The same rules as the API's import contracts, enforced by ESLint (`no-restricted
 - Components do not call `fetch`. Only the hooks in `features/*/api.ts` do, through the client.
 
 Server state lives in TanStack Query, client-only choices in Zustand; nothing the server owns goes into a store. Screens are lazy routes, so heavy libraries load only where they are used.
+
+## The Ask screen
+
+`/ask` (`src/features/ask`): a question box, the answer with its sources, and the papers it cites.
+
+- **Sending.** The button or Ctrl+Enter sends; a blank question cannot be sent. `POST /asks` answers `202` and the answer is followed on `GET /asks/{id}/events` with the browser's `EventSource`: queued (with the number of questions ahead), searching the papers, writing the answer, then the answer or an error. The steps are shown in order and announced to a screen reader. One question at a time per tab; it can be cancelled.
+- **The answer.** Markdown with LaTeX math (`src/shared/markdown`: react-markdown, remark-math, rehype-katex; raw HTML is dropped, only web addresses become links, no image is fetched). Each citation the answer prints, `(<16 hex> pages 3-4)`, is a button, and so is each chip under "Sources". The warnings of the engine, the timings and "Edit and ask again" are there too. "What the model read" lists the passages the answering model was given, collapsed until asked for.
+- **The paper.** A citation opens a side panel with the paper's title and the cited page as Markdown (`GET /documents/{id}/pages/{n}`), with next and previous page. A LaTeX source says "section N". Escape or the close button shuts it and focus returns to the citation.
+- **Options for one question.** A popover with the three things the API takes per question: search with the index or not, keyword matching (server setting, English, always, never) and completing a cut equation or table (server setting, yes, no). A choice left at "server setting" sends `null`, so the server's own configuration decides. The API does not report that configuration, so the screen cannot print the default values.
+- **The engine.** `GET /status` is read every 30 s (every 3 s while the engine starts). A starting engine closes the form with a notice; an engine that reports a problem shows its reason but still takes questions, because the cause may have been fixed. A failure during the ask (`503`, `502`, `422`, `429`) shows the server's message and a "Try again" that sends the same question with the same options.
+- **If the connection breaks.** The screen asks `GET /asks/{id}` where the question is: it takes the answer if it is done, opens the stream again if it is not, and says so when the service has forgotten the question (it keeps one for 30 minutes).
+- **History.** The last 10 questions of the tab, answers included, live in a Zustand store and nowhere else (no server history, no `localStorage`): the answers hold text of the papers. The store is emptied when the person signs out or the session ends (`src/shared/lib/session.ts`), and a question being answered goes on when the screen is left.
 
 ## Sessions and routes
 
@@ -130,11 +144,13 @@ Versions are exact in `package.json` (`@types/node` included) and locked in `pnp
 
 pnpm 12 runs no dependency build script unless it is allowed, and `onlyBuiltDependencies` is left unset on purpose: no package in the lock file declares an install script, so none can run code at install time.
 
+`react-markdown`, `remark-math`, `rehype-katex` and `katex` are the Markdown and math stack of the scope. `rehype-katex` 7 and `micromark-extension-math` ask for `katex` ^0.16, which has a published advisory (fixed in 0.18.2), so `pnpm-workspace.yaml` overrides it: all three use `katex` 0.19.0.
+
 New runtime dependencies need the lead's approval.
 
 ## Tests
 
-Vitest runs the unit and component tests next to the code (the circuit screen has most of them: strict JSON, value parsing, number formatting, the gate list, the answer guards, every panel and every problem) (`*.test.ts(x)`): the client and its middlewares, error mapping, the theme and language rules, the forms, the router guards, the whole app on an in-memory router (sign-in, forced change, sign-out, session ending under an open page, navigation, theme and language switches, the status badge) and the translation parity. Playwright runs the smoke test (`e2e/smoke.spec.ts`, sign-in answered by the mock), the real sign-in test (`e2e/real-api.spec.ts`) and the circuit screen's acceptance checks (`e2e/circuits.spec.ts`: C1 to C6 by hand, C7 as every LaTeX source of quantum-sim's bridge folder sent through the screen and compared with what the API says, the recorded answers, both themes, Spanish, a phone width, and 4 and 8 wire unitaries kept inside their cards at phone and desktop widths; it signs in against the real API first) in Chromium against the production bundle, with an axe scan (WCAG 2.2 A and AA) of the login and forced-change pages in light and in dark (each page loads in its scheme) and of the app layout, also after a theme switch. The scan first waits for running transitions to end, so it never reads a color halfway through a fade; the focus moves after signing in and out are checked too.
+Vitest runs the unit and component tests next to the code (the circuit screen has many of them: strict JSON, value parsing, number formatting, the gate list, the answer guards, every panel and every problem) (`*.test.ts(x)`): the client and its middlewares, error mapping, the theme and language rules, the forms, the router guards, the whole app on an in-memory router (sign-in, forced change, sign-out, session ending under an open page, navigation, theme and language switches, the status badge) and the translation parity. The Ask screen is tested on the real answers of the API: `pnpm capture:ask` records them (`src/features/ask/fixtures/captured.json`), MSW serves the papers and pages, and `src/test/event-source.ts` stands in for `EventSource` (jsdom has none) so a test plays the server's part event by event, including a connection that breaks. Playwright runs the smoke test (`e2e/smoke.spec.ts`, sign-in answered by the mock), the real sign-in test (`e2e/real-api.spec.ts`), the Ask tests (`e2e/ask.spec.ts`: phases, citations, the paper panel, options, failures, a broken stream, cancel, history, Spanish, a narrow screen, with axe scans in both themes) and the circuit screen's acceptance checks (`e2e/circuits.spec.ts`: C1 to C6 by hand, C7 as every LaTeX source of quantum-sim's bridge folder sent through the screen and compared with what the API says, the recorded answers, both themes, Spanish, a phone width, and 4 and 8 wire unitaries kept inside their cards at phone and desktop widths; it signs in against the real API first) in Chromium against the production bundle, with an axe scan (WCAG 2.2 A and AA) of the login and forced-change pages in light and in dark (each page loads in its scheme) and of the app layout, also after a theme switch. The scan first waits for running transitions to end, so it never reads a color halfway through a fade; the focus moves after signing in and out are checked too.
 
 ## CI
 
