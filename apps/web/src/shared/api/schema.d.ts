@@ -4,6 +4,86 @@
  */
 
 export interface paths {
+    "/api/v1/circuits/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compare a circuit with a state, a unitary or another circuit
+         * @description Whether the circuit equals the target up to global phase. With no target, the two sides of an equality drawn in the circuit are compared. Up to 12 wires against a state and 8 for every comparison that builds a unitary. The body is quantum-sim's `quantum-sim-result/1` document as it is: `status` (`ok`, `symbolic` or `refused`), `conventions`, `input`, `circuits`, `comparisons`, `notes` and `refused`. A circuit the simulator refuses is a 200 with `status: refused`.
+         */
+        post: operations["checkCircuit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/circuits/conventions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The conventions, the gate table and the limits of the simulator
+         * @description What `quantum-sim conventions` prints: the conventions every result states, the gate table and quantum-sim's own limits (the limits of this API are smaller and are named in its 422 answers).
+         */
+        get: operations["getCircuitConventions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/circuits/parse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read the circuits drawn in LaTeX
+         * @description Reads quantikz, Qcircuit, yquant and tikz-cd source with docingest and returns the gate list in words and each circuit as a `circuit/1` document.
+         */
+        post: operations["parseCircuit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/circuits/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Simulate a circuit
+         * @description The state and the outcome probabilities of a circuit, and its unitary on request. Up to 12 wires, or 8 with the unitary, and up to the configured number of operations; a bigger one is a 422 that points to the `quantum-sim` command. The body is quantum-sim's `quantum-sim-result/1` document as it is: `status` (`ok`, `symbolic` or `refused`), `conventions`, `input`, `circuits`, `comparisons`, `notes` and `refused`. A circuit the simulator refuses is a 200 with `status: refused`.
+         */
+        post: operations["runCircuit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -42,10 +122,82 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CheckRequest */
+        CheckRequest: {
+            /**
+             * Circuit Json
+             * @description A `circuit/1` document as JSON text. It is text, not an object, so that a key written twice is seen and refused (answer 400) instead of the last one winning.
+             */
+            circuit_json: string;
+            /**
+             * Input
+             * @description The input: a basis label such as `010` (wire 1 first) or a list of amplitudes, each a number or a `[re, im]` pair. Default |0...0>.
+             */
+            input?: string | unknown[] | null;
+            /** @description Leave it out to compare the two sides of an equality drawn in the circuit. Sending `null` is refused. */
+            target?: components["schemas"]["CheckTargetBody"];
+            /**
+             * Values
+             * @description A value for each symbol of the circuit, a number or an angle as text such as `\pi/2`.
+             */
+            values?: {
+                [key: string]: string | number;
+            } | null;
+        };
+        /**
+         * CheckTargetBody
+         * @description What to compare the circuit with. Give exactly one field.
+         */
+        CheckTargetBody: {
+            /**
+             * Circuit Json
+             * @description A second circuit, as JSON text (see the first `circuit_json`).
+             */
+            circuit_json?: string | null;
+            /**
+             * State
+             * @description A state: a basis label or a list of amplitudes of norm 1.
+             */
+            state?: string | unknown[] | null;
+            /**
+             * Unitary
+             * @description A unitary matrix: rows of numbers or `[re, im]` pairs.
+             */
+            unitary?: unknown[][] | null;
+        };
+        /** GateListResponse */
+        GateListResponse: {
+            /**
+             * Circuits
+             * @description Each circuit as a `circuit/1` document. To simulate one, send it as text in `circuit_json`.
+             */
+            circuits: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Status
+             * @description `parsed` when every circuit was fully read, `unparsed` when none was.
+             * @enum {string}
+             */
+            status: "parsed" | "partial" | "unparsed";
+            /**
+             * Text
+             * @description The gate list in words, as docingest gives it to the answer model.
+             */
+            text: string;
+        };
         /** Health */
         Health: {
             /** Ok */
             ok: boolean;
+        };
+        /** ParseRequest */
+        ParseRequest: {
+            /**
+             * Latex
+             * @description The body of one code block: a quantikz, Qcircuit, yquant or tikz-cd source.
+             */
+            latex: string;
         };
         /**
          * Problem
@@ -80,6 +232,32 @@ export interface components {
              */
             path: string;
         };
+        /** RunRequest */
+        RunRequest: {
+            /**
+             * Circuit Json
+             * @description A `circuit/1` document as JSON text. It is text, not an object, so that a key written twice is seen and refused (answer 400) instead of the last one winning.
+             */
+            circuit_json: string;
+            /**
+             * Input
+             * @description The input: a basis label such as `010` (wire 1 first) or a list of amplitudes, each a number or a `[re, im]` pair. Default |0...0>.
+             */
+            input?: string | unknown[] | null;
+            /**
+             * Unitary
+             * @description Also list the unitary (up to 8 wires). `true` or `false` only.
+             * @default false
+             */
+            unitary: boolean;
+            /**
+             * Values
+             * @description A value for each symbol of the circuit, a number or an angle as text such as `\pi/2`.
+             */
+            values?: {
+                [key: string]: string | number;
+            } | null;
+        };
         /** Status */
         Status: {
             /** Api Version */
@@ -109,6 +287,248 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    checkCircuit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The body is not valid JSON, or a JSON key is written twice (in the body or in a `circuit_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid, or the circuit is over the synchronous caps (wires, operations, time); `detail` points to the `quantum-sim` command. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Circuit jobs are all busy; see `Retry-After`. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getCircuitConventions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    parseCircuit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GateListResponse"];
+                };
+            };
+            /** @description The body is not valid JSON, or a JSON key is written twice (in the body or in a `circuit_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid, or the circuit is over the synchronous caps (wires, operations, time); `detail` points to the `quantum-sim` command. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Circuit jobs are all busy; see `Retry-After`. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    runCircuit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The body is not valid JSON, or a JSON key is written twice (in the body or in a `circuit_json`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid, or the circuit is over the synchronous caps (wires, operations, time); `detail` points to the `quantum-sim` command. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Circuit jobs are all busy; see `Retry-After`. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     getHealth: {
         parameters: {
             query?: never;
