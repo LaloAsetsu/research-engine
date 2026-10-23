@@ -12,6 +12,24 @@ port = 8090
 # http, 443 for https). Defaults to http://<bind_host>:<port>.
 public_origin = "http://127.0.0.1:8090"
 
+# Where the service keeps its files. Absolute paths; all three folders are made private (mode
+# 0700) if missing, and the service refuses to start when one of them, or the database file,
+# is readable by group or others. Needed to run for real; `--fake` ignores them.
+data_dir = "/path/to/research-api/data"
+db_path = "/path/to/research-api/db/research-api.sqlite3"
+# Optional. Without it the log lines go to standard error. With it: <log_dir>/api.log, mode
+# 0600, rotated at 10 MiB, five kept.
+# log_dir = "/path/to/research-api/logs"
+
+# Sessions end after this many hours without a request, or this many days after sign-in.
+session_idle_hours = 12
+session_max_days = 7
+
+# Failed sign-ins allowed per username in the window; one address gets four times as many.
+# Past that the answer is 429 with Retry-After.
+login_max_failures = 5
+login_window_minutes = 15
+
 # What the circuit check accepts. The check runs inside the API process, so these keep one
 # request small. A bigger circuit is a 422 that points to the `quantum-sim` command.
 [circuit_caps]
