@@ -71,6 +71,7 @@ def test_serve_fake_listens_on_loopback_without_an_access_log(served: list[dict[
     assert cli.main(["serve", "--fake"]) == 0
     (call,) = served
     assert (call["host"], call["port"], call["access_log"]) == ("127.0.0.1", 8090, False)
+    assert call["proxy_headers"] is False  # X-Forwarded-For would let a caller pick its address
 
 
 def live_config(tmp_path: Path, extra: str = "") -> Path:

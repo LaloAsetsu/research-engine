@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from ...bootstrap import Container, container_from_env
+from ..logs import configure_logging
 from .accesslog import AccessLog
 from .auth import admin_router
 from .auth import router as auth_router
@@ -69,5 +71,13 @@ def build_app(container: Container) -> FastAPI:
 
 
 def create_app() -> FastAPI:
-    """The no-argument factory: ``uvicorn research_api.entrypoints.http:create_app --factory``."""
-    return build_app(container_from_env())
+    """The no-argument factory: ``uvicorn research_api.entrypoints.http:create_app --factory``.
+
+    Sets up the service's log like ``research-api serve`` does, and silences uvicorn's own access
+    log, which would hold raw paths and query strings. uvicorn has set its logging up before it
+    calls this, so the logger is switched off here instead of in its options.
+    """
+    container = container_from_env()
+    configure_logging(None if container.mode == "fake" else container.settings.log_dir)
+    logging.getLogger("uvicorn.access").disabled = True
+    return build_app(container)

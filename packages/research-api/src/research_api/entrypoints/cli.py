@@ -234,6 +234,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         host=container.settings.bind_host,
         port=container.settings.port,
         access_log=False,
+        # Nothing sits in front of the service, so a forwarded address is a forged one.
+        proxy_headers=False,
     )
     return 0
 

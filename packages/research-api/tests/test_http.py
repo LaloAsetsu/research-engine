@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
+from helpers import live_settings, prepare_live
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
@@ -265,3 +267,35 @@ def test_the_factory_builds_the_app_from_the_environment(
 ) -> None:
     monkeypatch.setenv("RESEARCH_API_FAKE", "1")
     assert client_for(create_app()).get("/api/v1/health").json() == {"ok": True}
+
+
+def test_the_factory_sets_up_the_audit_log_and_silences_uvicorns_access_log(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], client_for: ClientFor
+) -> None:
+    access = logging.getLogger("uvicorn.access")
+    monkeypatch.setattr(access, "disabled", False)  # put back when the test ends
+    monkeypatch.setenv("RESEARCH_API_FAKE", "1")
+    client = client_for(create_app())
+    client.post("/api/v1/auth/login", json={"username": "ana", "password": "wrong-wrong-wrong"})
+    assert access.disabled
+    events = [json.loads(line)["event"] for line in capsys.readouterr().err.splitlines()]
+    assert "login.failure" in events
+
+
+def test_the_factory_writes_the_live_log_to_the_log_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, client_for: ClientFor
+) -> None:
+    settings = prepare_live(live_settings(tmp_path, log_dir=tmp_path / "logs"))
+    config = tmp_path / "live.toml"
+    config.write_text(
+        f'data_dir = "{settings.data_dir}"\ndb_path = "{settings.db_path}"\n'
+        f'log_dir = "{settings.log_dir}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(logging.getLogger("uvicorn.access"), "disabled", False)
+    monkeypatch.delenv("RESEARCH_API_FAKE", raising=False)
+    monkeypatch.setenv("RESEARCH_API_CONFIG", str(config))
+    client = client_for(create_app())
+    client.post("/api/v1/auth/login", json={"username": "ana", "password": "wrong-wrong-wrong"})
+    written = (tmp_path / "logs" / "api.log").read_text(encoding="utf-8")
+    assert '"event": "login.failure"' in written
