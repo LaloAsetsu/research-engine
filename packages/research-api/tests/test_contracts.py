@@ -294,6 +294,83 @@ CASES = {
         "from .. import bootstrap",
         set(),
     ),
+    "the ask domain imports docingest": (
+        "domain/ask.py",
+        "import docingest",
+        {PURE, PORTS_ONLY, DOCINGEST},
+    ),
+    "the document rules import httpx": ("domain/documents.py", "import httpx", {PURE, PORTS_ONLY}),
+    "the ask port imports docingest": (
+        "ports/ask.py",
+        "import docingest",
+        {PORTS_ONLY, DOCINGEST},
+    ),
+    "the document port imports sqlalchemy": (
+        "ports/documents.py",
+        "import sqlalchemy",
+        {PORTS_ONLY, SQL},
+    ),
+    "the ask use cases import fastapi": ("application/ask.py", "import fastapi", {PORTS_ONLY}),
+    "the lane imports docingest": (
+        "application/lanes.py",
+        "import docingest",
+        {PORTS_ONLY, DOCINGEST},
+    ),
+    "the document use cases import docingest": (
+        "application/documents.py",
+        "import docingest",
+        {PORTS_ONLY, DOCINGEST},
+    ),
+    "the ask use cases import the fake adapter": (
+        "application/ask.py",
+        "from ..adapters import fake",
+        {LAYERS, PROTECTED},
+    ),
+    "the fake adapter imports docingest": (
+        "adapters/fake/ask.py",
+        "import docingest",
+        {DOCINGEST},
+    ),
+    "the fake corpus imports quantum_sim": (
+        "adapters/fake/corpus.py",
+        "import quantum_sim",
+        {QUANTUM},
+    ),
+    "the fake adapter imports the docingest adapter": (
+        "adapters/fake/ask.py",
+        "from .. import docingest_ask",
+        {INDEPENDENT},
+    ),
+    "the docingest adapter imports the fake adapter": (
+        "adapters/docingest_ask/engine.py",
+        "from .. import fake",
+        {INDEPENDENT},
+    ),
+    "the paper reader imports sqlalchemy": (
+        "adapters/docingest_ask/documents.py",
+        "import sqlalchemy",
+        {SQL},
+    ),
+    "an ask route imports docingest itself": (
+        "entrypoints/http/asks.py",
+        "import docingest",
+        {DOCINGEST},
+    ),
+    "control: the docingest adapter imports its own modules and docingest": (
+        "adapters/docingest_ask/engine.py",
+        "import docingest.application.ask\nfrom . import errors",
+        set(),
+    ),
+    "control: the fake adapter imports the domain and the ports": (
+        "adapters/fake/ask.py",
+        "from ...domain import ask\nfrom ...ports import ask as ports",
+        set(),
+    ),
+    "control: the ask use cases import the domain and the ports": (
+        "application/ask.py",
+        "from ..domain import documents\nfrom ..ports import documents as ports",
+        set(),
+    ),
 }
 
 
