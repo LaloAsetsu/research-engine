@@ -134,7 +134,7 @@ A successful sign-in sets two cookies, `Path=/`, `SameSite=Strict`, `Secure` whe
 
 Every `POST`, `PUT`, `PATCH` and `DELETE` must carry the `re_csrf` value in `X-CSRF-Token` (compared in constant time with the one stored for the session) and an `Origin` header equal to `public_origin` (a missing or different one is a `403` before the request body is read). Reads never change state, so they need neither. Sign-in itself needs the `Origin` check, which keeps another site from signing a browser in as someone else. Behind both is `SameSite=Strict`.
 
-A session ends after `session_idle_hours` without a request, or `session_max_days` after sign-in. A new token is issued at sign-in and at every password change. The user is read again on every request, so disabling an account, changing a role or resetting a password takes effect at the next request. The last-use time is written at most once a minute.
+A session ends after `session_idle_hours` without a request, or `session_max_days` after sign-in. A new token is issued at sign-in and at every password change. The user is read again on every request, so disabling an account, changing a role or resetting a password takes effect at the next request. The last-use time is written at most once a minute. A `401` for a request that sent a `re_session` cookie that no longer works (expired, ended, unknown, or its account disabled) also deletes both cookies, so the browser stops sending them; a `401` for a request with no cookie, and a wrong sign-in, touch no cookie. Signing in from a browser that still holds a live session ends that session first, so no unused row stays until it expires.
 
 ### Rate limit
 

@@ -217,7 +217,11 @@ class SignIn:
         self._throttle = throttle
         self._policy = policy
 
-    def __call__(self, username: str, password: str, address: str) -> NewSession:
+    def __call__(
+        self, username: str, password: str, address: str, replacing: str | None = None
+    ) -> NewSession:
+        """Sign in. ``replacing`` is the session token the browser already holds, if any: that
+        session ends when the new one starts."""
         name = normalize_username(username)
         user = self._users.by_username(name)
         # The typed text is never logged or stored: it may be a password typed in the wrong box.
@@ -245,6 +249,10 @@ class SignIn:
         self._sessions.delete_idle_or_old(
             idle_before=now - self._policy.idle, created_before=now - self._policy.absolute
         )
+        if replacing:
+            old = self._sessions.by_token_hash(hash_token(replacing))
+            if old is not None:
+                self._sessions.delete(old.id)
         opened = _open_session(user, now)
         self._sessions.add(opened.session)
         audit(

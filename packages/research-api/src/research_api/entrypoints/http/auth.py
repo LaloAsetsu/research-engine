@@ -15,6 +15,7 @@ from .security import (
     admin,
     client_address,
     container_of,
+    forget_session_cookies,
     signed_in,
 )
 
@@ -96,9 +97,13 @@ def _no_content(container: Container, opened: NewSession | None = None) -> Respo
     },
 )
 def login(body: LoginRequest, request: Request) -> Response:
-    """Sets the `re_session` cookie (HttpOnly) and the `re_csrf` cookie. Answers `204`."""
+    """Sets the `re_session` cookie (HttpOnly) and the `re_csrf` cookie. Answers `204`.
+
+    A session the browser already held is ended, so signing in again leaves no old row behind."""
     container = container_of(request)
-    opened = container.auth.sign_in(body.username, body.password, client_address(request))
+    opened = container.auth.sign_in(
+        body.username, body.password, client_address(request), request.cookies.get(SESSION_COOKIE)
+    )
     return _no_content(container, opened)
 
 
@@ -115,11 +120,7 @@ def logout(request: Request, who: Annotated[Authenticated, Depends(signed_in)]) 
     container = container_of(request)
     container.auth.sign_out(who)
     response = _no_content(container)
-    secure = container.settings.origin.startswith("https://")
-    response.delete_cookie(
-        SESSION_COOKIE, path="/", secure=secure, httponly=True, samesite="strict"
-    )
-    response.delete_cookie(CSRF_COOKIE, path="/", secure=secure, httponly=False, samesite="strict")
+    forget_session_cookies(response, container)
     return response
 
 

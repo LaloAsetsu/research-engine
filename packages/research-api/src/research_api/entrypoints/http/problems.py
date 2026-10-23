@@ -27,6 +27,7 @@ from ...domain.errors import (
     UpstreamError,
 )
 from .schemas import Problem
+from .security import SessionLost, forget_session_cookies
 
 PROBLEM_MEDIA = "application/problem+json"
 PROBLEM_REF = "#/components/schemas/Problem"
@@ -103,7 +104,7 @@ async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
     retry_after = getattr(exc, "retry_after_s", None)
     if retry_after is not None:
         headers["Retry-After"] = str(retry_after)
-    return problem(
+    response = problem(
         request,
         status=status_of(exc),
         slug=exc.slug,
@@ -111,6 +112,9 @@ async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
         errors=getattr(exc, "errors", None),
         headers=headers or None,
     )
+    if isinstance(exc, SessionLost):
+        forget_session_cookies(response, request.app.state.container)
+    return response
 
 
 async def _on_validation_error(request: Request, exc: Exception) -> JSONResponse:

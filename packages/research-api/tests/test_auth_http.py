@@ -112,6 +112,71 @@ def test_the_cookies_are_secure_when_the_public_origin_is_https(
     assert all("secure" in c.lower() for c in done.headers.get_list("set-cookie"))
 
 
+def cleared(response: Any) -> set[str]:
+    """The cookies a response asks the browser to delete."""
+    found = set()
+    for line in response.headers.get_list("set-cookie"):
+        name, _, rest = line.partition("=")
+        if "max-age=0" in rest.lower() or "1970" in rest:
+            found.add(name)
+    return found
+
+
+def test_signing_in_again_ends_the_session_the_browser_already_held(
+    client: TestClient, container: Container
+) -> None:
+    sign_in(client, ANA)
+    old = client.cookies[SESSION_COOKIE]
+    sign_in(client, BETO)  # the same browser, another account
+    assert client.cookies[SESSION_COOKIE] != old
+    assert client.get("/api/v1/auth/me").json()["username"] == "beto"
+    other = client.__class__(client.app, base_url=LOOPBACK, cookies={SESSION_COOKIE: old})
+    assert other.get("/api/v1/auth/me").status_code == 401
+    assert len(container.auth.list_sessions._sessions.all()) == 1
+
+
+def test_a_failed_sign_in_keeps_the_session_the_browser_holds(client: TestClient) -> None:
+    sign_in(client, ANA)
+    assert client.post(LOGIN, json={**BETO, "password": "not-the-password-1"}).status_code == 401
+    assert client.get("/api/v1/auth/me").json()["username"] == "ana"
+
+
+@pytest.mark.parametrize("path", ["/api/v1/auth/me", "/api/v1/admin/sessions"])
+def test_a_cookie_that_no_longer_works_is_cleared_with_the_401(
+    client: TestClient, path: str
+) -> None:
+    client.cookies.set(SESSION_COOKIE, "x" * 43)
+    client.cookies.set(CSRF_COOKIE, "y" * 43)
+    response = client.get(path)
+    assert response.status_code == 401
+    assert cleared(response) == {SESSION_COOKIE, CSRF_COOKIE}
+    assert (
+        "httponly"
+        in next(
+            c for c in response.headers.get_list("set-cookie") if c.startswith(SESSION_COOKIE)
+        ).lower()
+    )
+
+
+def test_an_ended_session_is_cleared_too(client: TestClient) -> None:
+    sign_in(client, ANA)
+    write(client, "POST", "/api/v1/auth/logout")
+    client.cookies.set(SESSION_COOKIE, "x" * 43)  # the browser kept an old copy
+    assert cleared(client.get("/api/v1/auth/me")) == {SESSION_COOKIE, CSRF_COOKIE}
+
+
+def test_a_request_with_no_cookie_has_nothing_to_clear(client: TestClient) -> None:
+    response = client.get("/api/v1/auth/me")
+    assert response.status_code == 401
+    assert response.headers.get_list("set-cookie") == []
+
+
+def test_a_wrong_login_does_not_touch_cookies(client: TestClient) -> None:
+    response = client.post(LOGIN, json={**ANA, "password": "not-the-password-1"})
+    assert response.status_code == 401
+    assert response.headers.get_list("set-cookie") == []
+
+
 def test_a_wrong_password_and_an_unknown_user_look_the_same(client: TestClient) -> None:
     wrong = client.post(LOGIN, json={**ANA, "password": "not-the-password-1"})
     unknown = client.post(LOGIN, json={"username": "ghost", "password": "not-the-password-1"})

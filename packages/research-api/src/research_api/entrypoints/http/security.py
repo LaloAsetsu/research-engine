@@ -10,13 +10,13 @@ from __future__ import annotations
 import secrets
 from typing import Annotated
 
-from fastapi import Depends, Request, Security
+from fastapi import Depends, Request, Response, Security
 from fastapi.security import APIKeyCookie
 
 from ...application.auth import Authenticated
 from ...bootstrap import Container
 from ...domain.auth import Role
-from ...domain.errors import ForbiddenError
+from ...domain.errors import ForbiddenError, UnauthenticatedError
 
 SESSION_COOKIE = "re_session"
 CSRF_COOKIE = "re_csrf"
@@ -35,9 +35,22 @@ session_cookie = APIKeyCookie(
 )
 
 
+class SessionLost(UnauthenticatedError):
+    """A session cookie was sent and no longer works: the answer also clears both cookies."""
+
+
 def container_of(request: Request) -> Container:
     container: Container = request.app.state.container
     return container
+
+
+def forget_session_cookies(response: Response, container: Container) -> None:
+    """Ask the browser to drop both cookies (same attributes they were set with)."""
+    secure = container.settings.origin.startswith("https://")
+    response.delete_cookie(
+        SESSION_COOKIE, path="/", secure=secure, httponly=True, samesite="strict"
+    )
+    response.delete_cookie(CSRF_COOKIE, path="/", secure=secure, httponly=False, samesite="strict")
 
 
 def client_address(request: Request) -> str:
@@ -48,7 +61,12 @@ def signed_in(
     request: Request, token: Annotated[str | None, Security(session_cookie)] = None
 ) -> Authenticated:
     """The caller, even before the first password change (so they can change it or sign out)."""
-    who = container_of(request).auth.authenticate(token)
+    try:
+        who = container_of(request).auth.authenticate(token)
+    except UnauthenticatedError as e:
+        if token:  # the browser holds a dead session: tell it to let go, or it keeps sending it
+            raise SessionLost(e.detail) from None
+        raise
     if request.method not in SAFE_METHODS:
         sent = request.headers.get(CSRF_HEADER, "")
         # compare_digest takes ASCII text only; bytes keeps a stray character from being a 500
