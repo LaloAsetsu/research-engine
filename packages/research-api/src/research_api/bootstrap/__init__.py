@@ -1,6 +1,7 @@
 """Composition root: settings and the container that wires adapters to ports."""
 
 from .container import (
+    BenchServices,
     Container,
     UserAdmin,
     build_container,
@@ -11,6 +12,7 @@ from .settings import Settings, SettingsError, load_settings
 from .storage import load_private_settings, open_database
 
 __all__ = [
+    "BenchServices",
     "Container",
     "Settings",
     "SettingsError",

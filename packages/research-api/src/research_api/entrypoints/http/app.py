@@ -31,9 +31,11 @@ API_PREFIX = "/api/v1"
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     container: Container = app.state.container
     await container.asks.start()  # the GPU lane, and the engine warming up in the background
+    await container.bench.jobs.start()  # runs left by a stop are found, queued ones go on
     try:
         yield
     finally:
+        await container.bench.jobs.stop()
         await container.asks.stop()
         container.close()
 

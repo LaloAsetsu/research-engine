@@ -1,8 +1,9 @@
 """The lane: a queue that runs one job at a time.
 
-The GPU lane of the scope. Asks join it now; benchmark runs will join it later with a lower
-priority, so an ask goes before the next benchmark question. Jobs of the same priority run in the
-order they came. The lane lives in the event loop of the API process and needs no thread.
+The GPU lane of the scope: asks join it with the highest priority and every question of a
+benchmark run joins it with a lower one, so an ask goes before the next benchmark question. The
+CPU lane (scorings) is a second lane of the same kind. Jobs of the same priority run in the order
+they came. A lane lives in the event loop of the API process and needs no thread of its own.
 """
 
 from __future__ import annotations
@@ -31,8 +32,10 @@ class Ticket:
     position: int = field(default=-1)
 
 
-class GpuLane:
-    def __init__(self) -> None:
+class Lane:
+    def __init__(self, name: str = "gpu-lane") -> None:
+        self._name = name
+        self._finished: dict[int, int] = {}
         self._waiting: list[Ticket] = []
         self._running: Ticket | None = None
         self._seq = 0
@@ -48,6 +51,11 @@ class GpuLane:
     def busy(self) -> bool:
         return self._running is not None
 
+    def finished(self, priority: int) -> int:
+        """How many jobs of ``priority`` have ended since the lane was made (cancelled ones
+        that never ran are not counted)."""
+        return self._finished.get(priority, 0)
+
     def start(self) -> None:
         """Run the worker in the current event loop (again, if the loop it ran in is gone)."""
         loop = asyncio.get_running_loop()
@@ -55,7 +63,7 @@ class GpuLane:
             return
         self._loop, self._wake = loop, asyncio.Event()
         self._running = None
-        self._task = loop.create_task(self._worker(self._wake), name="gpu-lane")
+        self._task = loop.create_task(self._worker(self._wake), name=self._name)
         if self._waiting:
             self._wake.set()
 
@@ -121,6 +129,11 @@ class GpuLane:
                 # left out on purpose: it could hold a question.
                 log.error("a job of the lane raised", extra={"event": "lane.error"})
             finally:
+                self._finished[ticket.priority] = self._finished.get(ticket.priority, 0) + 1
                 ticket.work = ticket.on_position = None
                 self._running = None
                 self._tell()
+
+
+GpuLane = Lane
+"""The lane the model servers sit behind, under the name the ask path uses."""

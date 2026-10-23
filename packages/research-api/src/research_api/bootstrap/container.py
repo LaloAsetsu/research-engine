@@ -12,7 +12,7 @@ from datetime import timedelta
 from importlib.metadata import version
 from pathlib import Path
 
-from ..adapters.bench import QaBenchSetFormats
+from ..adapters.bench import QaBenchRunFormats, QaBenchScorer, QaBenchSetFormats
 from ..adapters.circuits import CircuitsAdapter
 from ..adapters.clock import SystemClock
 from ..adapters.docingest_ask import (
@@ -20,10 +20,12 @@ from ..adapters.docingest_ask import (
     OfflineDocumentReader,
     open_docingest,
 )
-from ..adapters.fake import FakeAskEngine, FakeDocumentReader, FixedClock
-from ..adapters.files import SetFileStore
+from ..adapters.fake import FakeArms, FakeAskEngine, FakeDocumentReader, FakeModelServer, FixedClock
+from ..adapters.files import BenchFileStore, SetFileStore
 from ..adapters.hashing import ArgonPasswordHasher
+from ..adapters.models import OpenAiModels
 from ..adapters.persistence import Database
+from ..application.arms import LiveArms
 from ..application.ask import AskDesk
 from ..application.auth import (
     Authenticate,
@@ -43,6 +45,9 @@ from ..application.circuits import (
     ShowCircuitConventions,
 )
 from ..application.documents import DocumentServices
+from ..application.jobs import RECHECK_S, JobDesk
+from ..application.lanes import Lane
+from ..application.results import RunsDesk, ScoresDesk
 from ..application.sets import SetServices, build_set_services
 from ..application.status import ReportStatus
 from ..domain.auth import LoginPolicy, SessionPolicy
@@ -51,6 +56,8 @@ from ..ports.ask import AskEngine
 from ..ports.auth import PasswordHasher
 from ..ports.clock import Clock
 from ..ports.documents import DocumentReader
+from ..ports.jobs import Arms
+from ..ports.models import ModelEntry, ModelServer
 from .demo_sets import seed_demo_sets
 from .seed import SeedUser, default_seed_users
 from .settings import Settings, SettingsError, is_loopback
@@ -61,6 +68,20 @@ FAKE_ENV = "RESEARCH_API_FAKE"
 FAKE_ASK_PAUSE_ENV = "RESEARCH_API_FAKE_ASK_PAUSE"
 DEFAULT_FAKE_ASK_PAUSE_S = 0.6
 MAX_FAKE_ASK_PAUSE_S = 10.0
+FAKE_BENCH_PAUSE_ENV = "RESEARCH_API_FAKE_BENCH_PAUSE"
+DEFAULT_FAKE_BENCH_PAUSE_S = 0.25
+MAX_FAKE_BENCH_PAUSE_S = 10.0
+
+
+@dataclass(frozen=True)
+class BenchServices:
+    """The benchmark: the job desk (runs and scorings), the readers of runs and scores, and the
+    model servers the runs may ask."""
+
+    jobs: JobDesk
+    runs: RunsDesk
+    scores: ScoresDesk
+    models: ModelServer
 
 
 @dataclass(frozen=True)
@@ -78,6 +99,7 @@ class Container:
     asks: AskDesk
     documents: DocumentServices
     sets: SetServices
+    bench: BenchServices
     close: Callable[[], None]
     """Release the database. Idempotent; the HTTP app calls it when it shuts down."""
 
@@ -161,6 +183,55 @@ def build_sets(database: Database, data_dir: Path, clock: Clock) -> SetServices:
     )
 
 
+def build_bench(
+    *,
+    database: Database,
+    data_dir: Path,
+    sets: SetServices,
+    arms: Arms,
+    models: ModelServer,
+    clock: Clock,
+    lane: Lane,
+    api_version: str,
+    recheck_s: float | None = None,
+) -> BenchServices:
+    files = BenchFileStore(data_dir)
+    formats = QaBenchRunFormats()
+    scorer = QaBenchScorer()
+    set_formats = QaBenchSetFormats()
+    return BenchServices(
+        jobs=JobDesk(
+            repo=database.jobs,
+            files=files,
+            formats=formats,
+            scorer=scorer,
+            sets=sets.manage,
+            set_formats=set_formats,
+            arms=arms,
+            models=models,
+            clock=clock,
+            gpu=lane,
+            runner=f"research-api {api_version}",
+            recheck_s=RECHECK_S if recheck_s is None else recheck_s,
+        ),
+        runs=RunsDesk(
+            files=files,
+            formats=formats,
+            repo=database.jobs,
+            sets=sets.manage,
+            set_formats=set_formats,
+        ),
+        scores=ScoresDesk(files=files, scorer=scorer, repo=database.jobs),
+        models=models,
+    )
+
+
+def _model_server(settings: Settings) -> ModelServer:
+    return OpenAiModels(
+        [ModelEntry(m.name, m.endpoint, m.label or m.name, m.revision) for m in settings.models]
+    )
+
+
 def build_container(
     settings: Settings,
     *,
@@ -171,6 +242,10 @@ def build_container(
     fake_ask_pause_s: float = 0.0,
     ask_engine: AskEngine | None = None,
     document_reader: DocumentReader | None = None,
+    fake_bench_pause_s: float = 0.0,
+    bench_arms: Arms | None = None,
+    model_server: ModelServer | None = None,
+    bench_recheck_s: float | None = None,
 ) -> Container:
     """Wire the service.
 
@@ -181,7 +256,9 @@ def build_container(
     replaces the time source (to cross a session or rate-limit window); nothing else changes.
     In fake mode ``fake_ask_pause_s`` is the time the stand-in engine takes between the phases of
     an ask (so a screen shows them), and ``ask_engine`` and ``document_reader`` replace the
-    stand-ins (tests).
+    stand-ins (tests). ``fake_bench_pause_s`` is the time a fake benchmark answer takes;
+    ``bench_arms``, ``model_server`` and ``bench_recheck_s`` (how often a run waiting for a model
+    server looks again) replace the stand-ins and the default for tests.
     """
     if fake and not is_loopback(settings.bind_host):
         raise SettingsError("fake mode serves test data and may only bind a loopback address")
@@ -224,6 +301,26 @@ def build_container(
     sets = build_sets(database, data_dir, clock)
     if fake:
         seed_demo_sets(sets)
+    models = model_server or (FakeModelServer() if fake else _model_server(settings))
+    arms: Arms
+    if bench_arms is not None:
+        arms = bench_arms
+    elif fake:
+        arms = FakeArms(pause_s=fake_bench_pause_s)
+    else:
+        arms = LiveArms(engine=engine, models=models)
+    asks = AskDesk(engine=engine, clock=ask_clock)
+    bench = build_bench(
+        database=database,
+        data_dir=data_dir,
+        sets=sets,
+        arms=arms,
+        models=models,
+        clock=ask_clock,
+        lane=asks.lane,
+        api_version=api_version,
+        recheck_s=bench_recheck_s,
+    )
     container = Container(
         mode=mode,
         settings=settings,
@@ -237,9 +334,10 @@ def build_container(
         check_circuit=CheckCircuit(engine=circuits, caps=caps),
         circuit_conventions=ShowCircuitConventions(engine=circuits),
         auth=auth,
-        asks=AskDesk(engine=engine, clock=ask_clock),
+        asks=asks,
         documents=DocumentServices(reader=reader),
         sets=sets,
+        bench=bench,
         close=cleanup,
     )
     # A process that exits without a clean shutdown still removes the fake database's folder.
@@ -247,17 +345,15 @@ def build_container(
     return container
 
 
-def _fake_pause(text: str | None) -> float:
+def _fake_pause(text: str | None, *, name: str, default: float, limit: float) -> float:
     if text is None:
-        return DEFAULT_FAKE_ASK_PAUSE_S
+        return default
     try:
         pause = float(text)
     except ValueError:
         pause = -1.0
-    if not 0 <= pause <= MAX_FAKE_ASK_PAUSE_S:
-        raise SettingsError(
-            f"{FAKE_ASK_PAUSE_ENV} must be a number from 0 to {MAX_FAKE_ASK_PAUSE_S:g}"
-        )
+    if not 0 <= pause <= limit:
+        raise SettingsError(f"{name} must be a number from 0 to {limit:g}")
     return pause
 
 
@@ -269,7 +365,18 @@ def container_from_env(environ: Mapping[str, str] | None = None) -> Container:
             Settings.defaults(),
             fake=True,
             seed=default_seed_users(),
-            fake_ask_pause_s=_fake_pause(env.get(FAKE_ASK_PAUSE_ENV)),
+            fake_ask_pause_s=_fake_pause(
+                env.get(FAKE_ASK_PAUSE_ENV),
+                name=FAKE_ASK_PAUSE_ENV,
+                default=DEFAULT_FAKE_ASK_PAUSE_S,
+                limit=MAX_FAKE_ASK_PAUSE_S,
+            ),
+            fake_bench_pause_s=_fake_pause(
+                env.get(FAKE_BENCH_PAUSE_ENV),
+                name=FAKE_BENCH_PAUSE_ENV,
+                default=DEFAULT_FAKE_BENCH_PAUSE_S,
+                limit=MAX_FAKE_BENCH_PAUSE_S,
+            ),
         )
     path = env.get(CONFIG_ENV)
     if not path:
