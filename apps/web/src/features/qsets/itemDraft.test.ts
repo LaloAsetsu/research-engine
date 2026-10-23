@@ -1,10 +1,12 @@
 import {
+  changedFields,
   changesBetween,
   describeValue,
   hasChanges,
   isCircuitForm,
   isMulti,
   keyFactsOf,
+  mergeItems,
   needsSearchRecord,
   needsSynthesis,
   newItemTemplate,
@@ -12,6 +14,7 @@ import {
   parseJson,
   sameValue,
   stable,
+  standing,
   tagsFromRows,
   tagsOf,
   text,
@@ -145,5 +148,100 @@ describe("small readers", () => {
       ]),
     ).toEqual({ a: "3", b: "2" });
     expect(tagsFromRows([["", ""]])).toBeUndefined();
+  });
+});
+
+describe("merging my edits onto the latest item", () => {
+  const base = { id: "A", question: "q", notes: "n", answer: "a", tags: { k: "v" } };
+
+  it("takes a field only they changed, and a field only I changed", () => {
+    const mine = { ...base, notes: "my notes" };
+    const latest = { ...base, question: "their question" };
+    const merge = mergeItems(base, mine, latest);
+    expect(merge.merged).toEqual({ ...base, question: "their question", notes: "my notes" });
+    expect(merge.fromLatest).toEqual(["question"]);
+    expect(merge.fromMine).toEqual(["notes"]);
+    expect(merge.conflicts).toEqual([]);
+  });
+
+  it("keeps my value and reports a field we both changed to different values", () => {
+    const merge = mergeItems(
+      base,
+      { ...base, question: "mine" },
+      { ...base, question: "theirs", notes: "also theirs" },
+    );
+    expect(merge.merged.question).toBe("mine");
+    expect(merge.merged.notes).toBe("also theirs");
+    expect(merge.conflicts).toEqual([{ field: "question", mine: "mine", theirs: "theirs" }]);
+    expect(merge.fromLatest).toEqual(["notes"]);
+  });
+
+  it("is not a conflict when we both made the same change", () => {
+    const merge = mergeItems(base, { ...base, notes: "same" }, { ...base, notes: "same" });
+    expect(merge.conflicts).toEqual([]);
+    expect(merge.fromLatest).toEqual([]);
+    expect(merge.fromMine).toEqual([]);
+    expect(merge.merged.notes).toBe("same");
+  });
+
+  it("follows a removal on either side", () => {
+    const withoutAnswer = { id: "A", question: "q", notes: "n", tags: { k: "v" } };
+    const theirRemoval = mergeItems(base, { ...base, notes: "mine" }, withoutAnswer);
+    expect("answer" in theirRemoval.merged).toBe(false);
+    expect(theirRemoval.merged.notes).toBe("mine");
+    expect(theirRemoval.fromLatest).toEqual(["answer"]);
+    const myRemoval = mergeItems(base, withoutAnswer, { ...base, notes: "theirs" });
+    expect("answer" in myRemoval.merged).toBe(false);
+    expect(myRemoval.merged.notes).toBe("theirs");
+    expect(myRemoval.fromMine).toEqual(["answer"]);
+  });
+
+  it("reports a field I removed and they changed, with my removal kept", () => {
+    const withoutAnswer = { id: "A", question: "q", notes: "n", tags: { k: "v" } };
+    const merge = mergeItems(base, withoutAnswer, { ...base, answer: "their answer" });
+    expect("answer" in merge.merged).toBe(false);
+    expect(merge.conflicts).toEqual([{ field: "answer", mine: undefined, theirs: "their answer" }]);
+  });
+
+  it("compares nested values by content, whatever the order of their keys", () => {
+    const merge = mergeItems(base, { ...base, tags: { k: "v", j: "w" } }, { ...base, notes: "x" });
+    expect(merge.conflicts).toEqual([]);
+    expect(merge.merged.tags).toEqual({ k: "v", j: "w" });
+    expect(merge.merged.notes).toBe("x");
+  });
+
+  it("names the fields that differ between two copies", () => {
+    expect(changedFields(base, { ...base, notes: "x", answer: undefined })).toContain("notes");
+    expect(changedFields(base, { id: "A", question: "q2" })).toEqual([
+      "answer",
+      "notes",
+      "question",
+      "tags",
+    ]);
+    expect(changedFields(base, base)).toEqual([]);
+  });
+});
+
+describe("how the editor stands against the server", () => {
+  const base = { id: "A", question: "q", notes: "n" };
+
+  it("is the same when nothing moved, or when there is nothing to compare", () => {
+    expect(standing(base, { ...base, notes: "mine" }, { ...base })).toBe("same");
+    expect(standing(base, base, null)).toBe("same");
+  });
+
+  it("adopts a server copy that is exactly what the editor shows", () => {
+    const draft = { ...base, notes: "mine" };
+    expect(standing(base, draft, { ...draft })).toBe("adopt");
+  });
+
+  it("rebuilds from the server when the person has changed nothing", () => {
+    expect(standing(base, { ...base }, { ...base, question: "theirs" })).toBe("rebuild");
+  });
+
+  it("is behind when the server moved and the person has edits", () => {
+    expect(standing(base, { ...base, notes: "mine" }, { ...base, question: "theirs" })).toBe(
+      "behind",
+    );
   });
 });

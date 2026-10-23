@@ -318,7 +318,7 @@
       "frozenNote": "Frozen: its items, reviews and md5 never change. Runs name it by its md5.",
       "fixed": "Cannot change",
       "export": "Export file",
-      "exported": "Saved {{filename}}. The file is the version as stored, byte for byte: its md5 is {{md5}}.",
+      "exported": "Saved {{filename}}. The server sends the version as stored, byte for byte, and names its md5 as {{md5}}.",
       "addItem": "Add item",
       "freeze": "Review the plan and freeze",
       "next": "Start the next version",
@@ -457,9 +457,31 @@
       "loadLatest": "Load the latest",
       "keepEdits": "Keep my edits",
       "kept": "The latest version was read. Your edits are kept; save again to apply them.",
+      "loaded": "The latest version was loaded. Your edits were dropped.",
       "decisionsTitle": "This item has review decisions",
       "decisionsBody": "People have already decided on this text, so it is fixed. Propose your change as an edit decision instead; it is applied when the version is frozen.",
-      "proposeInstead": "Propose these changes as an edit decision"
+      "proposeInstead": "Propose these changes as an edit decision",
+      "remoteTitle": "This item changed while you had it open",
+      "remoteBody": "Someone else changed {{fields}}. You had no edits, so the editor now shows the latest text. Read it before you save or decide.",
+      "dismiss": "Dismiss",
+      "behindTitle": "This item changed while you were editing",
+      "behindBody": "Someone else changed {{fields}}. Your edits are not lost, but nothing is saved or decided until you choose: merge your edits onto the latest version, or load the latest and drop them.",
+      "behindBoth": "You also changed {{fields}}. After a merge your value is kept for those, and you can take the other value.",
+      "merge": "Merge with my edits",
+      "loadLatestDrop": "Load the latest and drop my edits",
+      "mergedTitle": "Merged with the latest version",
+      "mergedLatest": "Taken from the latest version because you had not changed them: {{fields}}.",
+      "mergedConflicts": "You and someone else both changed these fields. Your value is in the editor.",
+      "conflictYours": "Yours (kept): {{value}}",
+      "conflictLatest": "Latest on the server: {{value}}",
+      "useLatest": "Use the latest",
+      "useLatestOf": "Use the latest value of {{field}}",
+      "cannotSwitch": "Fix it before you change the view: the text would be lost.",
+      "leaveTitle": "You have unsaved edits",
+      "leaveBody": "If you leave this page your edits are lost. Stay to save them, or leave and drop them.",
+      "leaveStay": "Stay and keep editing",
+      "leaveGo": "Leave and drop my edits",
+      "removedValue": "(removed)"
     },
     "review": {
       "title": "Review",
@@ -501,7 +523,9 @@
         "edited": "The latest decision is an edit proposed by {{by}}; freezing applies it.",
         "rejected": "The latest decision is a rejection by {{by}}; freezing removes this item."
       },
-      "unsavedNote": "Accept and reject are about the item as it is saved. Your unsaved changes only go with a proposed edit."
+      "unsavedNote": "Accept and reject are about the item as it is saved. Your unsaved changes only go with a proposed edit.",
+      "remoteChanged": "The text above changed while you had it open ({{fields}}). Check it before you decide.",
+      "waiting": "The item changed on the server and you have edits. Choose above how to go on; no decision can be sent until then."
     },
     "freeze": {
       "title": "Freeze {{name}} {{version}}",

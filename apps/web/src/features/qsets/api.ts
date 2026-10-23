@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, EXPECTS_UNAUTHORIZED, fetchClient } from "@/shared/api/client";
 import { PAGE_SIZE, type ItemFilters } from "./filters";
-import type { Item, NewReview } from "./types";
+import type { Item, ItemDetail, NewReview } from "./types";
 
 const SETS = "/api/v1/sets";
 const IMPORT = "/api/v1/sets/import";
@@ -38,6 +38,7 @@ export function useVersionPage(
   version: string,
   filters: ItemFilters,
   offset: number,
+  limit: number = PAGE_SIZE,
 ) {
   return $api.useQuery(
     "get",
@@ -45,7 +46,7 @@ export function useVersionPage(
     {
       params: {
         path: { name, version },
-        query: { ...filters, offset, limit: PAGE_SIZE },
+        query: { ...filters, offset, limit },
       },
     },
     {
@@ -143,7 +144,11 @@ export function useImportSet() {
   });
 }
 
-export function useSaveItem(ref: VersionRef) {
+/**
+ * The answer to the PUT replaces the cached item, and `onStored` sees it before the cached copies
+ * are read again, so no copy of the old text is left to be taken for a change by someone else.
+ */
+export function useSaveItem(ref: VersionRef, onStored?: (stored: ItemDetail | undefined) => void) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, item, etag }: { id: string; item: Item; etag: string }) => {
@@ -153,7 +158,17 @@ export function useSaveItem(ref: VersionRef) {
       });
       return data;
     },
-    onSuccess: () => invalidateSets(queryClient),
+    onSuccess: (stored, { id }) => {
+      // The answer is the item as stored, with the new etag: put it where the item screen reads from.
+      if (stored?.item) {
+        const key = $api.queryOptions("get", ITEM, {
+          params: { path: { ...ref, item_id: id } },
+        }).queryKey;
+        queryClient.setQueryData(key, stored);
+      }
+      onStored?.(stored);
+      return invalidateSets(queryClient);
+    },
   });
 }
 

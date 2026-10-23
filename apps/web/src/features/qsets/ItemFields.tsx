@@ -152,7 +152,13 @@ export function ItemFields({ draft, onChange, problems, idEditable, onProblem }:
   return (
     <div className="grid gap-4">
       {hidden.length > 0 ? (
-        <div role="group" aria-label={t("sets.editor.hiddenProblems")}>
+        <div
+          role="group"
+          aria-label={t("sets.editor.hiddenProblems")}
+          tabIndex={-1}
+          data-first-error
+          className="rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
           <p className="text-sm font-medium text-destructive">{t("sets.editor.hiddenProblems")}</p>
           <ProblemList problems={hidden} />
         </div>

@@ -37,6 +37,83 @@ export function hasChanges(changes: Changes): boolean {
   return Object.keys(changes.changed).length > 0 || changes.removed.length > 0;
 }
 
+/** The names of the fields that differ between two copies of an item, sorted. */
+export function changedFields(a: Item, b: Item): string[] {
+  const { changed, removed } = changesBetween(a, b);
+  return [...Object.keys(changed), ...removed].sort();
+}
+
+/** One field that the person and someone else both changed, to different values. */
+export interface FieldConflict {
+  field: string;
+  /** The value in the editor (kept). Undefined when the person removed the field. */
+  mine: unknown;
+  /** The value on the server. Undefined when the other change removed the field. */
+  theirs: unknown;
+}
+
+export interface Merge {
+  /** The base the person started from, with their edits put on top of the latest item. */
+  merged: Item;
+  /** Fields that came from the latest item because the person did not touch them. */
+  fromLatest: string[];
+  /** Fields only the person changed. */
+  fromMine: string[];
+  /** Fields both changed to different values: the person's value is in `merged`. */
+  conflicts: FieldConflict[];
+}
+
+function put(target: Item, key: string, source: Item) {
+  if (key in source) target[key] = source[key];
+  else delete target[key];
+}
+
+/**
+ * A three-way merge by top-level field. `base` is the item the editor was built from, `mine` the
+ * editor now and `latest` what the server holds. A field only one side changed takes that
+ * side's value; a field both changed to different values keeps the person's and is reported.
+ */
+export function mergeItems(base: Item, mine: Item, latest: Item): Merge {
+  const merged: Item = { ...latest };
+  const fromLatest: string[] = [];
+  const fromMine: string[] = [];
+  const conflicts: FieldConflict[] = [];
+  const keys = new Set([...Object.keys(base), ...Object.keys(mine), ...Object.keys(latest)]);
+  const same = (x: Item, y: Item, key: string) =>
+    key in x === key in y && (!(key in x) || sameValue(x[key], y[key]));
+  for (const key of [...keys].sort()) {
+    const mineChanged = !same(base, mine, key);
+    const theirsChanged = !same(base, latest, key);
+    if (!mineChanged) {
+      if (theirsChanged) fromLatest.push(key);
+      continue;
+    }
+    if (!theirsChanged || same(mine, latest, key)) {
+      put(merged, key, mine);
+      if (!same(mine, latest, key)) fromMine.push(key);
+      continue;
+    }
+    put(merged, key, mine);
+    conflicts.push({ field: key, mine: mine[key], theirs: latest[key] });
+  }
+  return { merged, fromLatest, fromMine, conflicts };
+}
+
+/**
+ * How the editor stands against the item the server holds now:
+ * - `same`: the server has the text the editor was built from;
+ * - `adopt`: the server has exactly what the editor shows (the person's own save, say);
+ * - `rebuild`: the server has other text and the person changed nothing, so the editor can show it;
+ * - `behind`: the server has other text and the person has edits that must not be lost.
+ */
+export type Standing = "same" | "adopt" | "rebuild" | "behind";
+
+export function standing(base: Item, draft: Item, latest: Item | null): Standing {
+  if (latest === null || sameValue(latest, base)) return "same";
+  if (sameValue(latest, draft)) return "adopt";
+  return hasChanges(changesBetween(base, draft)) ? "behind" : "rebuild";
+}
+
 /** Sets a field, or takes it out when the value is empty (an optional text left blank is absent). */
 export function withField(draft: Item, key: string, value: unknown): Item {
   const next = { ...draft };

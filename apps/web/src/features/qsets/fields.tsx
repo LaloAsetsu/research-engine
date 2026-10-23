@@ -6,6 +6,9 @@ import { Textarea } from "@/shared/ui/textarea";
 /** A button that removes or refuses something: outlined, because axe measures the tinted destructive variant below 4.5:1 on a light page. */
 export const DESTRUCTIVE = "border-destructive/40 text-destructive hover:text-destructive";
 
+/** A busy button stays focusable (`aria-disabled`, and its handler ignores clicks): a disabled one drops the focus to the page. */
+export const BUSY = "aria-disabled:pointer-events-none aria-disabled:opacity-50";
+
 export const SELECT_CLASS =
   "h-8 w-full rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive dark:bg-input/30";
 

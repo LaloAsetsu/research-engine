@@ -4,7 +4,7 @@ import { isApiError } from "@/shared/api/errors";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { useAddReview } from "./api";
-import { AreaField, DESTRUCTIVE } from "./fields";
+import { AreaField, BUSY, DESTRUCTIVE } from "./fields";
 import { describeValue, hasChanges, type Changes } from "./itemDraft";
 import { ProblemView } from "./ProblemView";
 import { ReviewBadge } from "./ReviewBadge";
@@ -16,11 +16,19 @@ interface Props {
   version: string;
   id: string;
   detail: ItemDetail;
+  /** The etag of the draft the text on screen belongs to: the decision is refused if the draft moved since. */
+  etag: string;
   username: string | undefined;
   /** What the editor changes against the item as stored: the content of an edit decision. */
   changes: Changes;
   /** Text in the editor that cannot be read yet: a decision would send something else. */
   blocked: string | null;
+  /** The server holds other text than the editor shows and the person has edits: nothing is decided until they choose. */
+  waiting: boolean;
+  /** Fields that changed on the server under the reviewer, until they have been dismissed or a decision is recorded. */
+  remoteFields: readonly string[];
+  /** Called when a decision has been recorded. */
+  onRecorded: () => void;
   /** Changes when the person asks to propose their edits as a decision: the note takes focus. */
   focusSignal: number;
 }
@@ -31,9 +39,13 @@ export function ReviewPanel({
   version,
   id,
   detail,
+  etag,
   username,
   changes,
   blocked,
+  waiting,
+  remoteFields,
+  onRecorded,
   focusSignal,
 }: Props) {
   const { t } = useTranslation();
@@ -53,6 +65,7 @@ export function ReviewPanel({
   const stateKey = review.state;
 
   function decide(verdict: Verdict) {
+    if (add.isPending || waiting) return;
     setRecorded(null);
     setReloaded(false);
     const clean = note.trim();
@@ -68,7 +81,7 @@ export function ReviewPanel({
     }
     add.mutate(
       {
-        etag: detail.version.etag,
+        etag,
         review: {
           item_id: id,
           verdict,
@@ -80,6 +93,7 @@ export function ReviewPanel({
         onSuccess: () => {
           setRecorded(verdict);
           setNote("");
+          onRecorded();
         },
         // A 409 means the draft moved while this item was open. The queries are read again
         // (the mutation invalidates them), the note stays, and the person decides again.
@@ -93,7 +107,7 @@ export function ReviewPanel({
 
   return (
     <div className="grid gap-4">
-      <div className="grid gap-1" aria-live="polite">
+      <div className="grid gap-1">
         <div className="flex flex-wrap items-center gap-2">
           <ReviewBadge state={stateKey} />
           <span className="text-sm">
@@ -109,6 +123,13 @@ export function ReviewPanel({
           </p>
         ) : null}
       </div>
+
+      {remoteFields.length > 0 ? (
+        <p className="text-sm font-medium">
+          {t("sets.review.remoteChanged", { fields: remoteFields.join(", ") })}
+        </p>
+      ) : null}
+      {waiting ? <p className="text-sm text-destructive">{t("sets.review.waiting")}</p> : null}
 
       <AreaField
         label={t("sets.review.note")}
@@ -147,21 +168,29 @@ export function ReviewPanel({
       {blockedMessage ? <p className="text-sm text-destructive">{blockedMessage}</p> : null}
 
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => decide("accept")} disabled={add.isPending || blocked !== null}>
+        <Button
+          onClick={() => decide("accept")}
+          disabled={blocked !== null || waiting}
+          aria-disabled={add.isPending || undefined}
+          className={BUSY}
+        >
           {t("sets.review.accept")}
         </Button>
         <Button
           variant="outline"
           onClick={() => decide("edit")}
-          disabled={add.isPending || blocked !== null}
+          disabled={blocked !== null || waiting}
+          aria-disabled={add.isPending || undefined}
+          className={BUSY}
         >
           {t("sets.review.edit")}
         </Button>
         <Button
           variant="outline"
-          className={DESTRUCTIVE}
+          className={`${DESTRUCTIVE} ${BUSY}`}
           onClick={() => decide("reject")}
-          disabled={add.isPending || blocked !== null}
+          disabled={blocked !== null || waiting}
+          aria-disabled={add.isPending || undefined}
         >
           {t("sets.review.reject")}
         </Button>

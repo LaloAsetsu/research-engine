@@ -318,7 +318,7 @@
       "frozenNote": "Congelada: sus elementos, revisiones y md5 no cambian nunca. Las ejecuciones la nombran por su md5.",
       "fixed": "No puede cambiar",
       "export": "Exportar archivo",
-      "exported": "Se guardó {{filename}}. El archivo es la versión tal como está guardada, byte por byte: su md5 es {{md5}}.",
+      "exported": "Se guardó {{filename}}. El servidor envía la versión tal como está guardada, byte por byte, y da su md5 como {{md5}}.",
       "addItem": "Añadir elemento",
       "freeze": "Revisar el plan y congelar",
       "next": "Empezar la siguiente versión",
@@ -457,9 +457,31 @@
       "loadLatest": "Cargar la última",
       "keepEdits": "Conservar mis cambios",
       "kept": "Se leyó la última versión. Tus cambios se conservan; guarda de nuevo para aplicarlos.",
+      "loaded": "Se cargó la última versión. Tus cambios se descartaron.",
       "decisionsTitle": "Este elemento tiene decisiones de revisión",
       "decisionsBody": "Ya hay decisiones sobre este texto, así que es fijo. Propón tu cambio como una decisión de edición; se aplica cuando se congela la versión.",
-      "proposeInstead": "Proponer estos cambios como decisión de edición"
+      "proposeInstead": "Proponer estos cambios como decisión de edición",
+      "remoteTitle": "Este elemento cambió mientras lo tenías abierto",
+      "remoteBody": "Otra persona cambió {{fields}}. No tenías cambios, así que el editor muestra ahora el texto más reciente. Léelo antes de guardar o decidir.",
+      "dismiss": "Descartar aviso",
+      "behindTitle": "Este elemento cambió mientras lo editabas",
+      "behindBody": "Otra persona cambió {{fields}}. Tus cambios no se pierden, pero no se guarda ni se decide nada hasta que elijas: combinar tus cambios sobre la última versión, o cargar la última y descartarlos.",
+      "behindBoth": "Tú también cambiaste {{fields}}. Tras combinar se conserva tu valor en esos campos y puedes tomar el otro valor.",
+      "merge": "Combinar con mis cambios",
+      "loadLatestDrop": "Cargar la última y descartar mis cambios",
+      "mergedTitle": "Combinado con la última versión",
+      "mergedLatest": "Tomados de la última versión porque no los habías cambiado: {{fields}}.",
+      "mergedConflicts": "Tú y otra persona cambiasteis estos campos. Tu valor está en el editor.",
+      "conflictYours": "Tuyo (conservado): {{value}}",
+      "conflictLatest": "Último en el servidor: {{value}}",
+      "useLatest": "Usar el último",
+      "useLatestOf": "Usar el último valor de {{field}}",
+      "cannotSwitch": "Corrígelo antes de cambiar de vista: el texto se perdería.",
+      "leaveTitle": "Tienes cambios sin guardar",
+      "leaveBody": "Si sales de esta página pierdes tus cambios. Quédate para guardarlos, o sal y descártalos.",
+      "leaveStay": "Quedarme y seguir editando",
+      "leaveGo": "Salir y descartar mis cambios",
+      "removedValue": "(quitado)"
     },
     "review": {
       "title": "Revisión",
@@ -501,7 +523,9 @@
         "edited": "La última decisión es una edición propuesta por {{by}}; al congelar se aplica.",
         "rejected": "La última decisión es un rechazo de {{by}}; al congelar se quita este elemento."
       },
-      "unsavedNote": "Aceptar y rechazar se refieren al elemento tal como está guardado. Tus cambios sin guardar solo van con una edición propuesta."
+      "unsavedNote": "Aceptar y rechazar se refieren al elemento tal como está guardado. Tus cambios sin guardar solo van con una edición propuesta.",
+      "remoteChanged": "El texto de arriba cambió mientras lo tenías abierto ({{fields}}). Revísalo antes de decidir.",
+      "waiting": "El elemento cambió en el servidor y tienes cambios. Elige arriba cómo seguir; hasta entonces no se puede enviar ninguna decisión."
     },
     "freeze": {
       "title": "Congelar {{name}} {{version}}",

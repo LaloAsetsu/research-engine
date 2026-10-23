@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 import { PageHeader } from "@/shared/layout/PageHeader";
@@ -7,7 +6,7 @@ import { Button } from "@/shared/ui/button";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { useItemDetail, useMe, useVersionPage } from "./api";
 import { newItemTemplate, text } from "./itemDraft";
-import { ItemWorkspace } from "./ItemWorkspace";
+import { ItemWorkspace, type Fresh } from "./ItemWorkspace";
 import { ProblemView } from "./ProblemView";
 import { ReviewBadge, StatusBadge } from "./ReviewBadge";
 import { ReviewHistory } from "./ReviewHistory";
@@ -88,7 +87,6 @@ export function ItemPage() {
   const { name = "", version = "", id = "" } = useParams();
   const detail = useItemDetail(name, version, id);
   const me = useMe();
-  const [resetKey, setResetKey] = useState(0);
 
   if (detail.isPending) {
     return (
@@ -98,7 +96,9 @@ export function ItemPage() {
       </>
     );
   }
-  if (detail.isError) {
+  // A read that fails while the item is on screen must not take the editor away: the edits in it
+  // are not saved anywhere else. Its error is shown above the editor instead.
+  if (detail.isError && detail.data === undefined) {
     return (
       <>
         <PageHeader title={id} />
@@ -132,24 +132,27 @@ export function ItemPage() {
         </div>
       </PageHeader>
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+        {detail.isError ? <ProblemView error={detail.error} /> : null}
         {frozen ? (
           <FrozenItem detail={data} language={i18n.language} />
         ) : (
           <ItemWorkspace
-            key={resetKey}
             name={name}
             version={version}
             detail={data}
-            base={{ etag: data.version.etag, corpus: data.version.corpus }}
+            readAt={detail.dataUpdatedAt}
+            draftVersion={{ etag: data.version.etag, corpus: data.version.corpus }}
             initial={data.item}
             me={me.data}
             mayEdit={mayEdit}
             owner={data.version.owner}
             language={i18n.language}
-            onReload={() => {
-              void detail.refetch().then(() => setResetKey((key) => key + 1));
+            onRefresh={async (): Promise<Fresh | null> => {
+              const read = await detail.refetch();
+              return read.isError || !read.data
+                ? null
+                : { item: read.data.item, etag: read.data.version.etag, at: read.dataUpdatedAt };
             }}
-            onRefresh={() => detail.refetch()}
           />
         )}
       </div>
@@ -160,7 +163,8 @@ export function ItemPage() {
 export function NewItemPage() {
   const { t, i18n } = useTranslation();
   const { name = "", version = "" } = useParams();
-  const page = useVersionPage(name, version, {}, 0);
+  // One item is enough: only the draft's etag and corpus are read from this page.
+  const page = useVersionPage(name, version, {}, 0, 1);
   const me = useMe();
   const title = t("sets.editor.newTitle");
 
@@ -196,14 +200,19 @@ export function NewItemPage() {
             name={name}
             version={version}
             detail={null}
-            base={{ etag: current.etag, corpus: current.corpus }}
+            readAt={0}
+            draftVersion={{ etag: current.etag, corpus: current.corpus }}
             initial={newItemTemplate(current.corpus)}
             me={me.data}
             mayEdit
             owner={current.owner}
             language={i18n.language}
-            onReload={() => undefined}
-            onRefresh={() => page.refetch()}
+            onRefresh={async (): Promise<Fresh | null> => {
+              const read = await page.refetch();
+              return read.isError || !read.data
+                ? null
+                : { item: null, etag: read.data.version.etag, at: read.dataUpdatedAt };
+            }}
           />
         ) : (
           <p className="text-muted-foreground">

@@ -17,6 +17,8 @@ interface Props {
   hint?: string | undefined;
   /** Say whether a parsed value can be used (an object for the whole item, say). */
   accept?: ((value: unknown) => string | null) | undefined;
+  /** Print each problem with its whole pointer: the box holds the whole item, not one field of it. */
+  wholeItem?: boolean | undefined;
 }
 
 /**
@@ -33,6 +35,7 @@ export function JsonField({
   problems,
   hint,
   accept,
+  wholeItem,
 }: Props) {
   const { t } = useTranslation();
   const id = useId();
@@ -68,8 +71,8 @@ export function JsonField({
   }
 
   const messages = (problems ?? []).map((problem) => {
-    const inner = innerPath(problem.path);
-    return inner ? `${inner}: ${problem.message}` : problem.message;
+    const place = wholeItem ? problem.path : innerPath(problem.path);
+    return place ? `${place}: ${problem.message}` : problem.message;
   });
   const errors = parseError ? [parseError, ...messages] : messages;
   const hintId = `${id}-hint`;
