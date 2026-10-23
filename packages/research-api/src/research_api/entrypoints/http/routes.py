@@ -32,4 +32,6 @@ def health() -> Health:
 def status(request: Request) -> Status:
     """For signed-in members only: it shows when someone is asking."""
     container = _container(request)
-    return Status.from_domain(container.report_status(), container.asks.status())
+    return Status.from_domain(
+        container.report_status(), container.asks.status(), container.bench.jobs.status()
+    )

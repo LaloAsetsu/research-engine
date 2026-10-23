@@ -78,6 +78,7 @@ ignore = [
 "tests/**" = ["PLR0913", "PT018", "E501"]
 # FastAPI fills route parameters by name, never by position
 "src/research_api/entrypoints/http/sets.py" = ["PLR0917"]
+"src/research_api/entrypoints/http/jobs.py" = ["PLR0917"]
 
 [tool.pyright]
 include = ["src"]

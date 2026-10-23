@@ -121,7 +121,7 @@ def test_a_docingest_file_that_works_builds_the_real_adapters_without_opening_th
 
 def test_the_command_line_sets_the_pause_of_the_fake_engine() -> None:
     default = cli._container_for(None, True, None, None)
-    slow = cli._container_for(None, True, None, None, 1.5)
+    slow = cli._container_for(None, True, None, None, ask_pause=1.5)
     try:
         assert default.asks.engine._pause_s == DEFAULT_FAKE_ASK_PAUSE_S  # type: ignore[attr-defined]
         assert slow.asks.engine._pause_s == 1.5  # type: ignore[attr-defined]
@@ -133,7 +133,7 @@ def test_the_command_line_sets_the_pause_of_the_fake_engine() -> None:
 @pytest.mark.parametrize("pause", [-1.0, MAX_FAKE_ASK_PAUSE_S + 1, float("nan"), float("inf")])
 def test_a_pause_out_of_range_is_refused(pause: float) -> None:
     with pytest.raises(SettingsError, match="ask-pause"):
-        cli._container_for(None, True, None, None, pause)
+        cli._container_for(None, True, None, None, ask_pause=pause)
 
 
 def test_serve_fake_with_a_bad_pause_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
@@ -145,7 +145,7 @@ def test_a_pause_means_nothing_without_fake(capsys: pytest.CaptureFixture[str]) 
     assert cli.main(["serve", "--ask-pause", "1"]) == 1
     assert "--ask-pause only works with --fake" in capsys.readouterr().err
     with pytest.raises(SettingsError, match="--ask-pause only works with --fake"):
-        cli._container_for(None, False, None, None, 0.0)
+        cli._container_for(None, False, None, None, ask_pause=0.0)
 
 
 def test_fake_mode_forgets_old_asks_by_the_real_time_not_its_fixed_clock() -> None:
