@@ -30,7 +30,7 @@ export function Section({
             <p className="max-w-prose text-sm text-muted-foreground">{description}</p>
           ) : null}
         </CardHeader>
-        <CardContent className="grid gap-4">{children}</CardContent>
+        <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">{children}</CardContent>
       </Card>
     </section>
   );

@@ -164,7 +164,13 @@
       "unreadBody": "These parts of the drawing were not understood, so the circuit cannot be simulated until they are removed or rewritten.",
       "unreadItem": "Step {{step}}, wire {{wires}}:",
       "nothing": "There is no circuit to show.",
-      "words": "Gate list in words"
+      "words": "Gate list in words",
+      "live": "Reading finished: {{status}}. Circuits found: {{found}}.",
+      "liveStatus": {
+        "parsed": "every part understood",
+        "partial": "some parts not understood",
+        "unparsed": "no circuit found"
+      }
     },
     "kinds": {
       "cnot": "(CNOT)",
@@ -250,7 +256,8 @@
       "probabilitiesTitle": "Outcome probabilities of wires {{wires}}",
       "showing": "Showing {{shown}} of {{total}}",
       "more": "Show more",
-      "showZeros": "Show the {{count}} zero rows",
+      "showZeros_one": "Show the zero row",
+      "showZeros_other": "Show the {{count}} zero rows",
       "hideZeros": "Hide the zero rows",
       "measured": "Measured wires: {{wires}}",
       "unitaryCaption": "Unitary, {{size}} by {{size}}",
@@ -258,7 +265,13 @@
       "corner": "Showing the top left {{shown}} by {{shown}} of {{size}} by {{size}}.",
       "downloadUnitary": "Download the unitary (JSON)",
       "notes": "Notes",
-      "seeConventions": "See the conventions and the gate table"
+      "seeConventions": "See the conventions and the gate table",
+      "live": {
+        "run": "Simulation finished.",
+        "equal": "Check finished: equal up to global phase.",
+        "notEqual": "Check finished: not equal.",
+        "check": "Check finished."
+      }
     },
     "conventions": {
       "title": "Conventions",
@@ -292,7 +305,7 @@
     "problem": {
       "badRequest": "The server refused the text",
       "tooLarge": "The request is too large",
-      "tooBig": "This circuit is too big for the screen",
+      "unprocessable": "The circuit could not be processed",
       "busy": "The circuit service is busy",
       "notAllowed": "You are not allowed to do this",
       "failed": "The request failed",

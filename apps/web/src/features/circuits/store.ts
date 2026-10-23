@@ -27,11 +27,21 @@ export type Problem =
   | { kind: "local"; code: LocalCode; params: Record<string, string | number> };
 
 export interface Outcome {
+  /** Different for every answer, so a view can start fresh when a new answer arrives. */
+  serial: number;
   command: "run" | "check";
   result: SimulatorResult;
   /** The index of the circuit that was sent, in the reading. */
   circuit: number;
   target: TargetKind | null;
+}
+
+let outcomeSerial = 0;
+
+/** An outcome with its own serial number. */
+export function makeOutcome(outcome: Omit<Outcome, "serial">): Outcome {
+  outcomeSerial += 1;
+  return { serial: outcomeSerial, ...outcome };
 }
 
 export interface CircuitState {

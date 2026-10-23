@@ -73,7 +73,10 @@ export function ConventionsCard() {
           {t("circuits.conventions.limits", {
             statevector: limits.statevector_wires ?? "?",
             unitary: limits.unitary_wires ?? "?",
-            ops: new Intl.NumberFormat(i18n.language).format(limits.ops ?? 0),
+            ops:
+              limits.ops === undefined
+                ? "?"
+                : new Intl.NumberFormat(i18n.language).format(limits.ops),
           })}
         </p>
       ) : null}
@@ -83,7 +86,10 @@ export function ConventionsCard() {
           {t("circuits.conventions.gateTable", { count: query.data?.gates.length ?? 0 })}
         </summary>
         {query.data ? (
-          <Table data-testid="gate-table-reference">
+          <Table
+            data-testid="gate-table-reference"
+            scrollLabel={t("circuits.conventions.gateTableCaption")}
+          >
             <TableCaption>{t("circuits.conventions.gateTableCaption")}</TableCaption>
             <TableHeader>
               <TableRow>

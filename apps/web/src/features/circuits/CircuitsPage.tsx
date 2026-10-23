@@ -6,6 +6,7 @@ import { CheckPanel } from "./CheckPanel";
 import { ConventionsCard } from "./ConventionsCard";
 import { createFlows } from "./flows";
 import { InputPanel } from "./InputPanel";
+import { LiveStatus } from "./LiveStatus";
 import { OutcomeView } from "./OutcomeView";
 import { CurrentProblem } from "./ProblemView";
 import { ReadingView } from "./ReadingView";
@@ -20,11 +21,12 @@ export function CircuitsPage() {
       <PageHeader title={t("pages.circuits.title")}>
         <p className="max-w-prose text-muted-foreground">{t("circuits.intro")}</p>
       </PageHeader>
-      <div className="grid gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
+        <LiveStatus />
         <InputPanel flows={flows} />
         <CurrentProblem />
         <ReadingView />
-        <div className="grid items-start gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
           <RunPanel flows={flows} />
           <CheckPanel flows={flows} />
         </div>

@@ -13,7 +13,7 @@ function apiTitle(status: number, t: Translate): string {
     case 413:
       return t("circuits.problem.tooLarge");
     case 422:
-      return t("circuits.problem.tooBig");
+      return t("circuits.problem.unprocessable");
     case 503:
       return t("circuits.problem.busy");
     case 401:

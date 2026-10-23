@@ -5,6 +5,7 @@ import { parseStateInput, parseUnitaryInput, parseValues } from "./values";
 import { readStrictJson } from "./strictJson";
 import {
   currentText,
+  makeOutcome,
   useCircuitStore,
   type Busy,
   type LocalCode,
@@ -95,7 +96,7 @@ export function createFlows(calls: CircuitCalls) {
     } catch (error) {
       if (store.getState()[watch] === revision) store.setState({ problem: toProblem(error) });
     } finally {
-      // A later input may already have started its own work; only the owner of the flag clears it.
+      // Nothing else starts while the flag is set (see the first lines), so the flag is always ours.
       store.setState({ busy: null });
     }
   }
@@ -147,7 +148,7 @@ export function createFlows(calls: CircuitCalls) {
       () => calls.run({ circuitJson: circuit.value, unitary, ...options.value }),
       (result) =>
         useCircuitStore.setState({
-          outcome: { command: "run", result, circuit: selected, target: null },
+          outcome: makeOutcome({ command: "run", result, circuit: selected, target: null }),
         }),
     );
   }
@@ -198,12 +199,12 @@ export function createFlows(calls: CircuitCalls) {
         if ("problem" in outcome) useCircuitStore.setState({ problem: outcome.problem });
         else
           useCircuitStore.setState({
-            outcome: {
+            outcome: makeOutcome({
               command: "check",
               result: outcome.result,
               circuit: selected,
               target: targetKind,
-            },
+            }),
           });
       },
     );

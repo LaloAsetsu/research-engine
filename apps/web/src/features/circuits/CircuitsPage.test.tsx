@@ -455,9 +455,7 @@ describe("the circuit check screen", () => {
       await paste(user, screen.getByLabelText("circuit/1 document as JSON"), request.circuit_json);
       await user.click(screen.getByRole("button", { name: "Simulate" }));
       const problem = await screen.findByTestId("problem");
-      expect(
-        within(problem).getByText("This circuit is too big for the screen"),
-      ).toBeInTheDocument();
+      expect(within(problem).getByText("The circuit could not be processed")).toBeInTheDocument();
       expect(within(problem).getByText(/this check takes at most 12/)).toBeInTheDocument();
     });
 
@@ -509,6 +507,93 @@ describe("the circuit check screen", () => {
     });
   });
 
+  describe("what a screen reader hears and what the layout does", () => {
+    it("announces a reading and a result with one short sentence, not with the tables", async () => {
+      const user = await openPage();
+      const status = screen.getByTestId("live-status");
+      expect(status).toHaveAttribute("role", "status");
+      expect(status).toBeEmptyDOMElement();
+      await readExample(user, "bell");
+      await screen.findByText("Read in full");
+      expect(status).toHaveTextContent(
+        "Reading finished: every part understood. Circuits found: 1.",
+      );
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("state-table");
+      expect(status).toHaveTextContent("Simulation finished.");
+      expect(document.querySelectorAll("[aria-live]")).toHaveLength(0);
+    });
+
+    it("announces the verdict of a check", async () => {
+      const user = await openPage();
+      await readExample(user, "hzhEqualsX");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByRole("radio", { name: "The drawn equality" }));
+      await user.click(screen.getByRole("button", { name: "Check" }));
+      await screen.findByTestId("equal");
+      expect(screen.getByTestId("live-status")).toHaveTextContent(
+        "Check finished: equal up to global phase.",
+      );
+    });
+
+    it("lets a keyboard reach every table that can scroll sideways", async () => {
+      const user = await openPage();
+      await readExample(user, "bell");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByLabelText("Also show the unitary (up to 8 wires)"));
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("unitary-table");
+      for (const name of [
+        /^Gates of circuit 1/,
+        /^Final state/,
+        "Unitary, 4 by 4",
+        "Gates the simulator knows, by name",
+      ]) {
+        const region = screen.getByRole("region", { name });
+        expect(region, String(name)).toHaveAttribute("tabindex", "0");
+        expect(region.querySelector("table")).not.toBeNull();
+      }
+    });
+
+    it("starts a new result with its own zero-row switches", async () => {
+      const user = await openPage();
+      await readExample(user, "bell");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("state-table");
+      await user.click(screen.getAllByRole("button", { name: "Show the 2 zero rows" })[0]!);
+      expect(within(screen.getByTestId("state-table")).getAllByRole("row")).toHaveLength(5);
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await waitFor(() =>
+        expect(within(screen.getByTestId("state-table")).getAllByRole("row")).toHaveLength(3),
+      );
+      expect(screen.getAllByRole("button", { name: "Show the 2 zero rows" })).toHaveLength(2);
+    });
+
+    it("keeps the heading order: probabilities sit one level under the result, or under a side", async () => {
+      const user = await openPage();
+      await readExample(user, "bell");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("state-table");
+      const simulation = screen.getByRole("region", { name: "Simulation" });
+      expect(
+        within(simulation).getByRole("heading", { level: 3, name: /^Outcome probabilities/ }),
+      ).toBeInTheDocument();
+      await readExample(user, "hzhEqualsX");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findAllByTestId("state-table");
+      const both = screen.getByRole("region", { name: "Simulation" });
+      expect(
+        within(both)
+          .getAllByRole("heading", { level: 3 })
+          .map((h) => h.textContent),
+      ).toEqual(["Left side", 'Right side, after "="']);
+      expect(within(both).getAllByRole("heading", { level: 4 })).toHaveLength(2);
+    });
+  });
+
   describe("conventions", () => {
     it("shows what the simulator assumes, then what the last result stated", async () => {
       const user = await openPage();
@@ -545,6 +630,23 @@ describe("the circuit check screen", () => {
         await screen.findByRole("link", { name: "See the conventions and the gate table" }),
       );
       expect(details).toHaveAttribute("open");
+    });
+
+    it("writes a limit the server did not give as a question mark, like the others", async () => {
+      const answer = capturedAnswer("conventions").response as { limits: Record<string, number> };
+      const { ops, ...rest } = answer.limits;
+      void ops;
+      server.use(
+        http.get("*/api/v1/circuits/conventions", () =>
+          HttpResponse.json({ ...answer, limits: { ...rest, statevector_wires: 12 } }),
+        ),
+      );
+      await openPage();
+      expect(
+        await screen.findByText(
+          "The simulator itself takes up to 12 wires for a state, 10 for a unitary and ? operations.",
+        ),
+      ).toBeInTheDocument();
     });
 
     it("says so when the conventions cannot be loaded", async () => {

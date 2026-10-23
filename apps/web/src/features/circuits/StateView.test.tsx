@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import "@/shared/i18n";
+import i18n from "@/shared/i18n";
 import { MATRIX_PREVIEW, ProbabilityBars, StateTable, UnitaryMatrix } from "./StateView";
 import type { Complex, SimulatedPart } from "./types";
 
@@ -67,6 +67,44 @@ describe("StateTable", () => {
   });
 });
 
+describe("zero rows", () => {
+  const oneZero: Complex[] = [
+    [1, 0],
+    [0, 0],
+  ];
+
+  it("names a single hidden row in the singular", () => {
+    render(<StateTable part={part(1, { state: oneZero })} />);
+    expect(screen.getByRole("button", { name: "Show the zero row" })).toBeInTheDocument();
+  });
+
+  it("agrees with the number in Spanish", async () => {
+    await i18n.changeLanguage("es");
+    try {
+      const { unmount } = render(<StateTable part={part(1, { state: oneZero })} />);
+      expect(screen.getByRole("button", { name: "Mostrar la fila en cero" })).toBeInTheDocument();
+      unmount();
+      render(
+        <StateTable
+          part={part(2, {
+            state: [
+              [1, 0],
+              [0, 0],
+              [0, 0],
+              [0, 0],
+            ],
+          })}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: "Mostrar las 3 filas en cero" }),
+      ).toBeInTheDocument();
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+});
+
 describe("ProbabilityBars", () => {
   it("shows nothing for a result without probabilities", () => {
     const { container } = render(<ProbabilityBars part={part(2)} />);
@@ -124,6 +162,24 @@ describe("UnitaryMatrix", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(5);
     expect(within(table).getByRole("rowheader", { name: "|10⟩" })).toBeInTheDocument();
     expect(screen.queryByText(/Showing the top left/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the download alive until the browser has taken it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const revoked: string[] = [];
+    URL.createObjectURL = () => "blob:late";
+    URL.revokeObjectURL = (url: string) => void revoked.push(url);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    try {
+      const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+      render(<UnitaryMatrix part={part(2, { unitary: identity(4) })} />);
+      await user.click(screen.getByRole("button", { name: "Download the unitary (JSON)" }));
+      expect(revoked).toEqual([]);
+      vi.advanceTimersByTime(10_000);
+      expect(revoked).toEqual(["blob:late"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows only a corner of a large one and offers the whole as a download", async () => {

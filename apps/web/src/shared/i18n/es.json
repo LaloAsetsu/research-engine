@@ -164,7 +164,13 @@
       "unreadBody": "Estas partes del dibujo no se entendieron, así que el circuito no se puede simular hasta quitarlas o reescribirlas.",
       "unreadItem": "Paso {{step}}, cable {{wires}}:",
       "nothing": "No hay ningún circuito que mostrar.",
-      "words": "Lista de compuertas en palabras"
+      "words": "Lista de compuertas en palabras",
+      "live": "Lectura terminada: {{status}}. Circuitos encontrados: {{found}}.",
+      "liveStatus": {
+        "parsed": "se entendieron todas las partes",
+        "partial": "algunas partes no se entendieron",
+        "unparsed": "no se encontró ningún circuito"
+      }
     },
     "kinds": {
       "cnot": "(CNOT)",
@@ -250,7 +256,8 @@
       "probabilitiesTitle": "Probabilidades de los resultados de los cables {{wires}}",
       "showing": "Mostrando {{shown}} de {{total}}",
       "more": "Mostrar más",
-      "showZeros": "Mostrar las {{count}} filas en cero",
+      "showZeros_one": "Mostrar la fila en cero",
+      "showZeros_other": "Mostrar las {{count}} filas en cero",
       "hideZeros": "Ocultar las filas en cero",
       "measured": "Cables medidos: {{wires}}",
       "unitaryCaption": "Unitaria, {{size}} por {{size}}",
@@ -258,7 +265,13 @@
       "corner": "Mostrando la esquina superior izquierda de {{shown}} por {{shown}} de {{size}} por {{size}}.",
       "downloadUnitary": "Descargar la unitaria (JSON)",
       "notes": "Notas",
-      "seeConventions": "Ver las convenciones y la tabla de compuertas"
+      "seeConventions": "Ver las convenciones y la tabla de compuertas",
+      "live": {
+        "run": "Simulación terminada.",
+        "equal": "Comprobación terminada: igual salvo fase global.",
+        "notEqual": "Comprobación terminada: no es igual.",
+        "check": "Comprobación terminada."
+      }
     },
     "conventions": {
       "title": "Convenciones",
@@ -292,7 +305,7 @@
     "problem": {
       "badRequest": "El servidor rechazó el texto",
       "tooLarge": "La solicitud es demasiado grande",
-      "tooBig": "Este circuito es demasiado grande para la pantalla",
+      "unprocessable": "No se pudo procesar el circuito",
       "busy": "El servicio de circuitos está ocupado",
       "notAllowed": "No tienes permiso para hacer esto",
       "failed": "La solicitud falló",

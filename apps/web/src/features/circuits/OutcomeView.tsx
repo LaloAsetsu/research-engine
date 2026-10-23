@@ -77,7 +77,7 @@ function ComparisonTable({ comparisons }: { comparisons: Comparison[] }) {
     format: (value: number) => (value !== 0 && Math.abs(value) < 1e-4 ? tiny : plain).format(value),
   };
   return (
-    <Table data-testid="comparisons">
+    <Table data-testid="comparisons" scrollLabel={t("circuits.result.comparisons")}>
       <TableCaption>{t("circuits.result.comparisons")}</TableCaption>
       <TableHeader>
         <TableRow>
@@ -139,17 +139,17 @@ function Facts({ result }: { result: SimulatorResult }) {
   const { t } = useTranslation();
   const values = Object.entries(result.values);
   return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
       {result.input !== null ? (
         <>
           <dt className="text-muted-foreground">{t("circuits.result.inputUsed")}</dt>
-          <dd className="font-mono">{result.input}</dd>
+          <dd className="font-mono break-words">{result.input}</dd>
         </>
       ) : null}
       {values.length > 0 ? (
         <>
           <dt className="text-muted-foreground">{t("circuits.result.valuesUsed")}</dt>
-          <dd className="font-mono">
+          <dd className="font-mono break-words">
             {values.map(([name, value]) => `${name} = ${value}`).join(", ")}
           </dd>
         </>
@@ -161,9 +161,9 @@ function Facts({ result }: { result: SimulatorResult }) {
 function RunBody({ result }: { result: SimulatorResult }) {
   const { t } = useTranslation();
   return (
-    <div className="grid gap-6">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       {result.circuits.map((part) => (
-        <div key={part.part} className="grid gap-4">
+        <div key={part.part} className="grid grid-cols-[minmax(0,1fr)] gap-4">
           {result.circuits.length > 1 ? (
             <h3 className="text-sm font-semibold">
               {t(part.sign ? "circuits.result.rightPart" : "circuits.result.leftPart", {
@@ -172,7 +172,7 @@ function RunBody({ result }: { result: SimulatorResult }) {
             </h3>
           ) : null}
           <StateTable part={part} />
-          <ProbabilityBars part={part} />
+          <ProbabilityBars part={part} level={result.circuits.length > 1 ? 4 : 3} />
           {part.measuredWires.length > 0 ? (
             <p className="text-sm text-muted-foreground">
               {t("circuits.result.measured", { wires: part.measuredWires.join(", ") })}
@@ -188,7 +188,7 @@ function RunBody({ result }: { result: SimulatorResult }) {
 function CheckBody({ result }: { result: SimulatorResult }) {
   const { t } = useTranslation();
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       {result.equalToTarget !== null ? (
         <Verdict equal={result.equalToTarget} comparison={result.comparisons[0]} />
       ) : null}
@@ -212,7 +212,7 @@ function OutcomeBody({ outcome }: { outcome: Outcome }) {
   const { t } = useTranslation();
   const { result } = outcome;
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       {result.status === "refused" ? <Refusal reasons={result.refused} /> : null}
       {result.status === "symbolic" ? <Unbound names={result.unbound} /> : null}
       {result.status === "ok" ? (
@@ -258,9 +258,7 @@ export function OutcomeView() {
     outcome.command === "run" ? t("circuits.result.runTitle") : t("circuits.result.checkTitle");
   return (
     <Section title={title}>
-      <div aria-live="polite">
-        <OutcomeBody outcome={outcome} />
-      </div>
+      <OutcomeBody key={outcome.serial} outcome={outcome} />
     </Section>
   );
 }

@@ -83,7 +83,7 @@ function GateTables({ circuit, index }: { circuit: CircuitDocument; index: numbe
   const { t } = useTranslation();
   const parts = gateParts(circuit);
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       {parts.map((part, partIndex) => {
         const side =
           parts.length === 1
@@ -96,7 +96,7 @@ function GateTables({ circuit, index }: { circuit: CircuitDocument; index: numbe
                 },
               );
         return (
-          <Table key={partIndex} data-testid="gate-table">
+          <Table key={partIndex} data-testid="gate-table" scrollLabel={side}>
             <TableCaption>{side}</TableCaption>
             <TableHeader>
               <TableRow>
@@ -182,7 +182,7 @@ export function ReadingView() {
       action={<StatusBadge status={reading.status} />}
       description={t(`circuits.reading.explain.${reading.status}`)}
     >
-      <div aria-live="polite" className="grid gap-4">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
         {reading.circuits.length > 1 ? (
           <RadioGroup
             aria-label={t("circuits.reading.choose")}

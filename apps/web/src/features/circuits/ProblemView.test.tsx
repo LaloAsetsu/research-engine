@@ -17,7 +17,7 @@ describe("ProblemView", () => {
   it.each([
     [400, "The server refused the text"],
     [413, "The request is too large"],
-    [422, "This circuit is too big for the screen"],
+    [422, "The circuit could not be processed"],
     [503, "The circuit service is busy"],
     [401, "You are not allowed to do this"],
     [403, "You are not allowed to do this"],

@@ -1,9 +1,25 @@
 import * as React from "react";
 import { cn } from "@/shared/lib/utils";
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+/**
+ * A table that scrolls sideways inside its own box when it is wider than the space it gets.
+ * With `scrollLabel` the box is a named region a keyboard can reach: a box that scrolls but cannot
+ * take focus hides its far columns from people who do not use a mouse.
+ */
+function Table({
+  className,
+  scrollLabel,
+  ...props
+}: React.ComponentProps<"table"> & { scrollLabel?: string }) {
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      className={cn(
+        "relative w-full overflow-x-auto",
+        scrollLabel && "rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+      )}
+      {...(scrollLabel ? { tabIndex: 0, role: "region", "aria-label": scrollLabel } : {})}
+    >
       <table data-slot="table" className={cn("w-full caption-top text-sm", className)} {...props} />
     </div>
   );

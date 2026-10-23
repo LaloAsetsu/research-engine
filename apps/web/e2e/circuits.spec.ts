@@ -530,6 +530,115 @@ test.describe("themes, languages and small screens", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
+  /** Simulate a circuit of `wires` wires with its unitary, on the screen as it is now. */
+  async function simulateWithUnitary(page: Page, wires: number) {
+    await page.getByRole("tab", { name: "circuit/1 JSON" }).click();
+    await jsonBox(page).fill(
+      JSON.stringify({
+        format: "circuit/1",
+        wires,
+        parts: [[[{ kind: "gate", label: "H", targets: [1] }]]],
+      }),
+    );
+    const unitary = page.getByLabel("Also show the unitary (up to 8 wires)");
+    if (!(await unitary.isChecked())) await unitary.click();
+    await page.getByRole("button", { name: "Simulate" }).click();
+    await expect(page.getByTestId("unitary-table")).toBeVisible();
+  }
+
+  /**
+   * Every table of the result stays inside its card, and one that is wider than the card scrolls in
+   * its own box, which a keyboard can reach. A card that cuts a table off is the failure to catch.
+   */
+  async function expectTablesToScrollInsideTheirCards(page: Page) {
+    const boxes = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('[data-slot="table-container"]')].map((box) => {
+        const card = box.closest<HTMLElement>('[data-slot="card"]')!;
+        const inside = box.querySelector("table")!.getAttribute("data-testid") ?? "table";
+        return {
+          inside,
+          boxRight: box.getBoundingClientRect().right,
+          cardRight: card.getBoundingClientRect().right,
+          boxWidth: box.clientWidth,
+          cardWidth: card.clientWidth,
+          wide: box.scrollWidth > box.clientWidth,
+          focusable: box.tabIndex === 0 && box.getAttribute("role") === "region",
+        };
+      }),
+    );
+    expect(boxes.length).toBeGreaterThan(0);
+    for (const box of boxes) {
+      expect(box.boxRight, `${box.inside} ends inside its card`).toBeLessThanOrEqual(
+        box.cardRight + 1,
+      );
+      expect(box.boxWidth, `${box.inside} is no wider than its card`).toBeLessThanOrEqual(
+        box.cardWidth,
+      );
+      if (box.wide) expect(box.focusable, `${box.inside} can take focus`).toBe(true);
+    }
+    return boxes;
+  }
+
+  for (const [wires, width] of [
+    [4, 375],
+    [8, 375],
+    [4, 1280],
+    [8, 1280],
+  ] as const) {
+    test(`keeps a ${wires}-wire unitary inside its card at ${width} px, scrollable by keyboard`, async ({
+      page,
+      authMock,
+    }) => {
+      void authMock;
+      await page.setViewportSize({ width, height: 900 });
+      await openCircuits(page);
+      await simulateWithUnitary(page, wires);
+      const boxes = await expectTablesToScrollInsideTheirCards(page);
+      const unitary = boxes.find((box) => box.inside === "unitary-table")!;
+      // 16 columns of complex numbers never fit a phone, and 8 wires do not fit a desktop card
+      if (width === 375 || wires === 8) expect(unitary.wide).toBe(true);
+      const region = page.getByRole("region", { name: /^Unitary, / });
+      await region.focus();
+      await expect(region).toBeFocused();
+      if (unitary.wide) {
+        await page.keyboard.press("ArrowRight");
+        await expect.poll(() => region.evaluate((box) => box.scrollLeft)).toBeGreaterThan(0);
+        // the last column can be reached
+        await region.evaluate((box) => box.scrollTo({ left: box.scrollWidth }));
+        const last = region.locator("tbody tr").first().locator("td").last();
+        await expect(last).toBeInViewport();
+      }
+      if (width === 375) {
+        const state = page.getByRole("region", { name: /^Final state/ });
+        await state.focus();
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(0);
+      }
+      await expectNoAxeViolations(page);
+    });
+  }
+
+  test("keeps the tables of a drawn equality and a check inside their cards on a phone", async ({
+    page,
+    authMock,
+  }) => {
+    void authMock;
+    await page.setViewportSize({ width: 375, height: 900 });
+    await openCircuits(page);
+    await readExample(page, "hzhEqualsX");
+    await page.getByLabel("Also show the unitary (up to 8 wires)").click();
+    await page.getByRole("button", { name: "Simulate" }).click();
+    await expect(page.getByTestId("state-table")).toHaveCount(2);
+    await expectTablesToScrollInsideTheirCards(page);
+    await page.getByRole("radio", { name: "The drawn equality" }).click();
+    await page.getByRole("button", { name: "Check" }).click();
+    await expect(page.getByTestId("comparisons")).toBeVisible();
+    await expectTablesToScrollInsideTheirCards(page);
+    await expectNoAxeViolations(page);
+  });
+
   test("reads with the keyboard", async ({ page, authMock }) => {
     void authMock;
     await openCircuits(page);

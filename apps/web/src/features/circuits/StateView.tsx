@@ -24,6 +24,7 @@ const FIRST_ROWS = 64;
 const MORE_ROWS = 256;
 /** A unitary of 8 wires has 65,536 entries: the page shows a corner and offers the whole matrix. */
 export const MATRIX_PREVIEW = 16;
+const REVOKE_AFTER_MS = 10_000;
 
 function useRowLimit(total: number) {
   const [limit, setLimit] = useState(FIRST_ROWS);
@@ -63,7 +64,10 @@ export function StateTable({ part }: { part: SimulatedPart }) {
   const hidden = state.length - rows.length;
   return (
     <div>
-      <Table data-testid="state-table">
+      <Table
+        data-testid="state-table"
+        scrollLabel={t("circuits.result.stateCaption", { wires: part.wires })}
+      >
         <TableCaption>{t("circuits.result.stateCaption", { wires: part.wires })}</TableCaption>
         <TableHeader>
           <TableRow>
@@ -95,7 +99,8 @@ export function StateTable({ part }: { part: SimulatedPart }) {
 }
 
 /** Outcome probabilities as a bar list. The first listed wire is the most significant bit. */
-export function ProbabilityBars({ part }: { part: SimulatedPart }) {
+export function ProbabilityBars({ part, level = 3 }: { part: SimulatedPart; level?: 3 | 4 }) {
+  const Heading = level === 3 ? "h3" : "h4";
   const { t, i18n } = useTranslation();
   const [withZeros, setWithZeros] = useState(false);
   const probabilities = part.probabilities;
@@ -109,9 +114,9 @@ export function ProbabilityBars({ part }: { part: SimulatedPart }) {
   const hidden = probabilities.values.length - rows.length;
   return (
     <div>
-      <h4 className="mb-2 text-sm font-medium">
+      <Heading className="mb-2 text-sm font-medium">
         {t("circuits.result.probabilitiesTitle", { wires: probabilities.wires.join(", ") })}
-      </h4>
+      </Heading>
       <ul className="grid gap-1" data-testid="probabilities">
         {rows.slice(0, limit.shown).map(({ value, index }) => (
           <li key={index} className="grid grid-cols-[5rem_1fr_4.5rem] items-center gap-2 text-sm">
@@ -147,7 +152,8 @@ function download(rows: readonly (readonly Complex[])[], name: string) {
   link.href = url;
   link.download = name;
   link.click();
-  URL.revokeObjectURL(url);
+  // Some browsers start the download after the click returns: keep the URL alive a little longer
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
 }
 
 /** The unitary matrix; a corner of it when it is large, with the whole matrix as a download. */
@@ -160,7 +166,10 @@ export function UnitaryMatrix({ part }: { part: SimulatedPart }) {
   const rows = unitary.slice(0, shown);
   return (
     <div>
-      <Table data-testid="unitary-table">
+      <Table
+        data-testid="unitary-table"
+        scrollLabel={t("circuits.result.unitaryCaption", { size })}
+      >
         <TableCaption>{t("circuits.result.unitaryCaption", { size })}</TableCaption>
         <TableHeader>
           <TableRow>
