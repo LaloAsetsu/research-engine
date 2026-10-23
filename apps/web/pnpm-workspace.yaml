@@ -7,3 +7,7 @@ peerDependencyRules:
     # `pnpm lint` (jsx-a11y rules run under ESLint 10) and `pnpm gen:api` (TypeScript 6).
     eslint-plugin-jsx-a11y>eslint: "10"
     openapi-typescript>typescript: "6"
+overrides:
+  # rehype-katex and micromark-extension-math ask for katex ^0.16, which has an advisory
+  # (GHSA-238p-pmpm-9mq7, fixed in 0.18.2). One patched release serves all three.
+  katex: 0.19.0
