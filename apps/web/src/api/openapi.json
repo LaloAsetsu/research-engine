@@ -2425,6 +2425,8 @@
           "models": {
             "description": "Names from `GET /models`. One job is made for each arm and model.",
             "items": {
+              "maxLength": 128,
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 4,
@@ -3084,8 +3086,11 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
                   "type": "string"
                 },
+                "maxItems": 8,
                 "type": "array"
               },
               {
@@ -3098,8 +3103,11 @@
           "groups": {
             "description": "Unions written `label=v1|v2`.",
             "items": {
+              "maxLength": 400,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 32,
             "title": "Groups",
             "type": "array"
           },
@@ -3110,9 +3118,11 @@
                 "minItems": 2,
                 "prefixItems": [
                   {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
                     "type": "string"
                   },
                   {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
                     "type": "string"
                   }
                 ],
@@ -3137,9 +3147,11 @@
               "minItems": 2,
               "prefixItems": [
                 {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
                   "type": "string"
                 },
                 {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
                   "type": "string"
                 }
               ],
@@ -3152,6 +3164,7 @@
           "runs": {
             "description": "Run ids, all on this set version.",
             "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
               "type": "string"
             },
             "maxItems": 12,
@@ -5707,6 +5720,16 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -5746,6 +5769,16 @@
               }
             },
             "description": "The set version is a draft: freeze it first."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap (32 KiB)."
           },
           "422": {
             "content": {
@@ -6133,6 +6166,16 @@
             },
             "description": "Successful Response"
           },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -6172,6 +6215,16 @@
               }
             },
             "description": "A run has not ended yet."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap (32 KiB)."
           },
           "422": {
             "content": {

@@ -3824,6 +3824,15 @@ export interface operations {
                     "application/json": components["schemas"]["JobOut"][];
                 };
             };
+            /** @description The body is not valid JSON, or a JSON key is written twice. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description No session, or it has ended. */
             401: {
                 headers: {
@@ -3853,6 +3862,15 @@ export interface operations {
             };
             /** @description The set version is a draft: freeze it first. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap (32 KiB). */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4112,6 +4130,15 @@ export interface operations {
                     "application/json": components["schemas"]["JobOut"];
                 };
             };
+            /** @description The body is not valid JSON, or a JSON key is written twice. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description No session, or it has ended. */
             401: {
                 headers: {
@@ -4141,6 +4168,15 @@ export interface operations {
             };
             /** @description A run has not ended yet. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap (32 KiB). */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
