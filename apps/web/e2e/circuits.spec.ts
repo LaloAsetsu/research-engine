@@ -1,11 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ANA, expect, expectNoAxeViolations, signIn, test } from "./fixtures";
+import { DANI, expect, expectNoAxeViolations, signIn, test } from "./fixtures";
 import type { APIRequestContext, Page } from "@playwright/test";
 import captured from "../src/features/circuits/fixtures/captured.json" with { type: "json" };
 
 // Acceptance checks C1 to C7 of the circuit screen, against the real API in fake mode: the
-// parser and the simulator are the real ones, only the sign-in is the shared mock.
+// parser, the simulator and the sign-in are the real ones. Every test signs in as `dani`, a
+// seeded member that no other file uses, so these tests never end another file's session.
 //
 // The tests of this file run one after the other in one worker. The API runs at most two circuit
 // jobs at once and answers 503 to a third (by design), so the file's parallel tests would turn
@@ -49,7 +50,7 @@ async function ask<T>(api: APIRequestContext, path: string, data: unknown): Prom
 
 async function openCircuits(page: Page) {
   await page.goto("/login");
-  await signIn(page, ANA);
+  await signIn(page, DANI);
   await page
     .getByRole("navigation", { name: "Main" })
     .getByRole("link", { name: "Circuits" })
@@ -73,8 +74,7 @@ const BELL = String.raw`\begin{quantikz}
 \end{quantikz}`;
 
 test.describe("C1: LaTeX and the gate list", () => {
-  test("reads a quantikz circuit and lists each gate", async ({ page, authMock }) => {
-    void authMock;
+  test("reads a quantikz circuit and lists each gate", async ({ page }) => {
     await openCircuits(page);
     await latexBox(page).fill(BELL);
     await read(page);
@@ -96,9 +96,7 @@ test.describe("C1: LaTeX and the gate list", () => {
 
   test("reads Qcircuit and lists a circuit with a drawn equality as two sides", async ({
     page,
-    authMock,
   }) => {
-    void authMock;
     await openCircuits(page);
     await readExample(page, "ghz");
     await expect(page.getByRole("heading", { name: "Wires (3)" })).toBeVisible();
@@ -110,11 +108,7 @@ test.describe("C1: LaTeX and the gate list", () => {
     await expect(page.getByRole("table", { name: /right side, after "="/ })).toBeVisible();
   });
 
-  test("lists what was not read, and says so for text with no circuit", async ({
-    page,
-    authMock,
-  }) => {
-    void authMock;
+  test("lists what was not read, and says so for text with no circuit", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "partial");
     await expect(page.getByText("Read in part")).toBeVisible();
@@ -129,8 +123,7 @@ test.describe("C1: LaTeX and the gate list", () => {
 });
 
 test.describe("C2: circuit/1 JSON", () => {
-  test("is read as it is", async ({ page, authMock }) => {
-    void authMock;
+  test("is read as it is", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "bellJson");
     await expect(page.getByRole("tab", { name: "circuit/1 JSON", selected: true })).toBeVisible();
@@ -140,8 +133,7 @@ test.describe("C2: circuit/1 JSON", () => {
     ).toHaveCount(3);
   });
 
-  test("refuses a key written twice and names it", async ({ page, authMock }) => {
-    void authMock;
+  test("refuses a key written twice and names it", async ({ page }) => {
     await openCircuits(page);
     await page.getByRole("tab", { name: "circuit/1 JSON" }).click();
     await jsonBox(page).fill('{"format": "circuit/1", "wires": 1, "wires": 2, "parts": []}');
@@ -151,7 +143,7 @@ test.describe("C2: circuit/1 JSON", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("the server refuses a repeated key too, with the key's name", async ({ request: api }) => {
+  test("the server refuses a repeated key too, with the key's name", async ({ api }) => {
     const answer = await api.post("/api/v1/circuits/run", {
       data: JSON.stringify({
         circuit_json: '{"format":"circuit/1","wires":1,"wires":2,"parts":[]}',
@@ -164,11 +156,7 @@ test.describe("C2: circuit/1 JSON", () => {
 });
 
 test.describe("C3: refusals", () => {
-  test("shows every reason as the simulator gives it, and never a result", async ({
-    page,
-    authMock,
-  }) => {
-    void authMock;
+  test("shows every reason as the simulator gives it, and never a result", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "bundle");
     await page.getByRole("button", { name: "Simulate" }).click();
@@ -181,8 +169,7 @@ test.describe("C3: refusals", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("a refusal looks different from circuits that are not equal", async ({ page, authMock }) => {
-    void authMock;
+  test("a refusal looks different from circuits that are not equal", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "bell");
     await page.getByLabel("Target state").fill("11");
@@ -199,11 +186,7 @@ test.describe("C3: refusals", () => {
 });
 
 test.describe("C4: simulate", () => {
-  test("shows the state and the probabilities, first wire most significant", async ({
-    page,
-    authMock,
-  }) => {
-    void authMock;
+  test("shows the state and the probabilities, first wire most significant", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "bell");
     await page.getByLabel("Input state").fill("10");
@@ -219,8 +202,7 @@ test.describe("C4: simulate", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("shows the unitary only when asked", async ({ page, authMock }) => {
-    void authMock;
+  test("shows the unitary only when asked", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "bell");
     await page.getByRole("button", { name: "Simulate" }).click();
@@ -232,8 +214,7 @@ test.describe("C4: simulate", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("takes a symbol's value and an angle", async ({ page, authMock }) => {
-    void authMock;
+  test("takes a symbol's value and an angle", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "rotation");
     await page.getByRole("button", { name: "Simulate" }).click();
@@ -248,9 +229,7 @@ test.describe("C4: simulate", () => {
 
   test("shows a state of 12 wires, and says that 13 are too many for this screen", async ({
     page,
-    authMock,
   }) => {
-    void authMock;
     await openCircuits(page);
     await page.getByRole("tab", { name: "circuit/1 JSON" }).click();
     const wide = (wires: number) =>
@@ -283,11 +262,7 @@ test.describe("C4: simulate", () => {
     [12, 375],
     [12, 1280],
   ] as const) {
-    test(`keeps the ${wires}-wire outcome labels whole at ${width} px`, async ({
-      page,
-      authMock,
-    }) => {
-      void authMock;
+    test(`keeps the ${wires}-wire outcome labels whole at ${width} px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       await openCircuits(page);
       await page.getByRole("tab", { name: "circuit/1 JSON" }).click();
@@ -339,9 +314,7 @@ test.describe("C4: simulate", () => {
 
   test("shows a unitary of 8 wires as a corner with the whole matrix to download", async ({
     page,
-    authMock,
   }) => {
-    void authMock;
     await openCircuits(page);
     await page.getByRole("tab", { name: "circuit/1 JSON" }).click();
     await jsonBox(page).fill(
@@ -363,8 +336,7 @@ test.describe("C4: simulate", () => {
 });
 
 test.describe("C5: check against a target", () => {
-  test("a state: equal up to global phase, with the method", async ({ page, authMock }) => {
-    void authMock;
+  test("a state: equal up to global phase, with the method", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "bell");
     await page
@@ -376,11 +348,7 @@ test.describe("C5: check against a target", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("a state that differs: not equal, with the largest deviation", async ({
-    page,
-    authMock,
-  }) => {
-    void authMock;
+  test("a state that differs: not equal, with the largest deviation", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "bell");
     await page.getByLabel("Target state").fill("11");
@@ -390,8 +358,7 @@ test.describe("C5: check against a target", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("a unitary", async ({ page, authMock }) => {
-    void authMock;
+  test("a unitary", async ({ page }) => {
     await openCircuits(page);
     await page.getByRole("tab", { name: "circuit/1 JSON" }).click();
     await jsonBox(page).fill(String(request("check hzh unitary x").circuit_json));
@@ -406,8 +373,7 @@ test.describe("C5: check against a target", () => {
     await expect(page.getByTestId("not-equal")).toBeVisible();
   });
 
-  test("a second circuit, written in LaTeX or as circuit/1", async ({ page, authMock }) => {
-    void authMock;
+  test("a second circuit, written in LaTeX or as circuit/1", async ({ page }) => {
     await openCircuits(page);
     await readExample(page, "bellJson");
     await page.getByRole("radio", { name: "Another circuit" }).click();
@@ -424,8 +390,7 @@ test.describe("C5: check against a target", () => {
     await expect(page.getByTestId("refusal")).toBeVisible();
   });
 
-  test("a drawn equality checks the left side against the right", async ({ page, authMock }) => {
-    void authMock;
+  test("a drawn equality checks the left side against the right", async ({ page }) => {
     await openCircuits(page);
     for (const id of ["hzhEqualsX", "cnotFromCz"]) {
       await readExample(page, id);
@@ -438,8 +403,7 @@ test.describe("C5: check against a target", () => {
 });
 
 test.describe("C6: conventions", () => {
-  test("a card states the conventions and links to the gate table", async ({ page, authMock }) => {
-    void authMock;
+  test("a card states the conventions and links to the gate table", async ({ page }) => {
     await openCircuits(page);
     const card = page.getByRole("region", { name: "Conventions" });
     await expect(card).toContainText(
@@ -468,8 +432,7 @@ test.describe("C7: the bridge sources", () => {
   });
 
   for (const file of sources) {
-    test(`${file} shows what the API says`, async ({ page, authMock, request: api }) => {
-      void authMock;
+    test(`${file} shows what the API says`, async ({ page, api }) => {
       const latex = readFileSync(new URL(file, `file://${BRIDGE}`), "utf8");
       const saved = JSON.parse(
         readFileSync(new URL(file.replace(".tex", ".json"), `file://${BRIDGE}`), "utf8"),
@@ -519,7 +482,7 @@ test.describe("C7: the bridge sources", () => {
 
 test.describe("the recorded answers", () => {
   for (const entry of recorded) {
-    test(`still match the API: ${entry.name}`, async ({ request: api }) => {
+    test(`still match the API: ${entry.name}`, async ({ api }) => {
       const url = `/api/v1/circuits/${entry.path}`;
       const answer =
         entry.request === null
@@ -539,11 +502,7 @@ test.describe("themes, languages and small screens", () => {
   for (const colorScheme of ["light", "dark"] as const) {
     test.describe(`${colorScheme} theme`, () => {
       test.use({ colorScheme });
-      test("has no accessibility violations with a result on the screen", async ({
-        page,
-        authMock,
-      }) => {
-        void authMock;
+      test("has no accessibility violations with a result on the screen", async ({ page }) => {
         await openCircuits(page);
         await readExample(page, "hzhEqualsX");
         await page.getByRole("button", { name: "Simulate" }).click();
@@ -560,8 +519,7 @@ test.describe("themes, languages and small screens", () => {
     });
   }
 
-  test("works in Spanish", async ({ page, authMock }) => {
-    void authMock;
+  test("works in Spanish", async ({ page }) => {
     await openCircuits(page);
     await page.getByRole("button", { name: "Language: English" }).click();
     await page.getByRole("menuitemradio", { name: "Español" }).click();
@@ -572,8 +530,7 @@ test.describe("themes, languages and small screens", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("fits a phone without scrolling the page sideways", async ({ page, authMock }) => {
-    void authMock;
+  test("fits a phone without scrolling the page sideways", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
     await openCircuits(page);
     await page.getByRole("tab", { name: "circuit/1 JSON" }).click();
@@ -650,9 +607,7 @@ test.describe("themes, languages and small screens", () => {
   ] as const) {
     test(`keeps a ${wires}-wire unitary inside its card at ${width} px, scrollable by keyboard`, async ({
       page,
-      authMock,
     }) => {
-      void authMock;
       await page.setViewportSize({ width, height: 900 });
       await openCircuits(page);
       await simulateWithUnitary(page, wires);
@@ -690,9 +645,7 @@ test.describe("themes, languages and small screens", () => {
 
   test("keeps the tables of a drawn equality and a check inside their cards on a phone", async ({
     page,
-    authMock,
   }) => {
-    void authMock;
     await page.setViewportSize({ width: 375, height: 900 });
     await openCircuits(page);
     await readExample(page, "hzhEqualsX");
@@ -707,8 +660,7 @@ test.describe("themes, languages and small screens", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("reads with the keyboard", async ({ page, authMock }) => {
-    void authMock;
+  test("reads with the keyboard", async ({ page }) => {
     await openCircuits(page);
     await latexBox(page).fill(BELL);
     await latexBox(page).press("Control+Enter");

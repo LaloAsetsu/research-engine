@@ -22,7 +22,7 @@ export default defineConfig({
   webServer: [
     {
       // The real HTTP layer over fake ports. /health and /status are the API's own in every test;
-      // real-api.spec.ts also signs in here, with the seeded test accounts.
+      // real-api.spec.ts and circuits.spec.ts also sign in here, with the seeded test accounts.
       command: `uv run --frozen research-api serve --fake --port ${apiPort}`,
       cwd: "../..",
       url: `http://127.0.0.1:${apiPort}/api/v1/health`,

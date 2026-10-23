@@ -1,8 +1,17 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test as base, type Page } from "@playwright/test";
+import { expect, test as base, type APIRequestContext, type Page } from "@playwright/test";
 import { ANA, createAuthMock, TEMP, type MockUser } from "../src/test/auth-mock";
 
 export { ANA, TEMP };
+
+/** A seeded member of the API in fake mode, used by the circuit screen's tests only. */
+export const DANI: MockUser = {
+  username: "dani",
+  password: "test-password-dani-03",
+  display_name: "Dani Prueba",
+  role: "member",
+  must_change_password: false,
+};
 
 interface Fixtures {
   /**
@@ -11,6 +20,8 @@ interface Fixtures {
    * real-api.spec.ts reads the real /status after a real sign-in.
    */
   authMock: ReturnType<typeof createAuthMock>;
+  /** A request context signed in as `dani` against the real API: the session cookie, the CSRF header and the Origin the API checks. */
+  api: APIRequestContext;
 }
 
 const STATUS_BODY = {
@@ -47,6 +58,27 @@ export const test = base.extend<Fixtures>({
       });
     });
     await provide(mock);
+  },
+  api: async ({ playwright, baseURL }, provide) => {
+    const origin = baseURL ?? "";
+    const signing = await playwright.request.newContext({
+      baseURL: origin,
+      extraHTTPHeaders: { Origin: origin },
+    });
+    const login = await signing.post("/api/v1/auth/login", {
+      data: { username: DANI.username, password: DANI.password },
+    });
+    expect(login.status()).toBe(204);
+    const state = await signing.storageState();
+    await signing.dispose();
+    const csrf = state.cookies.find((cookie) => cookie.name === "re_csrf")?.value ?? "";
+    const signedIn = await playwright.request.newContext({
+      baseURL: origin,
+      storageState: state,
+      extraHTTPHeaders: { Origin: origin, "X-CSRF-Token": csrf },
+    });
+    await provide(signedIn);
+    await signedIn.dispose();
   },
 });
 
