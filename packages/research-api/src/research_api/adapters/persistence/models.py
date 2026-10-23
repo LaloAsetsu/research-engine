@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     String,
+    Text,
     TypeDecorator,
     UniqueConstraint,
 )
@@ -122,3 +123,39 @@ class ArtifactRow(Base):
     created_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
     updated_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
     frozen_at: Mapped[dt.datetime | None] = mapped_column(UtcDateTime)
+
+
+class JobRow(Base):
+    """A benchmark job: a run (GPU lane) or a scoring (CPU lane). The files hold the results.
+
+    ``params`` is the request as JSON text (what ``RunParams`` or ``ScoreParams`` say), so the
+    table needs no column for each setting. ``artifact_id`` is the run id or score id of the
+    file the job writes.
+    """
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        CheckConstraint("kind IN ('run', 'score')", name="kind"),
+        CheckConstraint(
+            "state IN ('queued', 'running', 'cancelling', 'cancelled', 'done', 'failed',"
+            " 'interrupted')",
+            name="state",
+        ),
+        Index("ix_jobs_state_kind_queued_at", "state", "kind", "queued_at"),
+        Index("ix_jobs_owner_state", "owner", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    state: Mapped[str] = mapped_column(String(12))
+    owner: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+    queued_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+    started_at: Mapped[dt.datetime | None] = mapped_column(UtcDateTime)
+    ended_at: Mapped[dt.datetime | None] = mapped_column(UtcDateTime)
+    params: Mapped[str] = mapped_column(Text)
+    done: Mapped[int] = mapped_column(Integer)
+    total: Mapped[int] = mapped_column(Integer)
+    artifact_id: Mapped[str | None] = mapped_column(String(128))
+    error_kind: Mapped[str | None] = mapped_column(String(32))
+    error_message: Mapped[str | None] = mapped_column(String(500))

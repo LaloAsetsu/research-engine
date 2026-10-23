@@ -14,6 +14,7 @@ from sqlalchemy import URL, Engine, create_engine, event
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.pool import ConnectionPoolEntry
 
+from .jobs import SqlJobs
 from .models import Base
 from .repos import SqlLoginAttempts, SqlSessions, SqlSetCatalog, SqlUsers
 
@@ -58,6 +59,7 @@ class Database:
         self.sessions = SqlSessions(engine)
         self.attempts = SqlLoginAttempts(engine)
         self.sets = SqlSetCatalog(engine)
+        self.jobs = SqlJobs(engine)
 
     @classmethod
     def open(cls, path: Path) -> Database:

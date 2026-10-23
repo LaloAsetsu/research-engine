@@ -82,7 +82,7 @@ def test_migrations_build_the_tables_the_models_describe(db: Database) -> None:
             "select name from sqlite_master where type='table'"
         )
     }
-    assert tables == {"users", "sessions", "login_attempts", "artifacts", "alembic_version"}
+    assert tables == {"users", "sessions", "login_attempts", "artifacts", "jobs", "alembic_version"}
 
 
 def test_an_empty_file_is_not_current_until_it_is_upgraded(tmp_path: Path) -> None:
@@ -90,7 +90,7 @@ def test_an_empty_file_is_not_current_until_it_is_upgraded(tmp_path: Path) -> No
     assert database.current_revision() is None
     assert not database.is_current()
     database.upgrade()
-    assert database.current_revision() == database.head_revision() == "0002"
+    assert database.current_revision() == database.head_revision() == "0003"
     database.close()
 
 
@@ -412,7 +412,7 @@ def test_parallel_reservations_never_pass_the_limit(db: Database) -> None:
 
 
 def test_the_models_know_every_table() -> None:
-    assert set(Base.metadata.tables) == {"users", "sessions", "login_attempts", "artifacts"}
+    assert set(Base.metadata.tables) == {"users", "sessions", "login_attempts", "artifacts", "jobs"}
 
 
 def test_the_database_file_made_by_the_service_is_private(tmp_path: Path) -> None:
