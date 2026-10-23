@@ -664,10 +664,15 @@ test.describe("themes, languages and small screens", () => {
       await region.focus();
       await expect(region).toBeFocused();
       if (unitary.wide) {
+        // Only the arrow key moves the box: it scrolls a few dozen pixels per press
+        const atEnd = () =>
+          region.evaluate((box) => box.scrollLeft + box.clientWidth >= box.scrollWidth - 1);
         await page.keyboard.press("ArrowRight");
         await expect.poll(() => region.evaluate((box) => box.scrollLeft)).toBeGreaterThan(0);
-        // the last column can be reached
-        await region.evaluate((box) => box.scrollTo({ left: box.scrollWidth }));
+        for (let presses = 0; presses < 200 && !(await atEnd()); presses += 1) {
+          await page.keyboard.press("ArrowRight");
+        }
+        expect(await atEnd(), "the arrow key reaches the last column").toBe(true);
         const last = region.locator("tbody tr").first().locator("td").last();
         await expect(last).toBeInViewport();
       }
