@@ -14,6 +14,7 @@ dependencies = [
     "fastapi>=0.159",
     "pwdlib[argon2]>=0.3.1",
     "pydantic>=2.14",
+    "qa-bench",
     "quantum-sim",
     "sqlalchemy>=2.1",
     "uvicorn>=0.54",
@@ -25,6 +26,7 @@ qa = ["docingest[qa]"]
 
 [tool.uv.sources]
 docingest = { workspace = true }
+qa-bench = { workspace = true }
 quantum-sim = { workspace = true }
 
 [project.scripts]
