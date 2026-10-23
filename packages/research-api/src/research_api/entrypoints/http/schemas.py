@@ -17,6 +17,8 @@ from pydantic import (
     model_validator,
 )
 
+from ...application.auth import SessionInfo
+from ...domain.auth import Language, Role, User
 from ...domain.circuits import CheckTarget
 from ...domain.status import Mode, ServerStatus
 from ...ports.circuits import GateListReading
@@ -167,3 +169,66 @@ class CheckRequest(Request):
                 'target must be {"state": ...}, {"unitary": ...} or {"circuit_json": ...}'
             )
         return value
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class PasswordChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current: str = Field(min_length=1, max_length=1024, description="The password in use now.")
+    new: str = Field(
+        max_length=1024,
+        description=(
+            "The new password: at least 12 characters, not the username, not a common password. "
+            "Refusals come back as a 422 with a pointer to `/new`."
+        ),
+    )
+
+
+class Me(BaseModel):
+    username: str
+    display_name: str
+    role: Role
+    must_change_password: bool = Field(
+        description="True after an account is made or reset: every other endpoint answers 403 "
+        "until the password is changed."
+    )
+    language: Language
+
+    @classmethod
+    def from_domain(cls, user: User) -> Me:
+        return cls(
+            username=user.username,
+            display_name=user.display_name,
+            role=user.role,
+            must_change_password=user.must_change_password,
+            language=user.language,
+        )
+
+
+class SessionOut(BaseModel):
+    """A signed-in browser. The cookie value is never shown."""
+
+    id: str
+    username: str
+    created_at: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    current: bool = Field(description="True for the session that made this request.")
+
+    @classmethod
+    def from_info(cls, info: SessionInfo) -> SessionOut:
+        return cls(
+            id=info.id,
+            username=info.username,
+            created_at=info.created_at,
+            last_seen_at=info.last_seen_at,
+            expires_at=info.expires_at,
+            current=info.current,
+        )

@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from ...bootstrap import Container, container_from_env
+from .accesslog import AccessLog
+from .auth import admin_router
+from .auth import router as auth_router
 from .circuits import router as circuits_router
 from .guard import BindGuard, loopback_only, loopback_or_address
+from .origin import OriginGuard, origin_allowed_by
 from .problems import install_problem_handlers, use_problem_media_in_openapi
 from .routes import router
 
 API_PREFIX = "/api/v1"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    app.state.container.close()
 
 
 def build_app(container: Container) -> FastAPI:
@@ -22,17 +35,23 @@ def build_app(container: Container) -> FastAPI:
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=_lifespan,
     )
     app.state.container = container
-    # Outermost, so it also covers a start that skips `research-api serve` and its bind check.
+    fake = container.mode == "fake"
+    # Added innermost first. A request meets, in order: the access log (so refusals are logged
+    # too), the bind check (which also covers a start that skips `research-api serve`), the Origin
+    # check on writes, then the routes.
+    app.add_middleware(OriginGuard, allowed=origin_allowed_by(container.settings, fake=fake))
     app.add_middleware(
         BindGuard,
-        allowed=loopback_only
-        if container.mode == "fake"
-        else loopback_or_address(container.settings.bind_host),
+        allowed=loopback_only if fake else loopback_or_address(container.settings.bind_host),
     )
+    app.add_middleware(AccessLog)
     app.include_router(router, prefix=API_PREFIX)
     app.include_router(circuits_router, prefix=API_PREFIX)
+    app.include_router(auth_router, prefix=API_PREFIX)
+    app.include_router(admin_router, prefix=API_PREFIX)
     install_problem_handlers(app)
 
     build_schema = app.openapi

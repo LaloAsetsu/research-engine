@@ -1,0 +1,321 @@
+"""What the service writes down: JSON lines, with no secret in them."""
+
+from __future__ import annotations
+
+import json
+import logging
+import stat
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+from helpers import MovableClock, live_settings, prepare_live
+
+from research_api.bootstrap import Settings, build_container
+from research_api.bootstrap.seed import SeedUser
+from research_api.entrypoints.http import build_app
+from research_api.entrypoints.http.security import CSRF_COOKIE, CSRF_HEADER, SESSION_COOKIE
+from research_api.entrypoints.logs import (
+    FIELDS,
+    LOG_NAME,
+    JsonFormatter,
+    PrivateRotatingFileHandler,
+    configure_logging,
+)
+
+ANA = {"username": "ana", "password": "test-password-ana-01"}
+BETO = {"username": "beto", "password": "test-password-beto-02"}
+
+
+def record(msg: str = "hello", **extra: Any) -> logging.LogRecord:
+    made = logging.LogRecord("research_api.test", logging.INFO, __file__, 1, msg, None, None)
+    for key, value in extra.items():
+        setattr(made, key, value)
+    return made
+
+
+# --- the formatter --------------------------------------------------------------------------
+
+
+def test_a_line_is_json_with_time_level_logger_and_message() -> None:
+    data = json.loads(JsonFormatter().format(record("hello")))
+    assert data["msg"] == "hello"
+    assert data["level"] == "INFO"
+    assert data["logger"] == "research_api.test"
+    assert data["time"].endswith("+00:00")
+
+
+def test_only_the_listed_fields_are_copied() -> None:
+    line = JsonFormatter().format(
+        record(
+            event="login.failure",
+            username="ana",
+            password="hunter2-hunter2",
+            cookie="re_session=abc",
+            token="t0k3n",
+            body='{"question": "private"}',
+        )
+    )
+    data = json.loads(line)
+    assert data["username"] == "ana"
+    assert set(data) <= {"time", "level", "logger", "msg", "exception", *FIELDS}
+    for secret in ("hunter2", "re_session", "t0k3n", "private"):
+        assert secret not in line
+
+
+def test_an_exception_is_written_as_text_and_the_line_stays_one_line() -> None:
+    try:
+        raise ValueError("boom\nsecond line")
+    except ValueError:
+        made = logging.LogRecord(
+            "research_api", logging.ERROR, __file__, 1, "failed", None, sys.exc_info()
+        )
+    line = JsonFormatter().format(made)
+    assert "\n" not in line
+    assert "boom" in json.loads(line)["exception"]
+
+
+def test_non_ascii_text_stays_readable() -> None:
+    assert "María" in JsonFormatter().format(record("María"))
+
+
+# --- the handlers ---------------------------------------------------------------------------
+
+
+def test_without_a_folder_the_lines_go_to_stderr() -> None:
+    configure_logging(None)
+    logger = logging.getLogger("research_api")
+    assert [type(h) for h in logger.handlers] == [logging.StreamHandler]
+    assert logger.propagate is False
+    assert logger.level == logging.INFO
+
+
+def test_with_a_folder_the_lines_go_to_a_private_file(tmp_path: Path) -> None:
+    folder = tmp_path / "logs"
+    folder.mkdir(mode=0o700)
+    configure_logging(folder)
+    logging.getLogger("research_api.audit").info("hello", extra={"event": "x", "username": "ana"})
+    for handler in logging.getLogger("research_api").handlers:
+        handler.flush()
+    path = folder / LOG_NAME
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert json.loads(path.read_text(encoding="utf-8").splitlines()[0])["username"] == "ana"
+
+
+def test_configuring_twice_does_not_double_the_lines(tmp_path: Path) -> None:
+    configure_logging(tmp_path)
+    configure_logging(tmp_path)
+    assert len(logging.getLogger("research_api").handlers) == 1
+
+
+def test_a_rotated_file_is_private_too(tmp_path: Path) -> None:
+    path = tmp_path / "api.log"
+    handler = PrivateRotatingFileHandler(path, maxBytes=200, backupCount=2, encoding="utf-8")
+    handler.setFormatter(JsonFormatter())
+    logger = logging.getLogger("rotation-test")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        for i in range(20):
+            logger.info("line %s %s", i, "x" * 40)
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+    files = sorted(tmp_path.iterdir())
+    assert len(files) == 3  # api.log, api.log.1, api.log.2
+    assert {stat.S_IMODE(f.stat().st_mode) for f in files} == {0o600}
+
+
+# --- a whole session of use, then a search of the log for secrets ---------------------------
+
+
+@pytest.fixture
+def logged(tmp_path: Path, seed: list[SeedUser]) -> tuple[TestClient, Path, list[str]]:
+    """A live-mode app logging to a file, one admin session, and every secret that was used."""
+    settings = prepare_live(live_settings(tmp_path / "home", log_dir=tmp_path / "home" / "logs"))
+    container = build_container(settings, cheap_hashing=True)
+    for account in seed:
+        container.auth.users.create(
+            account.username,
+            account.display_name,
+            account.role,
+            password=account.password,
+            must_change_password=account.must_change_password,
+        )
+    assert settings.log_dir
+    configure_logging(settings.log_dir)
+    client = TestClient(
+        build_app(container),
+        base_url="http://127.0.0.1:8090",
+        headers={"Origin": "http://127.0.0.1:8090"},
+        raise_server_exceptions=False,
+    )
+    secrets = [ANA["password"], BETO["password"], "temporary-test-0001"]
+    return client, settings.log_dir / LOG_NAME, secrets
+
+
+def lines(path: Path) -> list[dict[str, Any]]:
+    for handler in logging.getLogger("research_api").handlers:
+        handler.flush()
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_no_password_token_or_cookie_reaches_the_log(
+    logged: tuple[TestClient, Path, list[str]],
+) -> None:
+    client, path, secrets = logged
+    other = TestClient(
+        client.app,
+        base_url="http://127.0.0.1:8090",
+        headers={"Origin": "http://127.0.0.1:8090"},
+        raise_server_exceptions=False,
+    )
+    other.post("/api/v1/auth/login", json=BETO)
+    secrets += [other.cookies[SESSION_COOKIE], other.cookies[CSRF_COOKIE]]
+    client.post("/api/v1/auth/login", json={**ANA, "password": "a-wrong-password-1"})
+    client.post("/api/v1/auth/login", json=ANA)
+    secrets += [client.cookies[SESSION_COOKIE], client.cookies[CSRF_COOKIE]]
+    headers = {CSRF_HEADER: client.cookies[CSRF_COOKIE]}
+    client.get("/api/v1/auth/me")
+    client.get("/api/v1/health?question=what-is-the-secret-question")
+    client.get("/api/v1/admin/sessions")
+    target = next(r["id"] for r in client.get("/api/v1/admin/sessions").json() if not r["current"])
+    client.delete(f"/api/v1/admin/sessions/{target}", headers=headers)
+    client.post(
+        "/api/v1/auth/password",
+        json={"current": ANA["password"], "new": "the-brand-new-ana-secret"},
+        headers=headers,
+    )
+    secrets += ["the-brand-new-ana-secret", client.cookies[SESSION_COOKIE]]
+    client.post(
+        "/api/v1/auth/password",
+        json={"current": "wrong-current-password", "new": "another-new-secret-here"},
+        headers={CSRF_HEADER: client.cookies[CSRF_COOKIE]},
+    )
+    client.post("/api/v1/auth/logout", headers={CSRF_HEADER: client.cookies[CSRF_COOKIE]})
+    text = path.read_text(encoding="utf-8")
+    assert text.count("\n") > 10
+    for secret in [
+        *secrets,
+        "argon2",
+        "wrong-current-password",
+        "another-new-secret",
+        "what-is-the-secret",
+    ]:
+        assert secret not in text, secret
+    assert "set-cookie" not in text.lower()
+
+
+def test_the_audit_trail_names_who_did_what(logged: tuple[TestClient, Path, list[str]]) -> None:
+    client, path, _ = logged
+    client.post("/api/v1/auth/login", json={**ANA, "password": "a-wrong-password-1"})
+    client.post("/api/v1/auth/login", json=ANA)
+    csrf = {CSRF_HEADER: client.cookies[CSRF_COOKIE]}
+    client.post("/api/v1/auth/logout", headers=csrf)
+    audit = [line for line in lines(path) if line["logger"] == "research_api.audit"]
+    events = [(line["event"], line.get("username")) for line in audit]
+    assert ("login.failure", "ana") in events
+    assert ("login.success", "ana") in events
+    assert ("logout", "ana") in events
+    failure = next(line for line in audit if line["event"] == "login.failure")
+    assert failure["address"] == "testclient"
+    success = next(line for line in audit if line["event"] == "login.success")
+    assert len(success["session_id"]) == 32
+
+
+def test_blocked_attempts_password_changes_and_ended_sessions_are_logged(
+    logged: tuple[TestClient, Path, list[str]], seed: list[SeedUser]
+) -> None:
+    client, path, _ = logged
+    for _ in range(5):
+        client.post("/api/v1/auth/login", json={**BETO, "password": "a-wrong-password-1"})
+    client.post("/api/v1/auth/login", json=BETO)
+    client.post("/api/v1/auth/login", json=ANA)
+    csrf = {CSRF_HEADER: client.cookies[CSRF_COOKIE]}
+    events = {line["event"] for line in lines(path) if "event" in line}
+    assert {"login.blocked", "login.failure", "login.success", "request"} <= events
+    client.post(
+        "/api/v1/auth/password",
+        json={"current": ANA["password"], "new": "the-brand-new-ana-secret"},
+        headers=csrf,
+    )
+    assert "password.changed" in {line["event"] for line in lines(path) if "event" in line}
+
+
+def test_a_typed_username_that_cannot_be_one_is_not_written_down(
+    logged: tuple[TestClient, Path, list[str]],
+) -> None:
+    client, path, _ = logged
+    client.post("/api/v1/auth/login", json={"username": "my pass word 123", "password": "x"})
+    text = path.read_text(encoding="utf-8")
+    assert "my pass word" not in text
+    failure = next(line for line in lines(path) if line.get("event") == "login.failure")
+    assert failure["username"] == "(invalid)"
+
+
+def test_a_request_line_has_the_route_template_not_the_path_or_the_query(
+    logged: tuple[TestClient, Path, list[str]],
+) -> None:
+    client, path, _ = logged
+    client.post("/api/v1/auth/login", json=ANA)
+    client.get("/api/v1/health?question=private-words")
+    client.delete(
+        "/api/v1/admin/sessions/some-session-id", headers={CSRF_HEADER: client.cookies[CSRF_COOKIE]}
+    )
+    client.get("/api/v1/some/unknown/path-with-private-name")
+    requests = [line for line in lines(path) if line.get("event") == "request"]
+    routes = [(line["method"], line["route"], line["status"]) for line in requests]
+    assert ("GET", "/api/v1/health", 200) in routes
+    assert ("DELETE", "/api/v1/admin/sessions/{session_id}", 404) in routes
+    assert ("GET", "-", 404) in routes
+    text = path.read_text(encoding="utf-8")
+    assert "private-words" not in text
+    assert "private-name" not in text
+    assert "some-session-id" not in text
+
+
+def test_a_request_line_has_the_user_the_status_and_a_duration(
+    logged: tuple[TestClient, Path, list[str]],
+) -> None:
+    client, path, _ = logged
+    client.post("/api/v1/auth/login", json=ANA)
+    client.get("/api/v1/auth/me")
+    mine = [line for line in lines(path) if line.get("route") == "/api/v1/auth/me"]
+    assert len(mine) == 1
+    line = mine[0]
+    assert line["username"] == "ana"
+    assert line["status"] == 200
+    assert line["duration_ms"] >= 0
+    assert len(line["request_id"]) == 16
+    anonymous = [x for x in lines(path) if x.get("route") == "/api/v1/auth/login"]
+    assert "username" not in anonymous[0]
+
+
+def test_an_unhandled_error_is_logged_with_its_id_and_answered_without_a_trace(
+    logged: tuple[TestClient, Path, list[str]],
+) -> None:
+    client, path, _ = logged
+
+    @client.app.get("/boom")  # type: ignore[union-attr]
+    def boom() -> None:
+        raise RuntimeError("kaboom")
+
+    response = client.get("/boom")
+    assert response.status_code == 500
+    assert "kaboom" not in response.text
+    error_id = response.json()["error_id"]
+    errors = [line for line in lines(path) if line["level"] == "ERROR"]
+    assert errors and error_id in errors[0]["msg"]
+    assert next(x for x in lines(path) if x.get("route") == "/boom")["status"] == 500
+
+
+def test_the_clock_of_fake_mode_does_not_break_the_log(
+    seed: list[SeedUser], client_for: Callable[..., TestClient]
+) -> None:
+    container = build_container(
+        Settings.defaults(), fake=True, seed=seed, cheap_hashing=True, clock=MovableClock()
+    )
+    assert client_for(build_app(container)).get("/api/v1/health").status_code == 200
