@@ -3222,6 +3222,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "import-linter" },
+    { name = "numpy" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -3234,6 +3235,7 @@ requires-dist = [{ name = "jsonschema", specifier = ">=4.25" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "import-linter", specifier = ">=2.15" },
+    { name = "numpy", specifier = ">=2.5" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7" },

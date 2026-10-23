@@ -1,7 +1,7 @@
 [project]
 name = "qa-bench"
 version = "0.1.0"
-description = "The question-answer benchmark formats (question sets, runs, scores, reviews): schemas, readers and writers, converters of older sets, and a validator"
+description = "The question-answer benchmark: the formats (question sets, runs, scores, reviews), converters of older sets, a validator and the scorer"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
@@ -21,8 +21,11 @@ requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
+# numpy is here only so the tests can compare the scorer's pure-Python generator with numpy's;
+# qa_bench.score itself never imports it (see the contracts below).
 dev = [
     "import-linter>=2.15",
+    "numpy>=2.5",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "pytest-cov>=7",
@@ -46,6 +49,8 @@ exclude_also = ["if TYPE_CHECKING:"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Vendored matcher, kept as it came (tests pin the md5 of its code).
+extend-exclude = ["src/qa_bench/score/mathnorm.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "PT", "PL", "C4"]
@@ -59,6 +64,7 @@ ignore = [
 
 [tool.pyright]
 include = ["src"]
+ignore = ["src/qa_bench/score/mathnorm.py"]  # vendored, kept as it came
 venvPath = "../.."  # the workspace root, where uv keeps the shared .venv
 venv = ".venv"
 pythonVersion = "3.12"
@@ -71,21 +77,22 @@ include_external_packages = true
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Layers: cli, then converters and review rules, then the formats; a module imports only the layers below it"
+name = "Layers: cli, then converters, review rules and the scorer, then the formats; a module imports only the layers below it"
 type = "layers"
 layers = [
     "qa_bench.cli",
-    "qa_bench.convert | qa_bench.reviews",
+    "qa_bench.convert | qa_bench.reviews | qa_bench.score",
     "qa_bench.formats",
 ]
 
 [[tool.importlinter.contracts]]
-name = "The formats, the converters and the review rules use the standard library and jsonschema only"
+name = "The formats, converters, review rules and scorer use the standard library and jsonschema only"
 type = "forbidden"
 source_modules = [
     "qa_bench.formats",
     "qa_bench.convert",
     "qa_bench.reviews",
+    "qa_bench.score",
 ]
 forbidden_modules = ["httpx", "numpy", "docingest", "docingest_index", "quantum_sim"]
 
