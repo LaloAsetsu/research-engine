@@ -119,15 +119,18 @@ export function ProbabilityBars({ part, level = 3 }: { part: SimulatedPart; leve
       </Heading>
       <ul className="grid gap-1" data-testid="probabilities">
         {rows.slice(0, limit.shown).map(({ value, index }) => (
-          <li key={index} className="grid grid-cols-[5rem_1fr_4.5rem] items-center gap-2 text-sm">
-            <span className="font-mono">{basisLabel(index, bits)}</span>
+          <li
+            key={index}
+            className="grid grid-cols-[max-content_minmax(0,1fr)_5.5rem] items-center gap-2 text-sm"
+          >
+            <span className="font-mono whitespace-nowrap">{basisLabel(index, bits)}</span>
             <span aria-hidden="true" className="h-3 overflow-hidden rounded-sm bg-muted">
               <span
                 className="block h-full bg-primary"
                 style={{ width: `${Math.max(value * 100, value > 0 ? 0.5 : 0)}%` }}
               />
             </span>
-            <span className="text-right tabular-nums">
+            <span className="text-right whitespace-nowrap tabular-nums">
               {formatProbability(value, i18n.language)}
             </span>
           </li>

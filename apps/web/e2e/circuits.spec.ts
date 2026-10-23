@@ -274,6 +274,69 @@ test.describe("C4: simulate", () => {
     await expect(page.getByTestId("state-table")).toHaveCount(0);
   });
 
+  /**
+   * Every probability row shows its whole basis label, and the bar starts after it. A label that a
+   * bar covers makes two outcomes that differ in their last wires look the same.
+   */
+  for (const [wires, width] of [
+    [8, 375],
+    [12, 375],
+    [12, 1280],
+  ] as const) {
+    test(`keeps the ${wires}-wire outcome labels whole at ${width} px`, async ({
+      page,
+      authMock,
+    }) => {
+      void authMock;
+      await page.setViewportSize({ width, height: 900 });
+      await openCircuits(page);
+      await page.getByRole("tab", { name: "circuit/1 JSON" }).click();
+      // H on the last wire: the two outcomes differ only in their last bit
+      await jsonBox(page).fill(
+        JSON.stringify({
+          format: "circuit/1",
+          wires,
+          parts: [[[{ kind: "gate", label: "H", targets: [wires] }]]],
+        }),
+      );
+      await page.getByRole("button", { name: "Simulate" }).click();
+      const rows = page.getByTestId("probabilities").getByRole("listitem");
+      await expect(rows).toHaveText([
+        new RegExp(`\\|0{${wires}}\u27E9.*50%`),
+        new RegExp(`\\|0{${wires - 1}}1\u27E9.*50%`),
+      ]);
+      const layout = await page.getByTestId("probabilities").evaluate((list) =>
+        [...list.children].map((row) => {
+          const [label, bar, value] = [...row.children].map((cell) => cell.getBoundingClientRect());
+          const text = row.children[0] as HTMLElement;
+          return {
+            text: text.textContent,
+            labelRight: label!.right,
+            barLeft: bar!.left,
+            barWidth: bar!.width,
+            valueLeft: value!.left,
+            clipped: text.scrollWidth > text.clientWidth,
+            rowRight: row.getBoundingClientRect().right,
+            valueRight: value!.right,
+          };
+        }),
+      );
+      expect(layout).toHaveLength(2);
+      for (const row of layout) {
+        expect(row.clipped, `${row.text} is not cut off`).toBe(false);
+        expect(row.labelRight, `${row.text} ends before its bar`).toBeLessThanOrEqual(row.barLeft);
+        expect(row.barWidth, "the bar keeps some width").toBeGreaterThan(20);
+        expect(row.valueLeft).toBeGreaterThanOrEqual(row.barLeft + row.barWidth);
+        expect(row.valueRight).toBeLessThanOrEqual(row.rowRight + 1);
+      }
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(0);
+      await expectNoAxeViolations(page);
+    });
+  }
+
   test("shows a unitary of 8 wires as a corner with the whole matrix to download", async ({
     page,
     authMock,
