@@ -44,7 +44,8 @@ timeout_s = 30             # seconds to wait for one request (answer 422 after i
 
 # The models a benchmark run may ask (the closed-book arm calls them directly). `name` is what
 # the server serves the model as (vLLM's served name), `endpoint` is the address up to /v1: no
-# key, no query, no fragment, a key never goes in this file. `label` and `revision` are shown
+# key, no query, no fragment, a key never goes in this file. Plain http is for a loopback or
+# Tailscale address only; any other host needs https. `label` and `revision` are shown
 # and written in the run header. Without any entry only the harness and the fake mode run.
 # [[models]]
 # name = "qwen-local"

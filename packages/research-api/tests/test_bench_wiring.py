@@ -77,10 +77,42 @@ def test_a_model_entry_that_could_leak_a_key_or_cannot_work_is_refused(
         Settings.model_validate({"models": [entry]})
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://127.0.0.1:8001/v1",
+        "http://[::1]:8001/v1",
+        "http://localhost:8001/v1",
+        "http://LOCALHOST:8001/v1",
+        "http://100.101.102.103:8001/v1",
+        "http://docs-server.tail1234.ts.net:8001/v1",
+        "https://models.example.test/v1",
+    ],
+)
+def test_plain_http_is_for_this_machine_or_a_tailscale_peer(endpoint: str) -> None:
+    assert ModelSetting.model_validate({"name": "m", "endpoint": endpoint}).endpoint == endpoint
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://models.example.test/v1",
+        "http://192.168.1.20:8001/v1",
+        "http://8.8.8.8/v1",
+        "http://evil.ts.net.example.test/v1",
+    ],
+)
+def test_plain_http_to_another_host_is_refused(endpoint: str) -> None:
+    with pytest.raises(ValidationError, match="plain http is for a loopback or Tailscale"):
+        ModelSetting.model_validate({"name": "m", "endpoint": endpoint})
+
+
 def test_a_model_is_listed_once() -> None:
-    entry = {"name": "m", "endpoint": "http://x/v1"}
+    entry = {"name": "m", "endpoint": "http://127.0.0.1:8001/v1"}
     with pytest.raises(ValidationError, match="listed twice"):
-        Settings.model_validate({"models": [entry, {**entry, "endpoint": "http://y/v1"}]})
+        Settings.model_validate(
+            {"models": [entry, {**entry, "endpoint": "http://127.0.0.1:8002/v1"}]}
+        )
     assert ModelSetting.model_validate(entry).label is None
 
 

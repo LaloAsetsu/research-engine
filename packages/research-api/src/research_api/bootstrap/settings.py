@@ -79,6 +79,16 @@ def is_tailscale(host: str) -> bool:
     )
 
 
+def _private_host(host: str) -> bool:
+    """A host a plain-http model server may be on: this machine or a Tailscale peer."""
+    return (
+        host.lower() == "localhost"
+        or host.lower().endswith(".ts.net")
+        or is_loopback(host)
+        or is_tailscale(host)
+    )
+
+
 def _origin_text(scheme: str, host: str, port: int) -> str:
     """An origin as a browser sends it in ``Origin``: default port left out."""
     return f"{scheme}://{host}" + ("" if port == _DEFAULT_PORT[scheme] else f":{port}")
@@ -150,6 +160,11 @@ class ModelSetting(BaseModel):
             raise ValueError("must look like http://127.0.0.1:8001/v1")
         if parts.username or parts.password or parts.query or parts.fragment:
             raise ValueError("must have no credentials, query or fragment: a key never goes here")
+        if parts.scheme == "http" and not _private_host(parts.hostname):
+            raise ValueError(
+                "plain http is for a loopback or Tailscale address (a question and its answer "
+                "would cross the network in the clear); use https for another host"
+            )
         return value.rstrip("/")
 
 

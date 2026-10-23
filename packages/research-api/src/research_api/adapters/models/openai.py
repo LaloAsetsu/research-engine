@@ -1,8 +1,9 @@
 """``ModelServer`` over OpenAI-compatible endpoints (the vLLM servers of ``serving/``).
 
 An endpoint is the address up to and including ``/v1``. Nothing here sends a key: the servers are
-on loopback. A response body is never put in an error message, because a server may echo the
-prompt (a question of the set).
+on loopback (or Tailscale), and the client ignores the proxy variables of the environment. A
+response body is never put in an error message, because a server may echo the prompt (a question
+of the set).
 """
 
 from __future__ import annotations
@@ -42,7 +43,9 @@ class OpenAiModels:
         self._probed: dict[str, tuple[float, bool]] = {}
 
     def _client(self, timeout: float) -> httpx.AsyncClient:
-        return httpx.AsyncClient(timeout=timeout, transport=self._transport)
+        # trust_env=False: a proxy variable of the server's environment must not carry a question
+        # of the set (or its answer) through a proxy; the servers are addressed directly.
+        return httpx.AsyncClient(timeout=timeout, transport=self._transport, trust_env=False)
 
     async def _available(self, entry: ModelEntry) -> bool:
         seen = self._probed.get(entry.name)

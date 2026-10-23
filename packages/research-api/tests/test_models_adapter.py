@@ -201,3 +201,23 @@ async def test_a_server_that_never_connects_is_an_outage_not_a_slow_question() -
 
     with pytest.raises(UnavailableError, match="cannot be reached"):
         await served(handler).chat("qwen-local", "s", "u", max_tokens=8, temperature=0.0)
+
+
+@arun
+async def test_the_proxy_variables_of_the_environment_are_not_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from research_api.adapters.models import openai as module  # noqa: PLC0415
+
+    made: list[dict[str, object]] = []
+    real = httpx.AsyncClient
+
+    def spy(**kwargs: object) -> httpx.AsyncClient:
+        made.append(kwargs)
+        return real(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", spy)
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example.test:3128")
+    models = served(lambda request: listing("qwen-local", "other"))
+    await models.models()
+    assert made and all(kwargs["trust_env"] is False for kwargs in made)
