@@ -147,8 +147,13 @@ export function useImportSet() {
 /**
  * The answer to the PUT replaces the cached item, and `onStored` sees it before the cached copies
  * are read again, so no copy of the old text is left to be taken for a change by someone else.
+ * It also gets the item that was sent: the editor may hold more text by then (a pending mutation
+ * is handed the newest callbacks), so the sent item is what the answer must be compared with.
  */
-export function useSaveItem(ref: VersionRef, onStored?: (stored: ItemDetail | undefined) => void) {
+export function useSaveItem(
+  ref: VersionRef,
+  onStored?: (stored: ItemDetail | undefined, sent: Item) => void,
+) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, item, etag }: { id: string; item: Item; etag: string }) => {
@@ -158,7 +163,7 @@ export function useSaveItem(ref: VersionRef, onStored?: (stored: ItemDetail | un
       });
       return data;
     },
-    onSuccess: (stored, { id }) => {
+    onSuccess: (stored, { id, item }) => {
       // The answer is the item as stored, with the new etag: put it where the item screen reads from.
       if (stored?.item) {
         const key = $api.queryOptions("get", ITEM, {
@@ -166,7 +171,7 @@ export function useSaveItem(ref: VersionRef, onStored?: (stored: ItemDetail | un
         }).queryKey;
         queryClient.setQueryData(key, stored);
       }
-      onStored?.(stored);
+      onStored?.(stored, item);
       return invalidateSets(queryClient);
     },
   });

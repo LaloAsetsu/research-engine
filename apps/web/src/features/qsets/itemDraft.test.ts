@@ -244,4 +244,11 @@ describe("how the editor stands against the server", () => {
       "behind",
     );
   });
+
+  it("is behind, not rebuilt, when a box of text that cannot be read is an edit", () => {
+    const latest = { ...base, question: "theirs" };
+    expect(standing(base, { ...base }, latest, true)).toBe("behind");
+    expect(standing(base, { ...base }, latest, false)).toBe("rebuild");
+    expect(standing(base, { ...base }, { ...base }, true)).toBe("same");
+  });
 });

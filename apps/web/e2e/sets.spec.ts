@@ -359,6 +359,77 @@ test.describe("S2: editing an item, with the checks of qset/1", () => {
     await expect(page).toHaveURL(new RegExp(`/sets/${set.name}/v1$`));
   });
 
+  test("text typed while a save is on its way stays as an unsaved change", async ({ page }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    const path = `/sets/${set.name}/versions/v1/items/DP-003`;
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    await page.getByLabel("Notes", { exact: true }).fill("Saved note");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(`**${path}`, async (route) => {
+      if (route.request().method() === "PUT") await gate;
+      await route.continue();
+    });
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByLabel("Rationale", { exact: true }).fill("Typed while the save was on its way");
+    release();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Rationale", { exact: true })).toHaveValue(
+      "Typed while the save was on its way",
+    );
+    await expect(page.getByText("This item changed while you were editing")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect
+      .poll(async () => (await set.api.json(path)).item.rationale)
+      .toBe("Typed while the save was on its way");
+    expect((await set.api.json(path)).item.notes).toBe("Saved note");
+  });
+
+  test("a box that cannot be read is an edit: a remote change does not rebuild over it", async ({
+    page,
+  }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    const path = `/sets/${set.name}/versions/v1/items/DP-003`;
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    const box = page.getByLabel("Gold papers (JSON)", { exact: true });
+    const before = await box.inputValue();
+    await box.fill(`${before.slice(0, before.length - 3)}, "WORK IN PROGRESS`);
+    await expect(page.getByText(/cannot be used as written/).first()).toBeVisible();
+    const stored = (await set.api.json(path)).item;
+    await set.api.send("PUT", path, {
+      ifMatch: await set.api.etag(set.name, "v1"),
+      data: { ...stored, question: "Changed by someone else" },
+    });
+    await page.context().setOffline(true);
+    await page.context().setOffline(false);
+    await expect(page.getByText("This item changed while you were editing")).toBeVisible();
+    await expect(page.getByText("This item changed while you had it open")).toHaveCount(0);
+    await expect(box).toHaveValue(/WORK IN PROGRESS/);
+    await expect(page.getByRole("button", { name: "Merge with my edits" })).toBeDisabled();
+    await expectNoAxeViolations(page);
+    // One click drops the text and shows what the server holds.
+    await page.getByRole("button", { name: "Load the latest and drop my edits" }).click();
+    await expect(page.getByLabel("Question")).toHaveValue("Changed by someone else");
+    await expect(box).not.toHaveValue(/WORK IN PROGRESS/);
+  });
+
+  test("leaving while a box cannot be read asks first", async ({ page }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    const box = page.getByLabel("Gold papers (JSON)", { exact: true });
+    const before = await box.inputValue();
+    await box.fill(`${before.slice(0, before.length - 3)}, "WORK IN PROGRESS`);
+    await page.getByRole("link", { name: `Back to ${set.name} v1` }).click();
+    await expect(page.getByText("You have unsaved edits")).toBeVisible();
+    await expect(page).toHaveURL(/items\/DP-003$/);
+  });
+
   test("the whole-item JSON tab names the field of every problem", async ({ page }) => {
     await signInAs(page, "ana");
     const set = await seedDraft(page);

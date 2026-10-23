@@ -124,6 +124,8 @@ export function ItemWorkspace({
   const [refusedFor, setRefusedFor] = useState<string | null>(null);
   const leaving = useRef(false);
   const [jsonProblems, setJsonProblems] = useState<Record<string, string>>({});
+  // The same list for code that runs outside a render (the answer to a save).
+  const jsonProblemsRef = useRef<Record<string, string>>({});
   const [problems, setProblems] = useState<ProblemField[]>([]);
   const [notice, setNotice] = useState<Notice>(null);
   const [remote, setRemote] = useState<string[] | null>(null);
@@ -161,9 +163,16 @@ export function ItemWorkspace({
     setRemote(null);
   }
 
+  // A box of JSON that cannot be read yet is an edit the draft does not show: the draft still holds
+  // the last good value. It counts as unsaved text everywhere the draft is compared.
+  const blocked = Object.values(jsonProblems)[0] ?? null;
+  const unreadable = blocked !== null;
+
   // The server holds other text than the editor was built from. With nothing to lose the editor
   // shows it (and says so); with the person's own save, it only takes the new etag.
-  const stand = latest ? standing(base.item, draft, latest.item) : "same";
+  // The two branches set state while rendering, which React allows for the component's own state:
+  // the render runs again at once and the second pass finds the base up to date, so it ends there.
+  const stand = latest ? standing(base.item, draft, latest.item, unreadable) : "same";
   if (latest && stand === "adopt") {
     setBase(latest);
   } else if (latest && stand === "rebuild") {
@@ -172,27 +181,35 @@ export function ItemWorkspace({
     setRemote(fields);
   }
 
-  const save = useSaveItem(ref, (stored) => {
-    // The cached item is replaced by the answer, so the editor takes it up as the new text it
-    // stands on (`adopt` above). If the server stored something other than what was sent, the
-    // editor shows what it stored.
-    if (stored?.item && !sameValue(stored.item, draft)) {
-      setDraft(stored.item);
-      setFormKey((key) => key + 1);
-    }
+  const save = useSaveItem(ref, (stored, sent) => {
+    // The editor stands on what the server stored. The fields stay editable while the save is in
+    // flight, so the draft may hold more than was sent: that text is compared with `sent`, never
+    // with the answer, and goes on top of the stored item as unsaved changes. If the server
+    // stored something other than what was sent, the fields it changed show what it stored.
+    if (!stored?.item) return;
+    const fresh = stored.item;
+    setBase({ item: fresh, etag: stored.version.etag, at: Date.now() });
+    if (sameValue(fresh, sent)) return;
+    setDraft((current) => mergeItems(sent, current, fresh).merged);
+    // A remount would drop a box of JSON the person is still writing.
+    if (Object.keys(jsonProblemsRef.current).length === 0) setFormKey((key) => key + 1);
   });
   const add = useAddItem(ref);
   const del = useDeleteItem(ref);
   const validate = useValidateItem();
 
   const setJsonProblem = useCallback((key: string, message: string | null) => {
-    setJsonProblems((current) => {
-      if (message === null) {
-        if (!(key in current)) return current;
-        return Object.fromEntries(Object.entries(current).filter(([other]) => other !== key));
-      }
-      return current[key] === message ? current : { ...current, [key]: message };
-    });
+    const current = jsonProblemsRef.current;
+    if (message === null) {
+      if (!(key in current)) return;
+      jsonProblemsRef.current = Object.fromEntries(
+        Object.entries(current).filter(([other]) => other !== key),
+      );
+    } else {
+      if (current[key] === message) return;
+      jsonProblemsRef.current = { ...current, [key]: message };
+    }
+    setJsonProblems(jsonProblemsRef.current);
   }, []);
 
   useEffect(() => {
@@ -202,8 +219,7 @@ export function ItemWorkspace({
   }, [focus, root]);
 
   const changes = changesBetween(isNew ? {} : base.item, draft);
-  const blocked = Object.values(jsonProblems)[0] ?? null;
-  const dirty = isNew ? !sameValue(draft, initial) : hasChanges(changes);
+  const dirty = unreadable || (isNew ? !sameValue(draft, initial) : hasChanges(changes));
 
   // Edits live only in this page: leaving it (a link, the back button, closing the tab) asks first.
   const blocker = useBlocker(
@@ -322,6 +338,8 @@ export function ItemWorkspace({
 
   /** Put the person's edits on top of `fresh` and say what that did. */
   function rebase(fresh: Fresh) {
+    // The draft does not hold the text of a box that cannot be read: a merge would drop it.
+    if (blocked !== null) return;
     if (fresh.item === null) {
       setBase((current) => ({ ...current, etag: fresh.etag }));
       setSaveError(null);
@@ -397,6 +415,7 @@ export function ItemWorkspace({
           <BehindAlert
             fields={changedFields(base.item, latest.item)}
             both={preview.conflicts.map((conflict) => conflict.field)}
+            mergeBlocked={unreadable}
             onMerge={() => rebase(latest)}
             onLoadLatest={() => loadLatest(latest)}
           />
@@ -553,7 +572,7 @@ export function ItemWorkspace({
             {!isNew ? (
               <Button
                 variant="outline"
-                disabled={!hasChanges(changes)}
+                disabled={!hasChanges(changes) && !unreadable}
                 onClick={() => {
                   if (latest && behind) loadLatest(latest);
                   else void refreshThen(loadLatest);

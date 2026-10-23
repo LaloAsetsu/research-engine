@@ -467,6 +467,7 @@
       "behindTitle": "This item changed while you were editing",
       "behindBody": "Someone else changed {{fields}}. Your edits are not lost, but nothing is saved or decided until you choose: merge your edits onto the latest version, or load the latest and drop them.",
       "behindBoth": "You also changed {{fields}}. After a merge your value is kept for those, and you can take the other value.",
+      "behindUnreadable": "This item changed while a box of JSON cannot be read. Fix that box to merge your edits, or load the latest and drop them.",
       "merge": "Merge with my edits",
       "loadLatestDrop": "Load the latest and drop my edits",
       "mergedTitle": "Merged with the latest version",

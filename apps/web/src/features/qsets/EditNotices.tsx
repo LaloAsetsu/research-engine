@@ -39,11 +39,14 @@ export function RemoteNotice({ fields, onDismiss }: { fields: string[]; onDismis
 export function BehindAlert({
   fields,
   both,
+  mergeBlocked,
   onMerge,
   onLoadLatest,
 }: {
   fields: string[];
   both: string[];
+  /** A box of JSON cannot be read yet: a merge would drop its text, so it waits. */
+  mergeBlocked: boolean;
   onMerge: () => void;
   onLoadLatest: () => void;
 }) {
@@ -54,8 +57,9 @@ export function BehindAlert({
       <AlertDescription>
         <p>{t("sets.editor.behindBody", { fields: fields.join(", ") })}</p>
         {both.length > 0 ? <p>{t("sets.editor.behindBoth", { fields: both.join(", ") })}</p> : null}
+        {mergeBlocked ? <p>{t("sets.editor.behindUnreadable")}</p> : null}
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={onMerge}>
+          <Button type="button" variant="outline" disabled={mergeBlocked} onClick={onMerge}>
             {t("sets.editor.merge")}
           </Button>
           <Button type="button" variant="outline" onClick={onLoadLatest}>

@@ -105,13 +105,21 @@ export function mergeItems(base: Item, mine: Item, latest: Item): Merge {
  * - `adopt`: the server has exactly what the editor shows (the person's own save, say);
  * - `rebuild`: the server has other text and the person changed nothing, so the editor can show it;
  * - `behind`: the server has other text and the person has edits that must not be lost.
+ *
+ * Text that cannot be read yet (`unreadable`: a box of JSON that does not parse) is an edit too,
+ * even though the draft still holds the last good value: it must not be rebuilt over.
  */
 export type Standing = "same" | "adopt" | "rebuild" | "behind";
 
-export function standing(base: Item, draft: Item, latest: Item | null): Standing {
+export function standing(
+  base: Item,
+  draft: Item,
+  latest: Item | null,
+  unreadable = false,
+): Standing {
   if (latest === null || sameValue(latest, base)) return "same";
   if (sameValue(latest, draft)) return "adopt";
-  return hasChanges(changesBetween(base, draft)) ? "behind" : "rebuild";
+  return unreadable || hasChanges(changesBetween(base, draft)) ? "behind" : "rebuild";
 }
 
 /** Sets a field, or takes it out when the value is empty (an optional text left blank is absent). */

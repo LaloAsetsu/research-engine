@@ -29,7 +29,14 @@ interface Posted {
   body: Record<string, any>;
 }
 
-function serve(id: string) {
+interface ServeOptions {
+  /** The answer to a PUT waits for this, so a test can type while a save is in flight. */
+  gate?: Promise<void>;
+  /** The server stores something other than what it was sent (a normalized text, say). */
+  transform?: (body: Record<string, any>) => Record<string, any>;
+}
+
+function serve(id: string, options: ServeOptions = {}) {
   const original = capturedBody<Record<string, any>>(`item demo-papers/v2/${id}`);
   const state = {
     item: original.item as Record<string, any>,
@@ -59,8 +66,9 @@ function serve(id: string) {
         body: (await request.json()) as Record<string, any>,
       };
       state.puts.push(posted);
+      await options.gate;
       if (posted.ifMatch !== state.etag) return problem("put 409 stale");
-      state.item = posted.body;
+      state.item = options.transform ? options.transform(posted.body) : posted.body;
       move();
       return HttpResponse.json(detail());
     }),
@@ -99,6 +107,26 @@ async function openItem(id: string) {
 const question = () => screen.getByLabelText<HTMLTextAreaElement>("Question");
 const notes = () => screen.getByLabelText<HTMLTextAreaElement>("Notes", { exact: true });
 const save = () => screen.getByRole("button", { name: "Save changes" });
+const rationale = () => screen.getByLabelText<HTMLTextAreaElement>("Rationale");
+const otherBox = () => screen.getByLabelText<HTMLTextAreaElement>("Other fields (JSON)");
+
+/** Open the promise a test holds a save on. */
+function gate() {
+  let release!: () => void;
+  const wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { wait, release };
+}
+
+/**
+ * Add text to a box of JSON so that it cannot be read: the person is half way through an edit.
+ * The text is added to the end, so the last text that could be read is still the one saved.
+ */
+async function breakBox(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(otherBox(), " nope");
+  await screen.findAllByText(/Not valid JSON/);
+}
 
 describe("someone else changes the same item while it is open (S2, O-126)", () => {
   it("keeps their change and mine when I keep my edits after a refused save", async () => {
@@ -266,6 +294,55 @@ describe("someone else changes the same item while it is open (S2, O-126)", () =
     await user.click(save());
     await waitFor(() => expect(served.state.puts).toHaveLength(2));
     expect(served.state.puts[1]!.ifMatch).toBe('"moved-1"');
+  });
+
+  it("keeps text typed while a save is in flight as unsaved changes", async () => {
+    const held = gate();
+    const served = serve("DP-003", { gate: held.wait });
+    const { user } = await openItem("DP-003");
+    await user.type(notes(), " first");
+    await user.click(save());
+    await waitFor(() => expect(served.state.puts).toHaveLength(1));
+    await user.type(rationale(), "typed during the save");
+    held.release();
+
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    // What was sent is saved; what came after is still the person's, and can be saved.
+    expect(rationale()).toHaveValue("typed during the save");
+    expect(notes().value).toMatch(/ first$/);
+    expect(served.state.puts[0]!.body.rationale).toBeUndefined();
+    await waitFor(() => expect(served.state.reads).toBeGreaterThan(1));
+    expect(screen.queryByText("This item changed while you were editing")).not.toBeInTheDocument();
+    expect(screen.queryByText("This item changed while you had it open")).not.toBeInTheDocument();
+    expect(screen.getByText("1 field changed")).toBeInTheDocument();
+    expect(save()).toBeEnabled();
+
+    await user.click(save());
+    await waitFor(() => expect(served.state.puts).toHaveLength(2));
+    expect(served.state.puts[1]!.ifMatch).toBe('"moved-1"');
+    expect(served.state.item.rationale).toBe("typed during the save");
+    expect(String(served.state.item.notes)).toMatch(/ first$/);
+  });
+
+  it("shows what the server stored and keeps text typed while the save was in flight", async () => {
+    const held = gate();
+    const served = serve("DP-003", {
+      gate: held.wait,
+      transform: (body) => ({ ...body, question: `${String(body.question)} (normalized)` }),
+    });
+    const { user } = await openItem("DP-003");
+    await user.type(notes(), " first");
+    await user.click(save());
+    await waitFor(() => expect(served.state.puts).toHaveLength(1));
+    await user.type(rationale(), "typed during the save");
+    held.release();
+
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    await waitFor(() => expect(question().value).toMatch(/\(normalized\)$/));
+    expect(rationale()).toHaveValue("typed during the save");
+    expect(notes().value).toMatch(/ first$/);
+    expect(screen.queryByText("This item changed while you were editing")).not.toBeInTheDocument();
+    expect(save()).toBeEnabled();
   });
 
   it("sends the etag of the text it was built from when a save and a read cross", async () => {
@@ -555,5 +632,99 @@ describe("edits that are not saved are not lost by leaving", () => {
     await user.clear(screen.getByLabelText("Other fields (JSON)"));
     await user.click(screen.getByRole("tab", { name: "JSON" }));
     expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("asks before a link leaves the page while a box holds text that cannot be read", async () => {
+    serve("DP-003");
+    const { user, app } = await openItem("DP-003");
+    await breakBox(user);
+    await user.click(back());
+
+    expect(await screen.findByText("You have unsaved edits")).toBeInTheDocument();
+    expect(app.router.state.location.pathname).toBe("/sets/demo-papers/v2/items/DP-003");
+    await user.click(screen.getByRole("button", { name: "Stay and keep editing" }));
+    expect(otherBox().value).toMatch(/ nope$/);
+  });
+
+  it("warns the browser before the tab is closed while a box cannot be read", async () => {
+    serve("DP-003");
+    const { user } = await openItem("DP-003");
+    await breakBox(user);
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+describe("text that cannot be read yet is an edit (blocker 2 of round 2)", () => {
+  it("does not rebuild the editor over it when someone else saves", async () => {
+    const served = serve("DP-003");
+    const { user, app } = await openItem("DP-003");
+    await breakBox(user);
+    served.change({ question: "Changed while I typed" });
+    await act(async () => {
+      await invalidateSets(app.queryClient);
+    });
+
+    expect(await screen.findByText("This item changed while you were editing")).toBeInTheDocument();
+    expect(screen.queryByText("This item changed while you had it open")).not.toBeInTheDocument();
+    expect(screen.queryByText(/You had no edits/)).not.toBeInTheDocument();
+    expect(otherBox().value).toMatch(/ nope$/);
+    expect(question()).not.toHaveValue("Changed while I typed");
+    // The merge waits until the box can be read; saving stays off.
+    expect(screen.getByRole("button", { name: "Merge with my edits" })).toBeDisabled();
+    expect(screen.getByText(/Fix that box to merge your edits/)).toBeInTheDocument();
+    expect(save()).toBeDisabled();
+  });
+
+  it("lets the person drop the text and load the latest with one click", async () => {
+    const served = serve("DP-003");
+    const { user, app } = await openItem("DP-003");
+    await breakBox(user);
+    served.change({ question: "Changed while I typed" });
+    await act(async () => {
+      await invalidateSets(app.queryClient);
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Load the latest and drop my edits" }),
+    );
+
+    expect(question()).toHaveValue("Changed while I typed");
+    expect(otherBox().value).toContain('"writer": "ana"');
+    expect(screen.queryByText(/Not valid JSON/)).not.toBeInTheDocument();
+    expect(screen.queryByText("This item changed while you were editing")).not.toBeInTheDocument();
+  });
+
+  it("can be discarded with the button when it is the only edit", async () => {
+    serve("DP-003");
+    const { user } = await openItem("DP-003");
+    const original = otherBox().value;
+    await breakBox(user);
+    const discard = screen.getByRole("button", { name: "Discard changes" });
+    expect(discard).toBeEnabled();
+    await user.click(discard);
+
+    await waitFor(() => expect(otherBox().value).toBe(original));
+    expect(screen.queryByText(/Not valid JSON/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard changes" })).toBeDisabled();
+  });
+
+  it("merges once the box can be read again", async () => {
+    const served = serve("DP-003");
+    const { user, app } = await openItem("DP-003");
+    await user.type(notes(), " mine");
+    const original = otherBox().value;
+    await breakBox(user);
+    served.change({ question: "Changed while I typed" });
+    await act(async () => {
+      await invalidateSets(app.queryClient);
+    });
+    await screen.findByText("This item changed while you were editing");
+
+    await user.clear(otherBox());
+    await user.paste(original);
+    await user.click(screen.getByRole("button", { name: "Merge with my edits" }));
+    expect(question()).toHaveValue("Changed while I typed");
+    expect(notes().value).toMatch(/ mine$/);
   });
 });
