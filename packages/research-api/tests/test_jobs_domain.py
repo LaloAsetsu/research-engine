@@ -43,6 +43,7 @@ LEGAL = {
     (JobState.RUNNING, JobState.INTERRUPTED),
     (JobState.CANCELLING, JobState.CANCELLED),
     (JobState.CANCELLING, JobState.DONE),
+    (JobState.CANCELLING, JobState.FAILED),
     (JobState.CANCELLED, JobState.QUEUED),
     (JobState.INTERRUPTED, JobState.QUEUED),
 }

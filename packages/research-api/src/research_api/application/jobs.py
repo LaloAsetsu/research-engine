@@ -18,7 +18,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -57,6 +57,7 @@ from ..domain.jobs import (
     expected_keys,
     header_notes,
     interleaved_in,
+    move_allowed,
     require_owner_or_admin,
     run_id_for,
     valid_job_id,
@@ -223,6 +224,16 @@ class JobDesk:
             self._scoring_id is not None,
             len(self._repo.queued("score")),
         )
+
+    def _move(
+        self, job_id: str, *, expected: Collection[JobState], to: JobState, **columns: Any
+    ) -> Job | None:
+        """``JobRepo.move``, after the rulebook of the domain agrees: a pair it does not allow is
+        a bug here, never something to store."""
+        for state in expected:
+            if not move_allowed(state, to):
+                raise ValueError(f"a job may not move from {state.value} to {to.value}")
+        return self._repo.move(job_id, expected=expected, to=to, **columns)
 
     def _poke(self) -> None:
         if self._wake is not None:
@@ -445,14 +456,14 @@ class JobDesk:
 
     def _cancel_move(self, job: Job) -> Job | None:
         if job.state is JobState.QUEUED:
-            return self._repo.move(
+            return self._move(
                 job.id,
                 expected={JobState.QUEUED},
                 to=JobState.CANCELLED,
                 ended_at=self._clock.now(),
             )
         if job.state is JobState.RUNNING and job.kind == "run":
-            return self._repo.move(job.id, expected={JobState.RUNNING}, to=JobState.CANCELLING)
+            return self._move(job.id, expected={JobState.RUNNING}, to=JobState.CANCELLING)
         if job.state is JobState.RUNNING:
             raise ConflictError(
                 "A scoring cannot be stopped once it has started; it takes seconds."
@@ -471,7 +482,7 @@ class JobDesk:
             row = self._sets.export(job.params.set)[0]
             if row.md5 != job.params.set_md5:
                 raise ConflictError("The question set is no longer the file this run started on.")
-        moved = self._repo.move(
+        moved = self._move(
             job_id,
             expected=RESUMABLE_STATES,
             to=JobState.QUEUED,
@@ -539,7 +550,7 @@ class JobDesk:
 
     async def _run_job(self, job: Job) -> None:
         now = self._clock.now()
-        moved = self._repo.move(
+        moved = self._move(
             job.id,
             expected={JobState.QUEUED},
             to=JobState.RUNNING,
@@ -614,13 +625,11 @@ class JobDesk:
         if stopped_by_cancel:
             text = partial_text(have, len(expected), "Cancelled", now)
             self._rewrite_header(run_id, header, ended=None, interleaved=interleaved, partial=text)
-            self._repo.move(
-                job.id, expected={JobState.CANCELLING}, to=JobState.CANCELLED, ended_at=now
-            )
+            self._move(job.id, expected={JobState.CANCELLING}, to=JobState.CANCELLED, ended_at=now)
             self._log(job.id, f"cancelled with {have} of {len(expected)} answers")
             return
         self._rewrite_header(run_id, header, ended=now, interleaved=interleaved, partial=None)
-        self._repo.move(
+        self._move(
             job.id,
             expected={JobState.RUNNING, JobState.CANCELLING},
             to=JobState.DONE,
@@ -725,12 +734,10 @@ class JobDesk:
                 self._interleaved_now(),
             )
         if asked:
-            self._repo.move(
-                job.id, expected={JobState.CANCELLING}, to=JobState.CANCELLED, ended_at=now
-            )
+            self._move(job.id, expected={JobState.CANCELLING}, to=JobState.CANCELLED, ended_at=now)
             self._log(job.id, f"cancelled with {have} of {job.progress.total} answers")
             return
-        self._repo.move(
+        self._move(
             job.id,
             expected={JobState.RUNNING},
             to=JobState.INTERRUPTED,
@@ -740,7 +747,7 @@ class JobDesk:
         self._log(job.id, f"interrupted with {have} of {job.progress.total} answers")
 
     def _fail(self, job: Job, error: JobError) -> None:
-        self._repo.move(
+        self._move(
             job.id,
             expected={JobState.RUNNING, JobState.CANCELLING},
             to=JobState.FAILED,
@@ -819,7 +826,7 @@ class JobDesk:
 
     async def _score_job(self, job_id: str) -> None:
         now = self._clock.now()
-        job = self._repo.move(
+        job = self._move(
             job_id,
             expected={JobState.QUEUED},
             to=JobState.RUNNING,
@@ -845,7 +852,7 @@ class JobDesk:
         else:
             for warning in warnings:
                 self._log(job_id, f"warning: {_short(warning)}")
-            self._repo.move(
+            self._move(
                 job_id,
                 expected={JobState.RUNNING},
                 to=JobState.DONE,

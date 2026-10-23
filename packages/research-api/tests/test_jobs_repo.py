@@ -18,6 +18,7 @@ from research_api.domain.jobs import (
     Progress,
     RunParams,
     ScoreParams,
+    move_allowed,
 )
 from research_api.domain.sets import SetRef
 
@@ -205,6 +206,19 @@ def test_recovery_marks_what_a_stop_left_behind(db: Database) -> None:
     assert db.jobs.get(queued.id).state is JobState.QUEUED  # type: ignore[union-attr]
     assert db.jobs.get(done.id).state is JobState.DONE  # type: ignore[union-attr]
     assert db.jobs.recover(now) == []  # nothing left to recover
+
+
+def test_recovery_makes_only_moves_the_state_machine_allows(db: Database) -> None:
+    """``recover`` writes the new state itself, not through ``move``: the table is pinned here."""
+    before: dict[str, JobState] = {}
+    for state in (JobState.RUNNING, JobState.CANCELLING):
+        job = run_job(state=state)
+        db.jobs.add(job)
+        before[job.id] = state
+    changed = db.jobs.recover(T0 + timedelta(hours=1))
+    assert {j.id for j in changed} == set(before)
+    for job in changed:
+        assert move_allowed(before[job.id], job.state)
 
 
 def test_a_long_error_message_is_cut_to_fit(db: Database) -> None:

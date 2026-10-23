@@ -4,6 +4,7 @@ never started."""
 from __future__ import annotations
 
 import asyncio
+import errno
 from typing import Any
 
 import pytest
@@ -42,6 +43,7 @@ from research_api.domain.jobs import (
     ScoreOptions,
     ScoreParams,
     interleaved_in,
+    move_allowed,
 )
 
 
@@ -420,3 +422,81 @@ async def test_sentences_a_member_wrote_in_the_notes_never_change_the_count_of_a
     done, items = run_file(desk, view)
     assert done["notes"] == f"{FORGED} Interleaved asks: 0." and "ended" in done
     assert pairs(items) == every_pair(1)
+
+
+# --- the rulebook of the states is the one the desk follows -----------------------------------
+
+
+@arun
+async def test_a_failure_while_a_cancel_is_pending_ends_the_run_failed(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-002")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await until(lambda: ("bare", "DP-002", 1) in arms.calls)
+    assert desk.cancel(ANA_ACTOR, view.job.id).job.state is JobState.CANCELLING
+
+    def full(run_id: str, data: bytes) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    desk._files.append_run = full  # type: ignore[method-assign]
+    gate.set()
+    failed = await finished(desk, view)
+    assert failed.job.state is JobState.FAILED and failed.job.error is not None
+    assert move_allowed(JobState.CANCELLING, JobState.FAILED)
+    assert "failed: internal" in desk.read_log(view.job.id).text
+
+
+def test_the_desk_moves_a_job_only_the_way_the_rulebook_allows(desk: JobDesk) -> None:
+    now = desk._clock.now()
+    job = Job(
+        "7" * 26,
+        "run",
+        JobState.DONE,
+        "ana",
+        now,
+        now,
+        RunParams(DEMO, "a" * 32, ArmSpec("bare"), "m", 1),
+        Progress(0, 1),
+    )
+    desk._repo.add(job)
+    with pytest.raises(ValueError, match="from done to running"):
+        desk._move(job.id, expected={JobState.DONE}, to=JobState.RUNNING)
+    with pytest.raises(ValueError, match="from queued to done"):
+        desk._move(job.id, expected=(JobState.QUEUED, JobState.DONE), to=JobState.DONE)
+    assert desk._repo.get(job.id) == job  # nothing was written
+
+
+@arun
+async def test_every_move_the_desk_makes_is_one_the_rulebook_allows(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    moves: list[tuple[frozenset[JobState], JobState]] = []
+    real = desk._repo.move
+
+    def record(job_id: str, *, expected: Any, to: JobState, **columns: Any) -> Job | None:
+        moves.append((frozenset(expected), to))
+        return real(job_id, expected=expected, to=to, **columns)
+
+    desk._repo.move = record  # type: ignore[method-assign]
+    gate = arms.hold("DP-002")
+    first, second = await desk.start_runs(ANA_ACTOR, request("bare", "harness"))
+    await until(lambda: ("bare", "DP-002", 1) in arms.calls)
+    desk.cancel(ANA_ACTOR, second.job.id)  # queued -> cancelled
+    desk.cancel(ANA_ACTOR, first.job.id)  # running -> cancelling
+    gate.set()
+    await finished(desk, first)  # cancelling -> cancelled
+    desk.resume(ANA_ACTOR, first.job.id)  # cancelled -> queued, then queued -> running -> done
+    await finished(desk, first)
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (first.job.artifact_id or "",)))
+    await finished(desk, score)
+    seen = {(state, to) for expected, to in moves for state in expected}
+    assert {
+        (JobState.QUEUED, JobState.RUNNING),
+        (JobState.QUEUED, JobState.CANCELLED),
+        (JobState.RUNNING, JobState.CANCELLING),
+        (JobState.CANCELLING, JobState.CANCELLED),
+        (JobState.CANCELLED, JobState.QUEUED),
+        (JobState.RUNNING, JobState.DONE),
+    } <= seen
+    assert all(move_allowed(state, to) for state, to in seen), seen

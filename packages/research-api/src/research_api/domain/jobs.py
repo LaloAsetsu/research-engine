@@ -6,7 +6,7 @@ the application moves a job only through ``move_allowed``. Standard library only
 
     queued -> running -> done | failed | interrupted
     queued -> cancelled
-    running -> cancelling -> cancelled | done
+    running -> cancelling -> cancelled | done | failed
     cancelled | interrupted -> queued            (resume)
 
 ``interrupted`` is a run that stopped without being told to: the process went away while it ran
@@ -60,7 +60,7 @@ TRANSITIONS: dict[JobState, frozenset[JobState]] = {
     JobState.RUNNING: frozenset(
         {JobState.DONE, JobState.FAILED, JobState.CANCELLING, JobState.INTERRUPTED}
     ),
-    JobState.CANCELLING: frozenset({JobState.CANCELLED, JobState.DONE}),
+    JobState.CANCELLING: frozenset({JobState.CANCELLED, JobState.DONE, JobState.FAILED}),
     JobState.CANCELLED: frozenset({JobState.QUEUED}),
     JobState.INTERRUPTED: frozenset({JobState.QUEUED}),
     JobState.DONE: frozenset(),

@@ -370,9 +370,11 @@ Runs go through the same lane as the asks. A run is one job of the scheduler and
 ```text
 queued -> running -> done | failed | interrupted
 queued -> cancelled
-running -> cancelling -> cancelled | done
+running -> cancelling -> cancelled | done | failed
 cancelled | interrupted -> queued                  (resume)
 ```
+
+The desk moves a job only through this table (`move_allowed` in `domain/jobs.py`): a pair it does not allow raises instead of being stored, and a test lists every move the desk makes. A run whose cancel is pending can still end `failed` (the disk is full while the last answer is written): it did not stop because it was asked to.
 
 `interrupted` is a run that stopped without being told to: the model server stopped answering (`error.kind` `unavailable`), or the service stopped while it ran (found at the next start, or at a clean shutdown). A job found `running` at start-up becomes `interrupted`; one found `cancelling` becomes `cancelled`; a `queued` one runs. A cancel that arrives while the last question is in flight ends the run `done`, because nothing is missing.
 
