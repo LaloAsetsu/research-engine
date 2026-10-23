@@ -17,6 +17,7 @@ from pydantic import (
     StrictInt,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from ..domain.circuits import (
@@ -59,6 +60,10 @@ def _address(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
 def is_loopback(host: str) -> bool:
     address = _address(host)
     return address is not None and address.is_loopback
+
+
+def is_ip_address(host: str) -> bool:
+    return _address(host) is not None
 
 
 def same_address(first: str, second: str) -> bool:
@@ -135,6 +140,15 @@ class Settings(BaseModel):
     port: StrictInt = Field(default=8090, ge=1, le=65535)
     public_origin: str | None = None
     circuit_caps: CircuitCapsSettings = CircuitCapsSettings()
+    # Where the service keeps its files. Both are needed to run for real; fake mode uses a
+    # throwaway folder. Absolute paths (a leading ~ is expanded).
+    data_dir: Path | None = None
+    db_path: Path | None = None
+    log_dir: Path | None = None
+    session_idle_hours: StrictInt = Field(default=12, ge=1, le=720)
+    session_max_days: StrictInt = Field(default=7, ge=1, le=90)
+    login_max_failures: StrictInt = Field(default=5, ge=1, le=100)
+    login_window_minutes: StrictInt = Field(default=15, ge=1, le=1440)
 
     @field_validator("bind_host")
     @classmethod
@@ -149,6 +163,22 @@ class Settings(BaseModel):
     @classmethod
     def _origin_is_an_origin(cls, value: str | None) -> str | None:
         return None if value is None else normalize_origin(value)
+
+    @field_validator("data_dir", "db_path", "log_dir")
+    @classmethod
+    def _path_is_absolute(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        value = value.expanduser()
+        if not value.is_absolute():
+            raise ValueError("must be an absolute path")
+        return value
+
+    @model_validator(mode="after")
+    def _idle_is_within_the_session(self) -> Self:
+        if self.session_idle_hours > self.session_max_days * 24:
+            raise ValueError("session_idle_hours cannot be longer than session_max_days")
+        return self
 
     @property
     def origin(self) -> str:

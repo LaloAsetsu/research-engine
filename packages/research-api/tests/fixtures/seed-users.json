@@ -1,0 +1,29 @@
+{
+  "users": [
+    {
+      "username": "ana",
+      "display_name": "Ana Prueba",
+      "password": "test-password-ana-01",
+      "role": "admin"
+    },
+    {
+      "username": "beto",
+      "display_name": "Beto Prueba",
+      "password": "test-password-beto-02",
+      "role": "member"
+    },
+    {
+      "username": "dani",
+      "display_name": "Dani Prueba",
+      "password": "test-password-dani-03",
+      "role": "member"
+    },
+    {
+      "username": "luis",
+      "display_name": "Luis Prueba",
+      "password": "temporary-test-0001",
+      "role": "member",
+      "must_change_password": true
+    }
+  ]
+}

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import glob
 import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
+from helpers import prepare_live
 
+from research_api.bootstrap import load_settings
 from research_api.entrypoints import cli
 
 
@@ -69,9 +73,20 @@ def test_serve_fake_listens_on_loopback_without_an_access_log(served: list[dict[
     assert (call["host"], call["port"], call["access_log"]) == ("127.0.0.1", 8090, False)
 
 
-def test_serve_reads_the_settings_file(served: list[dict[str, Any]], tmp_path: Path) -> None:
+def live_config(tmp_path: Path, extra: str = "") -> Path:
+    """A settings file for a live run, with its database already made."""
     path = tmp_path / "s.toml"
-    path.write_text("port = 9001\n", encoding="utf-8")
+    folder = tmp_path / "home"
+    path.write_text(
+        f'data_dir = "{folder}/data"\ndb_path = "{folder}/db/api.sqlite3"\n{extra}',
+        encoding="utf-8",
+    )
+    prepare_live(load_settings(path))
+    return path
+
+
+def test_serve_reads_the_settings_file(served: list[dict[str, Any]], tmp_path: Path) -> None:
+    path = live_config(tmp_path, "port = 9001\n")
     assert cli.main(["serve", "--config", str(path)]) == 0
     assert served[0]["port"] == 9001
 
@@ -79,8 +94,7 @@ def test_serve_reads_the_settings_file(served: list[dict[str, Any]], tmp_path: P
 def test_serve_reads_the_file_named_in_the_environment(
     served: list[dict[str, Any]], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = tmp_path / "s.toml"
-    path.write_text("port = 9002\n", encoding="utf-8")
+    path = live_config(tmp_path, "port = 9002\n")
     monkeypatch.setenv("RESEARCH_API_CONFIG", str(path))
     assert cli.main(["serve"]) == 0
     assert served[0]["port"] == 9002
@@ -118,8 +132,7 @@ def test_serve_fake_takes_a_port(served: list[dict[str, Any]]) -> None:
 def test_a_port_on_the_command_line_beats_the_settings_file(
     served: list[dict[str, Any]], tmp_path: Path
 ) -> None:
-    path = tmp_path / "s.toml"
-    path.write_text("port = 9001\n", encoding="utf-8")
+    path = live_config(tmp_path, "port = 9001\n")
     assert cli.main(["serve", "--config", str(path), "--port", "9005"]) == 0
     assert served[0]["port"] == 9005
 
@@ -130,3 +143,95 @@ def test_a_port_out_of_range_exits_1(
     assert cli.main(["serve", "--fake", "--port", "70000"]) == 1
     assert "--port" in capsys.readouterr().err
     assert served == []
+
+
+# --- sign-in related options of serve -------------------------------------------------------
+
+
+def served_container(served: list[dict[str, Any]]) -> Any:
+    return served[0]["app"].state.container
+
+
+def test_serve_fake_creates_the_seed_accounts_of_the_repository(
+    served: list[dict[str, Any]],
+) -> None:
+    assert cli.main(["serve", "--fake"]) == 0
+    names = [u.username for u in served_container(served).auth.users.all()]
+    assert names == ["ana", "beto", "dani", "luis"]
+
+
+def test_serve_fake_can_take_another_seed_file(
+    served: list[dict[str, Any]], tmp_path: Path
+) -> None:
+    seed = tmp_path / "seed.json"
+    seed.write_text(
+        '{"users": [{"username": "zoe", "display_name": "Zoe", "password": "zoe-test-password-9"}]}',
+        encoding="utf-8",
+    )
+    assert cli.main(["serve", "--fake", "--seed", str(seed)]) == 0
+    assert [u.username for u in served_container(served).auth.users.all()] == ["zoe"]
+
+
+def test_a_broken_seed_file_exits_1(
+    served: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seed = tmp_path / "seed.json"
+    seed.write_text("not json", encoding="utf-8")
+    assert cli.main(["serve", "--fake", "--seed", str(seed)]) == 1
+    assert "seed file" in capsys.readouterr().err
+    assert served == []
+
+
+def test_a_seed_file_means_nothing_without_fake(
+    served: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = live_config(tmp_path)
+    assert cli.main(["serve", "--config", str(path), "--seed", "x.json"]) == 1
+    assert "--seed only works with --fake" in capsys.readouterr().err
+    assert served == []
+
+
+def test_serve_live_refuses_a_database_that_is_not_up_to_date(
+    served: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "s.toml"
+    home = tmp_path / "home"
+    path.write_text(f'data_dir = "{home}/d"\ndb_path = "{home}/db/a.sqlite3"\n', encoding="utf-8")
+    assert cli.main(["serve", "--config", str(path)]) == 1
+    assert "db upgrade" in capsys.readouterr().err
+    assert served == []
+
+
+def test_serve_live_with_a_log_folder_writes_there(
+    served: list[dict[str, Any]], tmp_path: Path
+) -> None:
+    path = live_config(tmp_path, f'log_dir = "{tmp_path}/home/logs"\n')
+    assert cli.main(["serve", "--config", str(path)]) == 0
+    assert (tmp_path / "home" / "logs" / "api.log").is_file()
+
+
+def test_serve_live_with_a_loose_data_folder_exits_1(
+    served: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = live_config(tmp_path)
+    (tmp_path / "home" / "data").chmod(0o755)
+    assert cli.main(["serve", "--config", str(path)]) == 1
+    assert "chmod 700" in capsys.readouterr().err
+    assert served == []
+
+
+def test_the_openapi_command_does_not_leave_a_database_behind() -> None:
+    before = set(glob.glob(f"{tempfile.gettempdir()}/research-api-fake-*"))
+    cli.openapi_document()
+    assert set(glob.glob(f"{tempfile.gettempdir()}/research-api-fake-*")) <= before
+
+
+def test_fake_mode_without_a_seed_file_says_there_are_no_accounts(
+    served: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "default_seed_users", list)
+    assert cli.main(["serve", "--fake"]) == 0
+    assert "no test accounts" in capsys.readouterr().err
+    assert served_container(served).auth.users.all() == []

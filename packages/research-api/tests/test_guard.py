@@ -11,18 +11,15 @@ from collections.abc import Callable
 
 import pytest
 import uvicorn
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from research_api.bootstrap import Container, Settings, build_container
+from research_api.bootstrap import Container
 from research_api.entrypoints.http import build_app
 
 PROBLEM = "application/problem+json"
 ClientFor = Callable[..., TestClient]
-
-
-def live_app(bind_host: str = "127.0.0.1"):
-    return build_app(build_container(Settings(bind_host=bind_host)))
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "127.8.8.8", "[::1]", "[::ffff:127.0.0.1]"])
@@ -47,7 +44,7 @@ def test_fake_mode_refuses_every_other_address(
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "127.8.8.8", "[::1]", "100.64.0.5"])
 def test_live_mode_answers_on_loopback_and_on_the_bind_address(
-    client_for: ClientFor, host: str
+    live_app: Callable[..., FastAPI], client_for: ClientFor, host: str
 ) -> None:
     response = client_for(live_app("100.64.0.5"), f"http://{host}:8090").get("/api/v1/health")
     assert response.status_code == 200
@@ -62,7 +59,7 @@ def test_live_mode_answers_on_loopback_and_on_the_bind_address(
     ],
 )
 def test_live_mode_reads_the_bind_address_as_an_address_not_as_text(
-    client_for: ClientFor, bind_host: str, host: str
+    live_app: Callable[..., FastAPI], client_for: ClientFor, bind_host: str, host: str
 ) -> None:
     response = client_for(live_app(bind_host), f"http://{host}:8090").get("/api/v1/health")
     assert response.status_code == 200
@@ -83,7 +80,7 @@ def test_live_mode_reads_the_bind_address_as_an_address_not_as_text(
     ],
 )
 def test_live_mode_refuses_every_other_address_even_in_the_tailscale_block(
-    client_for: ClientFor, host: str
+    live_app: Callable[..., FastAPI], client_for: ClientFor, host: str
 ) -> None:
     response = client_for(live_app("100.64.0.5"), f"http://{host}:8090").get("/api/v1/status")
     assert response.status_code == 403
@@ -92,7 +89,7 @@ def test_live_mode_refuses_every_other_address_even_in_the_tailscale_block(
 
 @pytest.mark.parametrize("host", ["100.64.0.5", "[fd7a:115c:a1e0::5]", "192.168.1.20"])
 def test_live_mode_on_loopback_refuses_the_tailscale_addresses(
-    client_for: ClientFor, host: str
+    live_app: Callable[..., FastAPI], client_for: ClientFor, host: str
 ) -> None:
     response = client_for(live_app(), f"http://{host}:8090").get("/api/v1/health")
     assert response.status_code == 403

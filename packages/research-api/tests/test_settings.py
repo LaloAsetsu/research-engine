@@ -249,3 +249,61 @@ def test_a_file_that_is_not_toml_is_a_settings_error(tmp_path: Path) -> None:
 
 def test_an_explicit_null_origin_means_the_default() -> None:
     assert Settings(public_origin=None).origin == "http://127.0.0.1:8090"
+
+
+# --- the sign-in and storage keys -----------------------------------------------------------
+
+
+def test_the_storage_keys_default_to_unset_and_the_session_keys_to_the_scope_values() -> None:
+    settings = Settings.defaults()
+    assert (settings.data_dir, settings.db_path, settings.log_dir) == (None, None, None)
+    assert (settings.session_idle_hours, settings.session_max_days) == (12, 7)
+    assert (settings.login_max_failures, settings.login_window_minutes) == (5, 15)
+
+
+def test_the_storage_paths_are_read_as_paths(tmp_path: Path) -> None:
+    settings = load_settings(
+        write(
+            tmp_path,
+            'data_dir = "/srv/ra/data"\ndb_path = "/srv/ra/db/api.sqlite3"\nlog_dir = "/srv/ra/log"\n',
+        )
+    )
+    assert settings.data_dir == Path("/srv/ra/data")
+    assert settings.db_path == Path("/srv/ra/db/api.sqlite3")
+    assert settings.log_dir == Path("/srv/ra/log")
+
+
+def test_a_leading_tilde_is_expanded() -> None:
+    assert Settings(data_dir=Path("~/ra")).data_dir == Path.home() / "ra"
+
+
+@pytest.mark.parametrize("key", ["data_dir", "db_path", "log_dir"])
+def test_a_relative_path_is_refused(key: str) -> None:
+    with pytest.raises(ValueError, match="absolute path"):
+        Settings.model_validate({key: "relative/path"})
+
+
+@pytest.mark.parametrize(
+    ("key", "bad"),
+    [
+        ("session_idle_hours", 0),
+        ("session_idle_hours", 721),
+        ("session_max_days", 0),
+        ("session_max_days", 91),
+        ("login_max_failures", 0),
+        ("login_max_failures", 101),
+        ("login_window_minutes", 0),
+        ("login_window_minutes", 1441),
+        ("session_idle_hours", 1.5),
+        ("login_max_failures", "5"),
+    ],
+)
+def test_the_limits_must_be_whole_numbers_in_range(key: str, bad: object) -> None:
+    with pytest.raises(ValueError, match=key):
+        Settings.model_validate({key: bad})
+
+
+def test_an_idle_time_longer_than_the_session_is_refused() -> None:
+    with pytest.raises(ValueError, match="session_idle_hours"):
+        Settings(session_idle_hours=49, session_max_days=2)
+    assert Settings(session_idle_hours=48, session_max_days=2).session_idle_hours == 48
