@@ -2,6 +2,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { createAuthMock, type AuthMock } from "./auth-mock";
 import { circuitHandlers } from "./circuits-api";
+import { askHandlers } from "./ask-api";
 
 export let authMock: AuthMock = createAuthMock();
 
@@ -37,4 +38,5 @@ export const server = setupServer(
       ? new HttpResponse(null, { status: answer.status, headers })
       : HttpResponse.json(answer.body, { status: answer.status, headers });
   }),
+  ...askHandlers,
 );
