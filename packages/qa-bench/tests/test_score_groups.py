@@ -3,7 +3,7 @@
 import pytest
 from scoredata import question, text_key
 
-from qa_bench.score.groups import auto_fields, field_value, make_groups
+from qa_bench.score.groups import auto_fields, field_value, field_warnings, make_groups
 
 
 def qs():
@@ -76,3 +76,20 @@ def test_a_missing_value_belongs_to_no_group_of_that_field():
     groups = make_groups(items, ["tag:survives"])
     assert names(groups) == ["all", "survives=no", "survives=partial"]
     assert field_value(items[0], "tag:survives") is None
+
+
+def test_fields_that_give_no_group_are_named():
+    items = qs()
+    items[0]["tags"]["eq"] = "a=b"
+    warnings = field_warnings(items, ["lang", "tag:category", "nosuch", "tag:Bad-Name", "tag:eq"])
+    assert warnings == [
+        "group field 'nosuch' gives no group: no question has it",
+        "group field 'tag:Bad-Name' gives no group: its name must be a-z and _ only",
+        "group field 'tag:eq': values with '=' are left out",
+    ]
+
+
+def test_a_field_that_every_question_lacks_is_named_even_when_the_label_is_fine():
+    assert field_warnings(qs(), ["tag:survives_not"]) == [
+        "group field 'tag:survives_not' gives no group: no question has it"
+    ]

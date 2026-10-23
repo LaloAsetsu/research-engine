@@ -57,6 +57,25 @@ def auto_fields(questions: Iterable[Question]) -> list[str]:
     return fields
 
 
+def field_warnings(questions: Iterable[Question], fields: Sequence[str]) -> list[str]:
+    """What is wrong with fields the caller named: a label the group name cannot hold, a field no
+    question has, values with ``=``. These fields give no group, so the caller hears about it."""
+    items = list(questions)
+    warnings: list[str] = []
+    for field in fields:
+        if LABEL.fullmatch(_label(field)) is None:
+            warnings.append(
+                f"group field {field!r} gives no group: its name must be a-z and _ only"
+            )
+            continue
+        values = [v for q in items if (v := field_value(q, field)) is not None]
+        if not values:
+            warnings.append(f"group field {field!r} gives no group: no question has it")
+        elif any("=" in str(v) for v in values):
+            warnings.append(f"group field {field!r}: values with '=' are left out")
+    return warnings
+
+
 def make_groups(
     questions: Sequence[Question], fields: Sequence[str], unions: Sequence[str] = ()
 ) -> list[Group]:
