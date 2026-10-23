@@ -141,6 +141,31 @@ CASES = {
         "from .. import clock",
         {INDEPENDENT},
     ),
+    "the circuit use cases import quantum_sim": (
+        "application/circuits.py",
+        "import quantum_sim",
+        {PORTS_ONLY, QUANTUM},
+    ),
+    "the circuit rules import docingest": (
+        "domain/circuits.py",
+        "import docingest",
+        {PURE, PORTS_ONLY, DOCINGEST},
+    ),
+    "the circuit port imports quantum_sim": (
+        "ports/circuits.py",
+        "import quantum_sim",
+        {PORTS_ONLY, QUANTUM},
+    ),
+    "the circuits adapter imports another adapter": (
+        "adapters/circuits/lane.py",
+        "from .. import files",
+        {INDEPENDENT},
+    ),
+    "control: the lane inside the circuits adapter imports quantum_sim": (
+        "adapters/circuits/lane.py",
+        "import quantum_sim\nimport docingest",
+        set(),
+    ),
     "control: a module inside the docingest adapter imports docingest": (
         "adapters/docingest_ask/parsing.py",
         "import docingest",
