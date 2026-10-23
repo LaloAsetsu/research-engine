@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,17 @@ from typing import Any
 from starlette.types import Message
 
 from research_api.bootstrap import Settings, open_database
+
+
+def arun[**P, R](test: Callable[P, Awaitable[R]]) -> Callable[P, R]:
+    """Run an ``async def`` test in its own event loop (no async pytest plugin is installed)."""
+
+    @functools.wraps(test)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        return asyncio.run(test(*args, **kwargs))  # type: ignore[arg-type]
+
+    return wrapper  # type: ignore[return-value]
+
 
 LOOPBACK = "http://127.0.0.1:8090"
 MEMBER = {"username": "beto", "password": "test-password-beto-02"}
