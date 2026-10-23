@@ -273,7 +273,7 @@ describe("the layout", () => {
   });
 
   it("offers a skip link and shows the screens as coming soon", async () => {
-    renderApp("/sets");
+    renderApp("/benchmarks");
     expect(await screen.findByRole("link", { name: "Skip to content" })).toHaveAttribute(
       "href",
       "#main",

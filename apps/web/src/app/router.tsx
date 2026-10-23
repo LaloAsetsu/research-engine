@@ -29,7 +29,20 @@ export function appRoutes(queryClient: QueryClient): RouteObject[] {
             { index: true, element: <Navigate to="/ask" replace /> },
             { path: "ask", lazy: () => import("@/features/ask/AskPage") },
             { path: "benchmarks", lazy: () => import("@/features/benchmarks/BenchmarksPage") },
-            { path: "sets", lazy: () => import("@/features/qsets/QSetsPage") },
+            { path: "sets", lazy: () => import("@/features/qsets/SetsPage") },
+            { path: "sets/:name/:version", lazy: () => import("@/features/qsets/VersionPage") },
+            {
+              path: "sets/:name/:version/items/:id",
+              lazy: () => import("@/features/qsets/ItemPage"),
+            },
+            {
+              path: "sets/:name/:version/new-item",
+              lazy: () => import("@/features/qsets/NewItemPage"),
+            },
+            {
+              path: "sets/:name/:version/freeze",
+              lazy: () => import("@/features/qsets/FreezePage"),
+            },
             { path: "circuits", lazy: () => import("@/features/circuits/CircuitsPage") },
             { path: "*", Component: NotFoundPage },
           ],
