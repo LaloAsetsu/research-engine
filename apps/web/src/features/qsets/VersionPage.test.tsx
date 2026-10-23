@@ -173,12 +173,47 @@ describe("a version (S1)", () => {
     await user.click(screen.getByRole("button", { name: "Next page" }));
     expect(await findItemsTable("Items 51 to 100 of 120")).toBeInTheDocument();
     expect(app.router.state.location.search).toBe("?offset=50");
+    // Focus goes to the table, a named region, once the new page is there.
+    await waitFor(() => expect(screen.getByRole("region", { name: /scroll/i })).toHaveFocus());
     await user.click(screen.getByRole("button", { name: "Next page" }));
     expect(await findItemsTable("Items 101 to 120 of 120")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     expect(seen).toEqual([0, 50, 100]);
     await user.click(screen.getByRole("button", { name: "Previous page" }));
     expect(await findItemsTable("Items 51 to 100 of 120")).toBeInTheDocument();
+  });
+
+  it("keeps the page buttons focusable and quiet while the next page loads", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seen: number[] = [];
+    server.use(
+      http.get("*/api/v1/sets/demo-papers/versions/v2", async ({ request }) => {
+        const offset = Number(new URL(request.url).searchParams.get("offset") ?? 0);
+        seen.push(offset);
+        if (offset > 0) await gate;
+        const body = capturedBody<Record<string, any>>("page demo-papers/v2");
+        body.total = 120;
+        body.offset = offset;
+        body.items = Array.from({ length: Math.min(50, 120 - offset) }, (_, index) => ({
+          ...body.items[0],
+          id: `X-${offset + index + 1}`,
+          mirror_of: null,
+        }));
+        return HttpResponse.json(body);
+      }),
+    );
+    const { user } = await openVersion("/sets/demo-papers/v2");
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    const next = screen.getByRole("button", { name: "Next page" });
+    await waitFor(() => expect(next).toHaveAttribute("aria-disabled", "true"));
+    expect(next).toBeEnabled();
+    await user.click(next);
+    release();
+    await screen.findByRole("table", { name: "Items 51 to 100 of 120" });
+    expect(seen).toEqual([0, 50]);
   });
 
   it("opens an item", async () => {

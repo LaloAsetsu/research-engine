@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageHeader } from "@/shared/layout/PageHeader";
@@ -16,6 +16,7 @@ import {
   withoutFilters,
   type FilterKey,
 } from "./filters";
+import { BUSY } from "./fields";
 import { ItemFilters } from "./ItemFilters";
 import { ItemsTable } from "./ItemsTable";
 import { ProblemView } from "./ProblemView";
@@ -78,7 +79,16 @@ function Summary({ page }: { page: ItemPage }) {
   );
 }
 
-function Pager({ page, onOffset }: { page: ItemPage; onOffset: (offset: number) => void }) {
+/** Both buttons stay focusable while the next page loads (`aria-disabled`) and ignore clicks until it is there. */
+function Pager({
+  page,
+  loading,
+  onOffset,
+}: {
+  page: ItemPage;
+  loading: boolean;
+  onOffset: (offset: number) => void;
+}) {
   const { t } = useTranslation();
   const hasPrevious = page.offset > 0;
   const hasNext = page.offset + page.items.length < page.total;
@@ -88,14 +98,22 @@ function Pager({ page, onOffset }: { page: ItemPage; onOffset: (offset: number) 
       <Button
         variant="outline"
         disabled={!hasPrevious}
-        onClick={() => onOffset(Math.max(0, page.offset - PAGE_SIZE))}
+        aria-disabled={loading || undefined}
+        className={BUSY}
+        onClick={() => {
+          if (!loading) onOffset(Math.max(0, page.offset - PAGE_SIZE));
+        }}
       >
         {t("sets.items.previous")}
       </Button>
       <Button
         variant="outline"
         disabled={!hasNext}
-        onClick={() => onOffset(page.offset + PAGE_SIZE)}
+        aria-disabled={loading || undefined}
+        className={BUSY}
+        onClick={() => {
+          if (!loading) onOffset(page.offset + PAGE_SIZE);
+        }}
       >
         {t("sets.items.next")}
       </Button>
@@ -113,6 +131,8 @@ export function VersionPage() {
   const page = useVersionPage(name, version, filters, offset);
   const me = useMe();
   const next = useCreateSet();
+  const tableBox = useRef<HTMLDivElement>(null);
+  const paged = useRef(false);
   const [exportState, setExportState] = useState<
     | { kind: "idle" }
     | { kind: "busy" }
@@ -121,6 +141,16 @@ export function VersionPage() {
   >({ kind: "idle" });
 
   const title = `${name} ${version}`;
+
+  // After a click on Previous or Next, once the new page is on screen, focus goes to the table
+  // (a named, scrollable region) so a screen reader says where the person is.
+  const loadingPage = page.isPlaceholderData;
+  const shownOffset = page.data?.offset;
+  useEffect(() => {
+    if (!paged.current || loadingPage) return;
+    paged.current = false;
+    tableBox.current?.querySelector<HTMLElement>('[role="region"]')?.focus();
+  }, [loadingPage, shownOffset]);
 
   if (page.isPending) {
     return (
@@ -256,11 +286,17 @@ export function VersionPage() {
                 : t("sets.items.noMatch")}
             </p>
           ) : (
-            <ItemsTable page={data} />
+            <div ref={tableBox}>
+              <ItemsTable page={data} />
+            </div>
           )}
           <Pager
             page={data}
-            onOffset={(value) => setParams((current) => withOffset(current, value))}
+            loading={page.isPlaceholderData}
+            onOffset={(value) => {
+              paged.current = true;
+              setParams((current) => withOffset(current, value));
+            }}
           />
         </Section>
       </div>
