@@ -181,6 +181,18 @@ allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
+name = "Only the models adapter imports httpx"
+type = "forbidden"
+source_modules = ["research_api"]
+forbidden_modules = ["httpx"]
+ignore_imports = [
+    "research_api.adapters.models -> httpx",
+    "research_api.adapters.models.** -> httpx",
+]
+allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
 name = "Only the hashing adapter imports pwdlib and argon2"
 type = "forbidden"
 source_modules = ["research_api"]

@@ -25,6 +25,7 @@ PORTS_ONLY = "Application and ports reach docingest, quantum-sim and qa-bench on
 DOCINGEST = "Only the docingest adapters import docingest"
 QUANTUM = "Only the circuits adapter imports quantum_sim"
 QA_BENCH = "Only the bench adapter imports qa_bench"
+HTTPX = "Only the models adapter imports httpx"
 HASHING = "Only the hashing adapter imports pwdlib and argon2"
 SQL = "Only the persistence adapter imports sqlalchemy and alembic"
 PROTECTED = "Only the composition root and entrypoints wire concrete adapters"
@@ -56,7 +57,7 @@ CASES = {
         {PURE, PORTS_ONLY, DOCINGEST},
     ),
     "domain imports jsonschema": ("domain/status.py", "import jsonschema", {PURE, PORTS_ONLY}),
-    "application imports httpx": ("application/status.py", "import httpx", {PORTS_ONLY}),
+    "application imports httpx": ("application/status.py", "import httpx", {PORTS_ONLY, HTTPX}),
     "ports import quantum_sim": ("ports/clock.py", "import quantum_sim", {PORTS_ONLY, QUANTUM}),
     "application imports an adapter": (
         "application/status.py",
@@ -299,7 +300,11 @@ CASES = {
         "import docingest",
         {PURE, PORTS_ONLY, DOCINGEST},
     ),
-    "the document rules import httpx": ("domain/documents.py", "import httpx", {PURE, PORTS_ONLY}),
+    "the document rules import httpx": (
+        "domain/documents.py",
+        "import httpx",
+        {PURE, PORTS_ONLY, HTTPX},
+    ),
     "the ask port imports docingest": (
         "ports/ask.py",
         "import docingest",
@@ -364,6 +369,115 @@ CASES = {
     "control: the fake adapter imports the domain and the ports": (
         "adapters/fake/ask.py",
         "from ...domain import ask\nfrom ...ports import ask as ports",
+        set(),
+    ),
+    "the job rules import qa_bench": (
+        "domain/jobs.py",
+        "import qa_bench",
+        {PURE, PORTS_ONLY, QA_BENCH},
+    ),
+    "the run rules import sqlalchemy": (
+        "domain/runs.py",
+        "import sqlalchemy",
+        {PURE, PORTS_ONLY, SQL},
+    ),
+    "the job port imports httpx": ("ports/jobs.py", "import httpx", {PORTS_ONLY, HTTPX}),
+    "the model port imports docingest": (
+        "ports/models.py",
+        "import docingest",
+        {PORTS_ONLY, DOCINGEST},
+    ),
+    "the job desk imports httpx": ("application/jobs.py", "import httpx", {PORTS_ONLY, HTTPX}),
+    "the job desk imports qa_bench": (
+        "application/jobs.py",
+        "import qa_bench",
+        {PORTS_ONLY, QA_BENCH},
+    ),
+    "the live arms import docingest": (
+        "application/arms.py",
+        "import docingest",
+        {PORTS_ONLY, DOCINGEST},
+    ),
+    "the result readers import sqlalchemy": (
+        "application/results.py",
+        "import sqlalchemy",
+        {PORTS_ONLY, SQL},
+    ),
+    "the job desk imports an adapter": (
+        "application/jobs.py",
+        "from ..adapters import fake",
+        {LAYERS, PROTECTED},
+    ),
+    "the live arms import the models adapter": (
+        "application/arms.py",
+        "from ..adapters import models",
+        {LAYERS, PROTECTED, PORTS_ONLY},  # and httpx, through the chain
+    ),
+    "the models adapter imports docingest": (
+        "adapters/models/openai.py",
+        "import docingest",
+        {DOCINGEST},
+    ),
+    "the models adapter imports qa_bench": (
+        "adapters/models/openai.py",
+        "import qa_bench",
+        {QA_BENCH},
+    ),
+    "the models adapter imports the bench adapter": (
+        "adapters/models/openai.py",
+        "from .. import bench",
+        {INDEPENDENT},
+    ),
+    "the run formats import httpx": ("adapters/bench/runs.py", "import httpx", {HTTPX}),
+    "the scorer imports sqlalchemy": ("adapters/bench/scores.py", "import sqlalchemy", {SQL}),
+    "the run formats import the files adapter": (
+        "adapters/bench/runs.py",
+        "from .. import files",
+        {INDEPENDENT},
+    ),
+    "the bench file store imports qa_bench": (
+        "adapters/files/bench.py",
+        "import qa_bench",
+        {QA_BENCH},
+    ),
+    "the job table imports httpx": ("adapters/persistence/jobs.py", "import httpx", {HTTPX}),
+    "the job table imports the fake adapter": (
+        "adapters/persistence/jobs.py",
+        "from .. import fake",
+        {INDEPENDENT},
+    ),
+    "the fake arms import httpx": ("adapters/fake/bench.py", "import httpx", {HTTPX}),
+    "the fake arms import qa_bench": ("adapters/fake/bench.py", "import qa_bench", {QA_BENCH}),
+    "the job routes import qa_bench itself": (
+        "entrypoints/http/jobs.py",
+        "import qa_bench",
+        {QA_BENCH},
+    ),
+    "the job routes import httpx itself": ("entrypoints/http/jobs.py", "import httpx", {HTTPX}),
+    "bootstrap imports httpx itself": ("bootstrap/container.py", "import httpx", {HTTPX}),
+    "control: httpx in the models adapter": (
+        "adapters/models/openai.py",
+        "import httpx as http",
+        set(),
+    ),
+    "control: qa_bench in the run formats": (
+        "adapters/bench/runs.py",
+        "import qa_bench.formats",
+        set(),
+    ),
+    "control: bootstrap wires the models adapter": (
+        "bootstrap/container.py",
+        "from ..adapters import models",
+        set(),
+    ),
+    "control: the job desk imports the domain and the ports": (
+        "application/jobs.py",
+        "from ..domain import runs\nfrom ..ports import models as ports",
+        set(),
+    ),
+    "control: the job routes import the application": (
+        "entrypoints/http/jobs.py",
+        "from ...application import results",
         set(),
     ),
     "control: the ask use cases import the domain and the ports": (
@@ -475,6 +589,7 @@ def test_a_contract_breaks_on_the_import_it_forbids(sandbox: Path, case: str) ->
             QUANTUM,
             QA_BENCH,
             HASHING,
+            HTTPX,
             SQL,
             PROTECTED,
             PLUGIN,
