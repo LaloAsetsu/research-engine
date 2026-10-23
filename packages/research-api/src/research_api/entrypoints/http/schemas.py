@@ -9,9 +9,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     StrictFloat,
     StrictInt,
     StrictStr,
+    field_validator,
     model_validator,
 )
 
@@ -109,7 +111,9 @@ class RunRequest(Request):
     values: dict[str, StrictStr | StrictInt | StrictFloat] | None = Field(
         default=None, description=VALUES
     )
-    unitary: bool = Field(default=False, description="Also list the unitary (up to 8 wires).")
+    unitary: StrictBool = Field(
+        default=False, description="Also list the unitary (up to 8 wires). `true` or `false` only."
+    )
 
 
 class CheckTargetBody(Request):
@@ -127,24 +131,39 @@ class CheckTargetBody(Request):
 
     @model_validator(mode="after")
     def _exactly_one(self) -> Self:
-        given = [
-            name for name in ("state", "unitary", "circuit_json") if getattr(self, name) is not None
-        ]
-        if len(given) != 1:
-            raise ValueError("give exactly one of state, unitary and circuit_json")
+        given = self.model_fields_set
+        if len(given) != 1 or any(getattr(self, name) is None for name in given):
+            raise ValueError("give exactly one of state, unitary and circuit_json, and not null")
         return self
 
     def to_domain(self) -> CheckTarget:
         return CheckTarget(state=self.state, unitary=self.unitary, circuit_json=self.circuit_json)
 
 
+def _not_nullable(schema: dict[str, Any]) -> None:
+    """Publish a field that may be left out, but not sent as null, without the null branch."""
+    branches = [b for b in schema.pop("anyOf") if b != {"type": "null"}]
+    schema.update(branches[0])
+
+
 class CheckRequest(Request):
     circuit_json: str = Field(description=CIRCUIT_JSON)
     target: CheckTargetBody | None = Field(
         default=None,
-        description="Leave it out to compare the two sides of an equality drawn in the circuit.",
+        description="Leave it out to compare the two sides of an equality drawn in the circuit. "
+        "Sending `null` is refused.",
+        json_schema_extra=_not_nullable,
     )
     input: str | list[Any] | None = Field(default=None, description=STATE_INPUT)
     values: dict[str, StrictStr | StrictInt | StrictFloat] | None = Field(
         default=None, description=VALUES
     )
+
+    @field_validator("target", mode="before")
+    @classmethod
+    def _target_is_a_target_or_absent(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError(
+                'target must be {"state": ...}, {"unitary": ...} or {"circuit_json": ...}'
+            )
+        return value

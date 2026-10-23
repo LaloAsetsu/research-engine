@@ -123,6 +123,13 @@ def test_run_lists_the_unitary_on_request(run: Callable[..., Any]) -> None:
     assert len(body["circuits"][0]["unitary"]) == 4
 
 
+@pytest.mark.parametrize("flag", [1, 0, "true", "yes", "on", None])
+def test_unitary_is_true_or_false_and_nothing_else(run: Callable[..., Any], flag: object) -> None:
+    response = run(circuit_json=text(BELL), unitary=flag)
+    assert response.status_code == 422
+    assert response.json()["errors"][0]["path"] == "/unitary"
+
+
 def test_run_binds_symbols(run: Callable[..., Any]) -> None:
     ry = {
         "format": "circuit/1",
@@ -347,6 +354,41 @@ def test_a_target_has_exactly_one_thing_in_it(check: Callable[..., Any], target:
     assert response.headers["content-type"] == PROBLEM
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"state": None, "unitary": [[1, 0], [0, 1]]},
+        {"state": None},
+        {"state": "00", "circuit_json": None},
+    ],
+)
+def test_a_null_in_a_target_is_not_taken_for_absent(
+    check: Callable[..., Any], target: dict
+) -> None:
+    response = check(circuit_json=text(BELL), target=target)
+    assert response.status_code == 422
+    assert response.headers["content-type"] == PROBLEM
+    assert response.json()["errors"][0]["path"] == "/target"
+
+
+def test_a_null_target_is_refused_not_taken_for_absent(check: Callable[..., Any]) -> None:
+    response = check(circuit_json=text(BELL), target=None)
+    assert response.status_code == 422
+    assert response.headers["content-type"] == PROBLEM
+    error = response.json()["errors"][0]
+    assert error["path"] == "/target"
+    assert "target must be" in error["message"]
+
+
+@pytest.mark.parametrize("field", ["input", "values"])
+def test_a_null_input_or_values_is_the_same_as_absent(
+    check: Callable[..., Any], field: str
+) -> None:
+    response = check(circuit_json=text(BELL), target={"state": "00"}, **{field: None})
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
 # --- caps --------------------------------------------------------------------------------------
 
 
@@ -493,3 +535,11 @@ def test_the_contract_sends_the_circuit_as_text_and_errors_as_problems() -> None
     for status in ("400", "413", "422", "503"):
         assert PROBLEM in run[status]["content"]
     assert run["200"]["content"]["application/json"]["schema"]["type"] == "object"
+
+
+def test_the_contract_does_not_offer_a_null_target() -> None:
+    schemas = json.loads(openapi_document())["components"]["schemas"]
+    target = schemas["CheckRequest"]["properties"]["target"]
+    assert "anyOf" not in target
+    assert target["$ref"] == "#/components/schemas/CheckTargetBody"
+    assert "target" not in schemas["CheckRequest"].get("required", [])
