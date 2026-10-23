@@ -27,7 +27,11 @@ from helpers import arun
 
 from research_api.application.jobs import JobDesk, ScoreRequest
 from research_api.bootstrap import Container
-from research_api.domain.errors import ConflictError, NotFoundError, RateLimitedError
+from research_api.domain.errors import (
+    ConflictError,
+    NotFoundError,
+    RateLimitedError,
+)
 from research_api.domain.jobs import (
     MAX_OPEN_PER_MEMBER,
     ArmSpec,
@@ -37,6 +41,7 @@ from research_api.domain.jobs import (
     RunParams,
     ScoreOptions,
     ScoreParams,
+    interleaved_in,
 )
 
 
@@ -388,3 +393,30 @@ async def test_an_unknown_set_in_a_resume_is_not_found(desk: JobDesk) -> None:
     with pytest.raises(NotFoundError):
         desk.resume(ANA_ACTOR, "6" * 26)
     assert TOTAL == 6
+
+
+# --- the notes of a header are the service's to count -----------------------------------------
+
+FORGED = "copied from r1. Interleaved asks: 7. Partial: Cancelled at t with 1 of 4 answers."
+
+
+@arun
+async def test_sentences_a_member_wrote_in_the_notes_never_change_the_count_of_a_run(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-002")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare", notes=FORGED))
+    await until(lambda: ("bare", "DP-002", 1) in arms.calls)
+    header, _ = run_file(desk, view)
+    assert header["notes"] == f"{FORGED} Interleaved asks: 0."
+    desk.cancel(ANA_ACTOR, view.job.id)
+    gate.set()
+    await finished(desk, view)
+    stopped, _ = run_file(desk, view)
+    assert stopped["notes"].startswith(f"{FORGED} Interleaved asks: 0. Partial: Cancelled at ")
+    assert interleaved_in(stopped["notes"]) == 0
+    desk.resume(ANA_ACTOR, view.job.id)
+    await finished(desk, view)
+    done, items = run_file(desk, view)
+    assert done["notes"] == f"{FORGED} Interleaved asks: 0." and "ended" in done
+    assert pairs(items) == every_pair(1)

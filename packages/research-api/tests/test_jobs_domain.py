@@ -240,6 +240,34 @@ def test_the_notes_carry_the_members_words_the_shared_asks_and_how_far_a_partial
     assert base_notes(header_notes("", 1, "x")) == ""
 
 
+FORGED = "copied from r1. Interleaved asks: 7. Partial: Cancelled at t with 1 of 4 answers."
+
+
+def test_sentences_in_the_members_words_do_not_count_as_the_services() -> None:
+    notes = header_notes(FORGED, 0, None)
+    assert notes == f"{FORGED} Interleaved asks: 0."
+    assert interleaved_in(notes) == 0 and base_notes(notes) == FORGED
+    stopped = header_notes(FORGED, 2, "Stopped at t with 3 of 6 answers")
+    assert interleaved_in(stopped) == 2 and base_notes(stopped) == FORGED
+
+
+def test_the_members_own_partial_sentence_survives_a_rewrite_of_the_header() -> None:
+    words = "Partial: my own idea of it."
+    once = header_notes(words, 1, "Stopped at t with 1 of 2 answers")
+    twice = header_notes(base_notes(once), 3, None)
+    assert twice == f"{words} Interleaved asks: 3."
+
+
+def test_only_the_ending_of_the_notes_is_read_as_the_services_sentences() -> None:
+    assert interleaved_in("Interleaved asks: 9. then more words") == 0
+    assert (
+        base_notes("Interleaved asks: 9. then more words") == "Interleaved asks: 9. then more words"
+    )
+    assert interleaved_in("words Interleaved asks: 4.") == 4
+    assert base_notes("Interleaved asks: 4.") == ""
+    assert interleaved_in("") == 0 and base_notes("  ") == ""
+
+
 def test_writing_the_notes_again_does_not_pile_up_sentences() -> None:
     once = header_notes("words", 1, "Stopped at t with 1 of 2 answers")
     twice = header_notes(base_notes(once), 4, None)

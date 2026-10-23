@@ -311,22 +311,26 @@ def expected_keys(item_ids: Sequence[str], repeats: int) -> Iterator[tuple[str, 
 
 
 # --- notes the run header carries ---------------------------------------------------------
+#
+# The notes of a header are the member's words followed by the service's own sentences, always in
+# this order and always at the end: ``<words> Interleaved asks: 3. Partial: Cancelled at ... .``
+# (the ``Partial`` sentence only while the run has not finished). The service reads back only that
+# ending, so a member who writes the same sentences in the words cannot change the count, and the
+# words are kept exactly as they were written.
 
-_INTERLEAVED = re.compile(r"Interleaved asks: (\d+)\.")
-_INTERLEAVED_SENTENCE = re.compile(r" ?Interleaved asks: \d+\.")
-_PARTIAL_SENTENCE = re.compile(r" ?Partial: [^.]*\.")
+_SERVICE_ENDING = re.compile(r"(?:^|\s)Interleaved asks: (\d+)\.(?: Partial: [^.]*\.)?\s*\Z")
 
 
 def interleaved_in(notes: str) -> int:
-    found = _INTERLEAVED.search(notes)
+    """The count the service wrote at the end of ``notes``; 0 when there is none."""
+    found = _SERVICE_ENDING.search(notes)
     return int(found.group(1)) if found else 0
 
 
 def base_notes(notes: str) -> str:
-    """The member's own words in run-header notes, without the sentences the service adds."""
-    notes = _INTERLEAVED_SENTENCE.sub("", notes)
-    notes = _PARTIAL_SENTENCE.sub("", notes)
-    return notes.strip()
+    """The member's own words in run-header notes, without the sentences the service added."""
+    found = _SERVICE_ENDING.search(notes)
+    return (notes[: found.start()] if found else notes).strip()
 
 
 def header_notes(base: str, interleaved: int, partial: str | None) -> str:
