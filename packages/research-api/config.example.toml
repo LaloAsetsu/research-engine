@@ -18,6 +18,10 @@ public_origin = "http://127.0.0.1:8090"
 # is readable by group or others. Needed to run for real; `--fake` ignores them.
 data_dir = "/path/to/research-api/data"
 db_path = "/path/to/research-api/db/research-api.sqlite3"
+# The docingest settings file that names the papers, the index and the model servers (see
+# docs/run-guide.md of the repository). Without it everything works except asking questions and
+# reading papers. An absolute path to a file that exists; a change needs a restart.
+docingest_config = "/path/to/docingest.toml"
 # Optional. Without it the log lines go to standard error. With it: <log_dir>/api.log, mode
 # 0600, rotated at 10 MiB, five kept.
 # log_dir = "/path/to/research-api/logs"
