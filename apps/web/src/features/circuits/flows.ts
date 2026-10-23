@@ -4,11 +4,14 @@ import type { CheckInput, CheckTarget, CircuitCalls } from "./api";
 import { parseStateInput, parseUnitaryInput, parseValues } from "./values";
 import { readStrictJson } from "./strictJson";
 import {
+  announce,
+  announcementFor,
   currentText,
   makeOutcome,
   useCircuitStore,
   type Busy,
   type LocalCode,
+  type Outcome,
   type Problem,
   type TargetKind,
 } from "./store";
@@ -68,6 +71,30 @@ function requestOptions() {
   };
 }
 
+/** Show a reading and announce it. */
+function showReading(reading: Reading) {
+  useCircuitStore.setState({
+    reading,
+    selected: 0,
+    outcome: null,
+    problem: null,
+    announcement: announce({
+      kind: "reading",
+      status: reading.status,
+      found: reading.circuits.length,
+    }),
+  });
+}
+
+/** Show an answer and announce it (a refusal is announced by its own alert). */
+function showOutcome(outcome: Outcome) {
+  const said = announcementFor(outcome);
+  useCircuitStore.setState({
+    outcome,
+    ...(said ? { announcement: announce(said) } : {}),
+  });
+}
+
 function toProblem(error: unknown): Problem {
   if (isApiError(error)) return { kind: "api", error };
   if (error instanceof MalformedAnswerError) return { kind: "malformed" };
@@ -121,7 +148,7 @@ export function createFlows(calls: CircuitCalls) {
           ? document.status
           : "parsed";
       const reading: Reading = { status, text: "", circuits: [document], raw: [] };
-      useCircuitStore.setState({ reading, selected: 0, outcome: null, problem: null });
+      showReading(reading);
       return;
     }
     if (text.trim() === "") {
@@ -131,7 +158,7 @@ export function createFlows(calls: CircuitCalls) {
     await guarded(
       "read",
       () => calls.parse(text),
-      (reading) => useCircuitStore.setState({ reading, selected: 0, outcome: null }),
+      showReading,
       // A reading answers the text only: editing the options meanwhile does not make it stale.
       "textRevision",
     );
@@ -147,9 +174,7 @@ export function createFlows(calls: CircuitCalls) {
       "run",
       () => calls.run({ circuitJson: circuit.value, unitary, ...options.value }),
       (result) =>
-        useCircuitStore.setState({
-          outcome: makeOutcome({ command: "run", result, circuit: selected, target: null }),
-        }),
+        showOutcome(makeOutcome({ command: "run", result, circuit: selected, target: null })),
     );
   }
 
@@ -198,14 +223,14 @@ export function createFlows(calls: CircuitCalls) {
       (outcome) => {
         if ("problem" in outcome) useCircuitStore.setState({ problem: outcome.problem });
         else
-          useCircuitStore.setState({
-            outcome: makeOutcome({
+          showOutcome(
+            makeOutcome({
               command: "check",
               result: outcome.result,
               circuit: selected,
               target: targetKind,
             }),
-          });
+          );
       },
     );
   }

@@ -508,20 +508,55 @@ describe("the circuit check screen", () => {
   });
 
   describe("what a screen reader hears and what the layout does", () => {
+    /** What each of the two status regions says right now. */
+    const regions = () =>
+      within(screen.getByTestId("live-status"))
+        .getAllByRole("status")
+        .map((region) => region.textContent);
+
     it("announces a reading and a result with one short sentence, not with the tables", async () => {
       const user = await openPage();
-      const status = screen.getByTestId("live-status");
-      expect(status).toHaveAttribute("role", "status");
-      expect(status).toBeEmptyDOMElement();
+      expect(regions()).toEqual(["", ""]);
       await readExample(user, "bell");
       await screen.findByText("Read in full");
-      expect(status).toHaveTextContent(
+      expect(screen.getByTestId("live-status")).toHaveTextContent(
         "Reading finished: every part understood. Circuits found: 1.",
       );
       await user.click(screen.getByRole("button", { name: "Simulate" }));
       await screen.findByTestId("state-table");
-      expect(status).toHaveTextContent("Simulation finished.");
+      expect(screen.getByTestId("live-status")).toHaveTextContent("Simulation finished.");
       expect(document.querySelectorAll("[aria-live]")).toHaveLength(0);
+    });
+
+    it("keeps what it said while the person edits, and says nothing new", async () => {
+      const user = await openPage();
+      await readExample(user, "bell");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("state-table");
+      const said = regions();
+      expect(said.filter(Boolean)).toEqual(["Simulation finished."]);
+      // Typing clears the result on the screen, but nothing is announced
+      await user.type(screen.getByLabelText("Input state"), "1");
+      expect(screen.queryByTestId("state-table")).not.toBeInTheDocument();
+      expect(regions()).toEqual(said);
+      await user.type(screen.getByLabelText("Parameter values"), "x");
+      expect(regions()).toEqual(said);
+    });
+
+    it("announces a second identical result again, in the other region", async () => {
+      const user = await openPage();
+      await readExample(user, "bell");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("state-table");
+      const first = regions();
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await waitFor(() => expect(regions()).not.toEqual(first));
+      const second = regions();
+      // The same sentence, now added to the region that was empty and removed from the other
+      expect(second.filter(Boolean)).toEqual(["Simulation finished."]);
+      expect(second.findIndex(Boolean)).not.toBe(first.findIndex(Boolean));
     });
 
     it("announces the verdict of a check", async () => {

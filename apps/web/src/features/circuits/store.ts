@@ -36,7 +36,31 @@ export interface Outcome {
   target: TargetKind | null;
 }
 
+/** What a screen reader is told when a reading or an answer arrives. The text is made when it is shown. */
+export type Announcement =
+  | { kind: "reading"; status: Reading["status"]; found: number }
+  | { kind: "run" | "check" | "equal" | "notEqual" };
+
+/** An announcement with a number that grows with every one, so the same words twice are two events. */
+export type NumberedAnnouncement = Announcement & { serial: number };
+
 let outcomeSerial = 0;
+let announcementSerial = 0;
+
+/** The announcement for a reading or an answer, numbered. */
+export function announce(announcement: Announcement): NumberedAnnouncement {
+  announcementSerial += 1;
+  return { serial: announcementSerial, ...announcement };
+}
+
+/** What to say about an answer; a refusal is announced by its own alert, so it says nothing. */
+export function announcementFor(outcome: Outcome): Announcement | null {
+  const { result } = outcome;
+  if (result.status !== "ok") return null;
+  if (outcome.command === "run") return { kind: "run" };
+  if (result.equalToTarget === null) return { kind: "check" };
+  return { kind: result.equalToTarget ? "equal" : "notEqual" };
+}
 
 /** An outcome with its own serial number. */
 export function makeOutcome(outcome: Omit<Outcome, "serial">): Outcome {
@@ -56,6 +80,8 @@ export interface CircuitState {
   targetKind: TargetKind;
   targetText: string;
   outcome: Outcome | null;
+  /** The last thing announced. Editing the screen does not clear it: only a new reading or answer replaces it. */
+  announcement: NumberedAnnouncement | null;
   problem: Problem | null;
   busy: Busy;
   /** Bumped by every change of what a request depends on, so an answer to an older screen is dropped. */
@@ -89,6 +115,7 @@ export const initialCircuitState: CircuitState = {
   targetKind: "state",
   targetText: "",
   outcome: null,
+  announcement: null,
   problem: null,
   busy: null,
   revision: 0,
