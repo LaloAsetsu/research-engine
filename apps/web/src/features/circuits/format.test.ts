@@ -47,6 +47,9 @@ describe("formatProbability", () => {
     expect(formatProbability(0.9994, "en")).toBe("99.9%");
     expect(formatProbability(0.999999, "en")).toBe("99.9999%");
     expect(formatProbability(1 - 1e-9, "en")).toBe(">99.9999%");
+    // Exactly half a step below 1 is the first value that would round up to 100%
+    expect(formatProbability(1 - 5e-7, "en")).toBe(">99.9999%");
+    expect(formatProbability(0.9999995, "en")).toBe(">99.9999%");
     expect(formatProbability(1, "en")).toBe("100%");
     expect(formatProbability(1 + 1e-12, "en")).toBe("100%");
   });
@@ -63,6 +66,7 @@ describe("formatProbability", () => {
     expect(formatProbability(1e-9, "es")).toMatch(/^<0,0001\s?%$/);
     expect(formatProbability(5e-6, "es")).toMatch(/^0,0005\s?%$/);
     expect(formatProbability(1 - 1e-9, "es")).toMatch(/^>99,9999\s?%$/);
+    expect(formatProbability(1 - 5e-7, "es")).toMatch(/^>99,9999\s?%$/);
   });
 });
 

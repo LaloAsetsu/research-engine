@@ -44,7 +44,7 @@ export function formatProbability(p: number, locale: string): string {
   // Below half a step the figure would round to 0%; say "less than one step", in the language's own digits
   if (p < FINEST / 2) return `<${percent(FINEST)}`;
   // The same at the top: within half a step of 1 it would round to 100%, so say "above 99.9999%"
-  if (p < 1 && p > 1 - FINEST / 2) return `>${percent(1 - FINEST)}`;
+  if (p < 1 && p >= 1 - FINEST / 2) return `>${percent(1 - FINEST)}`;
   return percent(p);
 }
 
