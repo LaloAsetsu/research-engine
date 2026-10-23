@@ -190,10 +190,13 @@ def use_problem_media_in_openapi(schema: dict[str, Any]) -> None:
                     if response.get("description") == "Validation Error":
                         response["description"] = "The request is not valid."
                     response["content"] = {PROBLEM_MEDIA: {"schema": {"$ref": PROBLEM_REF}}}
-                elif (
-                    content.get("application/json", {}).get("schema", {}).get("$ref") == PROBLEM_REF
-                ):
-                    content[PROBLEM_MEDIA] = content.pop("application/json")
+                else:  # whatever media type the route's response class gave an error body
+                    for media in [
+                        m
+                        for m, body in content.items()
+                        if m != PROBLEM_MEDIA and body.get("schema", {}).get("$ref") == PROBLEM_REF
+                    ]:
+                        content[PROBLEM_MEDIA] = content.pop(media)
     schemas.pop("HTTPValidationError", None)
     schemas.pop("ValidationError", None)
     # The handlers leave absent fields out instead of sending null, so the schema says so.

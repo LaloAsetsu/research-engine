@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
-from helpers import live_settings, prepare_live, write_config
+from helpers import live_settings, prepare_live, sign_in_as_member, write_config
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
@@ -40,12 +40,24 @@ def test_health(client: TestClient) -> None:
 
 
 def test_status_in_fake_mode(client: TestClient) -> None:
-    body = client.get("/api/v1/status").json()
+    body = sign_in_as_member(client).get("/api/v1/status").json()
     assert body["mode"] == "fake"
     assert body["started_at"] == "2026-01-01T00:00:00Z"
     assert body["uptime_s"] == 0
     assert body["ready"] is True
     assert body["api_version"]
+
+
+def test_status_is_for_members_because_it_shows_when_someone_is_asking(
+    client: TestClient,
+) -> None:
+    refused = client.get("/api/v1/status")
+    assert refused.status_code == 401 and refused.headers["content-type"] == PROBLEM
+    assert "uptime_s" not in refused.text and "ask" not in refused.json()
+    temporary = {"username": "temp", "password": "temporary-test-0001"}
+    assert client.post("/api/v1/auth/login", json=temporary).status_code == 204
+    pending = client.get("/api/v1/status")
+    assert pending.status_code == 403 and pending.json()["detail"] == "Change your password first."
 
 
 def test_no_documentation_pages_and_no_served_schema(client: TestClient) -> None:

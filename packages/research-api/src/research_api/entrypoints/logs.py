@@ -20,6 +20,10 @@ from ..adapters.files import PrivacyError, create_private_file, ensure_private_f
 from ..bootstrap import SettingsError
 
 FIELDS = (
+    "ask_id",
+    "error_id",
+    "kind",
+    "trace",
     "event",
     "request_id",
     "username",

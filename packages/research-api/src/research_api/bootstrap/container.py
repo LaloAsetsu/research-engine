@@ -14,9 +14,15 @@ from pathlib import Path
 
 from ..adapters.circuits import CircuitsAdapter
 from ..adapters.clock import SystemClock
-from ..adapters.fake import FixedClock
+from ..adapters.docingest_ask import (
+    OfflineAskEngine,
+    OfflineDocumentReader,
+    open_docingest,
+)
+from ..adapters.fake import FakeAskEngine, FakeDocumentReader, FixedClock
 from ..adapters.hashing import ArgonPasswordHasher
 from ..adapters.persistence import Database
+from ..application.ask import AskDesk
 from ..application.auth import (
     Authenticate,
     AuthServices,
@@ -34,17 +40,23 @@ from ..application.circuits import (
     RunCircuit,
     ShowCircuitConventions,
 )
+from ..application.documents import DocumentServices
 from ..application.status import ReportStatus
 from ..domain.auth import LoginPolicy, SessionPolicy
 from ..domain.status import Mode
+from ..ports.ask import AskEngine
 from ..ports.auth import PasswordHasher
 from ..ports.clock import Clock
+from ..ports.documents import DocumentReader
 from .seed import SeedUser, default_seed_users
 from .settings import Settings, SettingsError, is_loopback
 from .storage import load_private_settings, open_current_database
 
 CONFIG_ENV = "RESEARCH_API_CONFIG"
 FAKE_ENV = "RESEARCH_API_FAKE"
+FAKE_ASK_PAUSE_ENV = "RESEARCH_API_FAKE_ASK_PAUSE"
+DEFAULT_FAKE_ASK_PAUSE_S = 0.6
+MAX_FAKE_ASK_PAUSE_S = 10.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +71,8 @@ class Container:
     check_circuit: CheckCircuit
     circuit_conventions: ShowCircuitConventions
     auth: AuthServices
+    asks: AskDesk
+    documents: DocumentServices
     close: Callable[[], None]
     """Release the database. Idempotent; the HTTP app calls it when it shuts down."""
 
@@ -108,6 +122,18 @@ def build_auth(
     )
 
 
+def _live_ask_parts(settings: Settings) -> tuple[AskEngine, DocumentReader]:
+    path = settings.docingest_config
+    if path is None:
+        return OfflineAskEngine(), OfflineDocumentReader()
+    if not path.is_file():
+        raise SettingsError(f"docingest_config {path} is not a file")
+    try:
+        return open_docingest(path)
+    except (OSError, ValueError) as e:  # an unreadable or invalid docingest settings file
+        raise SettingsError(f"docingest_config {path} cannot be used: {e}") from e
+
+
 def _fake_database() -> tuple[Database, Callable[[], None]]:
     """A throwaway database in a private temporary folder, removed when the process ends."""
     folder = Path(tempfile.mkdtemp(prefix="research-api-fake-"))
@@ -128,6 +154,9 @@ def build_container(
     seed: Sequence[SeedUser] = (),
     cheap_hashing: bool = False,
     clock: Clock | None = None,
+    fake_ask_pause_s: float = 0.0,
+    ask_engine: AskEngine | None = None,
+    document_reader: DocumentReader | None = None,
 ) -> Container:
     """Wire the service.
 
@@ -136,17 +165,34 @@ def build_container(
     refuses to start when its folders are open to other accounts or its tables are out of date.
     ``cheap_hashing`` makes password hashing fast enough for a large test suite, and ``clock``
     replaces the time source (to cross a session or rate-limit window); nothing else changes.
+    In fake mode ``fake_ask_pause_s`` is the time the stand-in engine takes between the phases of
+    an ask (so a screen shows them), and ``ask_engine`` and ``document_reader`` replace the
+    stand-ins (tests).
     """
     if fake and not is_loopback(settings.bind_host):
         raise SettingsError("fake mode serves test data and may only bind a loopback address")
+    # The asks are forgotten half an hour after they end, so they need a clock that moves, in
+    # fake mode too (its fixed clock is for reproducible sessions and documents). A test can
+    # still pass its own.
+    ask_clock = clock or SystemClock()
     clock = clock or (FixedClock() if fake else SystemClock())
     mode: Mode = "fake" if fake else "live"
     api_version = version("research-api")
+    engine: AskEngine
+    reader: DocumentReader
     if fake:
-        database, cleanup = _fake_database()
+        engine = ask_engine or FakeAskEngine(pause_s=fake_ask_pause_s)
+        reader = document_reader or FakeDocumentReader()
+        database, release = _fake_database()
     else:
+        engine, reader = _live_ask_parts(settings)
         database = open_current_database(settings)
-        cleanup = database.close
+        release = database.close
+
+    def cleanup() -> None:
+        engine.close()
+        release()
+
     auth = build_auth(database, settings, clock, ArgonPasswordHasher(cheap=cheap_hashing))
     for account in seed:
         auth.users.create(
@@ -173,6 +219,8 @@ def build_container(
         check_circuit=CheckCircuit(engine=circuits, caps=caps),
         circuit_conventions=ShowCircuitConventions(engine=circuits),
         auth=auth,
+        asks=AskDesk(engine=engine, clock=ask_clock),
+        documents=DocumentServices(reader=reader),
         close=cleanup,
     )
     # A process that exits without a clean shutdown still removes the fake database's folder.
@@ -180,11 +228,30 @@ def build_container(
     return container
 
 
+def _fake_pause(text: str | None) -> float:
+    if text is None:
+        return DEFAULT_FAKE_ASK_PAUSE_S
+    try:
+        pause = float(text)
+    except ValueError:
+        pause = -1.0
+    if not 0 <= pause <= MAX_FAKE_ASK_PAUSE_S:
+        raise SettingsError(
+            f"{FAKE_ASK_PAUSE_ENV} must be a number from 0 to {MAX_FAKE_ASK_PAUSE_S:g}"
+        )
+    return pause
+
+
 def container_from_env(environ: Mapping[str, str] | None = None) -> Container:
     """The container for ``uvicorn --factory``: fake mode, or the settings file named in the env."""
     env = os.environ if environ is None else environ
     if env.get(FAKE_ENV) == "1":
-        return build_container(Settings.defaults(), fake=True, seed=default_seed_users())
+        return build_container(
+            Settings.defaults(),
+            fake=True,
+            seed=default_seed_users(),
+            fake_ask_pause_s=_fake_pause(env.get(FAKE_ASK_PAUSE_ENV)),
+        )
     path = env.get(CONFIG_ENV)
     if not path:
         raise SettingsError(f"set {CONFIG_ENV} to a settings file, or {FAKE_ENV}=1 for fake mode")

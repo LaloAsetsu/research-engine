@@ -17,15 +17,61 @@ from pydantic import (
     model_validator,
 )
 
+from ...application.ask import DeskStatus
 from ...application.auth import SessionInfo
+from ...domain.ask import (
+    MAX_QUESTION_CHARS,
+    AskAnswer,
+    AskFailure,
+    AskOptions,
+    AskQuestion,
+    AskRecord,
+    AskState,
+    KeywordMode,
+    Phase,
+)
 from ...domain.auth import Language, Role, User
 from ...domain.circuits import CheckTarget
+from ...domain.documents import (
+    DocumentDetail,
+    DocumentList,
+    DocumentPage,
+    DocumentSummary,
+    PageKind,
+)
 from ...domain.status import Mode, ServerStatus
+from ...ports.ask import EngineState
 from ...ports.circuits import GateListReading
 
 
 class Health(BaseModel):
     ok: bool
+
+
+class AskStatus(BaseModel):
+    """The answer engine and the GPU lane. Nothing here names a person or a question."""
+
+    state: EngineState = Field(
+        description="`warming_up`: asks are refused with 503 for a few seconds. `ready`. "
+        "`unavailable`: the last start or question found the index or the settings unusable "
+        "(`reason` says which). Asks are still accepted, because the cause may have been fixed."
+    )
+    reason: str | None = Field(default=None, description="Fixed text; set when `unavailable`.")
+    index_generation: str | None = Field(
+        default=None, description="The index commit the last answer was made from."
+    )
+    queued: int = Field(description="Asks waiting for the GPU lane.")
+    busy: bool = Field(description="True while the lane is answering a question.")
+
+    @classmethod
+    def from_domain(cls, desk: DeskStatus) -> AskStatus:
+        return cls(
+            state=desk.health.state,
+            reason=desk.health.reason,
+            index_generation=desk.health.index_generation,
+            queued=desk.queued,
+            busy=desk.busy,
+        )
 
 
 class Status(BaseModel):
@@ -34,15 +80,17 @@ class Status(BaseModel):
     started_at: datetime
     uptime_s: float
     ready: bool
+    ask: AskStatus
 
     @classmethod
-    def from_domain(cls, status: ServerStatus) -> Status:
+    def from_domain(cls, status: ServerStatus, desk: DeskStatus) -> Status:
         return cls(
             mode=status.mode,
             api_version=status.version,
             started_at=status.started_at,
             uptime_s=status.uptime_s,
             ready=status.ready,
+            ask=AskStatus.from_domain(desk),
         )
 
 
@@ -231,4 +279,260 @@ class SessionOut(BaseModel):
             last_seen_at=info.last_seen_at,
             expires_at=info.expires_at,
             current=info.current,
+        )
+
+
+# --- asking ---------------------------------------------------------------------------------
+
+
+class AskRequestBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(
+        min_length=1,
+        max_length=MAX_QUESTION_CHARS,
+        description="The question, in any language. Sent in the body only: it is never put in a "
+        "URL or a log.",
+    )
+    use_index: StrictBool = Field(
+        default=True,
+        description="False: the answer model searches the whole corpus itself (slow).",
+    )
+    bm25: KeywordMode | None = Field(
+        default=None,
+        description="When keyword matching joins the vector search: `english` (English questions "
+        "and questions with LaTeX), `always` or `never`. Null: the server setting.",
+    )
+    whole_blocks: StrictBool | None = Field(
+        default=None,
+        description="Complete the equation, code block or table a chunk cuts. Null: the server "
+        "setting.",
+    )
+    return_contexts: StrictBool = Field(
+        default=True, description="Send the chunks the answer model read."
+    )
+
+    @field_validator("question")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be empty")
+        return value
+
+    def to_domain(self) -> AskQuestion:
+        return AskQuestion(
+            self.question.strip(),
+            AskOptions(self.use_index, self.bm25, self.whole_blocks),
+            self.return_contexts,
+        )
+
+
+class AskAccepted(BaseModel):
+    ask_id: str
+    position: int = Field(
+        description="How many asks are ahead of this one, the running one included (0: next)."
+    )
+
+
+class CitationOut(BaseModel):
+    key: str = Field(description="As printed in the answer: `<16 hex> pages 3-4`.")
+    doc_id: str = Field(description="The full document id.")
+    first_page: int
+    last_page: int
+
+
+class ContextOut(BaseModel):
+    doc_id: str
+    name: str
+    start: int
+    first_page: int
+    last_page: int
+    is_reference: bool
+    text: str
+    score: float | None = Field(
+        default=None,
+        description="The `qa-run/1` context field. Not filled yet: docingest's chunks carry no "
+        "score, so it is always null. A client must not rely on it.",
+    )
+
+
+class TimingsOut(BaseModel):
+    retrieve_s: float
+    answer_s: float
+    wall_s: float
+
+
+class AskResponse(BaseModel):
+    """The answer as a `qa-run/1` item holds it: `citations` and `contexts` have the same shape
+    in both."""
+
+    ask_id: str
+    answer: str = Field(description="Markdown with LaTeX; the References list is not in it.")
+    references_text: str
+    citations: list[CitationOut]
+    contexts: list[ContextOut]
+    sources: list[str] = Field(description="Full ids of the papers the contexts come from.")
+    warnings: list[str]
+    index_generation: str | None
+    timings: TimingsOut
+
+    @classmethod
+    def from_domain(cls, ask_id: str, answer: AskAnswer) -> AskResponse:
+        return cls(
+            ask_id=ask_id,
+            answer=answer.answer,
+            references_text=answer.references_text,
+            citations=[
+                CitationOut(
+                    key=c.key, doc_id=c.doc_id, first_page=c.first_page, last_page=c.last_page
+                )
+                for c in answer.citations
+            ],
+            contexts=[
+                ContextOut(
+                    doc_id=c.doc_id,
+                    name=c.name,
+                    start=c.start,
+                    first_page=c.first_page,
+                    last_page=c.last_page,
+                    is_reference=c.is_reference,
+                    text=c.text,
+                )
+                for c in answer.contexts
+            ],
+            sources=list(answer.sources),
+            warnings=list(answer.warnings),
+            index_generation=answer.index_generation,
+            timings=TimingsOut(
+                retrieve_s=answer.timings.retrieve_s,
+                answer_s=answer.timings.answer_s,
+                wall_s=answer.timings.wall_s,
+            ),
+        )
+
+
+class AskErrorOut(BaseModel):
+    """Why no answer came. `status` is the HTTP status the same failure would have had."""
+
+    ask_id: str
+    kind: str = Field(description="The problem slug: `unavailable`, `upstream-error`, ...")
+    status: int
+    message: str
+    retry_after_s: int | None = None
+
+    @classmethod
+    def from_domain(cls, ask_id: str, failure: AskFailure) -> AskErrorOut:
+        return cls(
+            ask_id=ask_id,
+            kind=failure.kind,
+            status=failure.status,
+            message=failure.message,
+            retry_after_s=failure.retry_after_s,
+        )
+
+
+class AskView(BaseModel):
+    ask_id: str
+    state: AskState
+    position: int | None = Field(default=None, description="Set while `queued`.")
+    phase: Phase | None = Field(default=None, description="Where a running ask is.")
+    response: AskResponse | None = Field(default=None, description="Set when `done`.")
+    error: AskErrorOut | None = Field(default=None, description="Set when `failed`.")
+
+    @classmethod
+    def from_domain(cls, record: AskRecord) -> AskView:
+        answer, failure = record.answer, record.failure
+        return cls(
+            ask_id=record.ask_id,
+            state=record.state,
+            position=record.position,
+            phase=record.phase if record.state is AskState.RUNNING else None,
+            response=AskResponse.from_domain(record.ask_id, answer) if answer else None,
+            error=AskErrorOut.from_domain(record.ask_id, failure) if failure else None,
+        )
+
+
+# --- papers ---------------------------------------------------------------------------------
+
+
+class DocumentSummaryOut(BaseModel):
+    doc_id: str
+    short_id: str = Field(description="The first 16 characters, as a citation prints them.")
+    title: str
+    source_name: str
+    source_kind: str = Field(description="`pdf`, `latex`, `office`, `image` or `text`.")
+    pages: int
+    page_kind: PageKind = Field(
+        description="`section` for a LaTeX source (its page markers number sections), else `page`."
+    )
+
+    @classmethod
+    def from_domain(cls, summary: DocumentSummary) -> DocumentSummaryOut:
+        return cls(
+            doc_id=summary.doc_id,
+            short_id=summary.short_id,
+            title=summary.title,
+            source_name=summary.source_name,
+            source_kind=summary.source_kind,
+            pages=summary.pages,
+            page_kind=summary.page_kind,
+        )
+
+
+class DocumentListOut(BaseModel):
+    items: list[DocumentSummaryOut]
+    total: int = Field(description="Papers that match, before the limit.")
+
+    @classmethod
+    def from_domain(cls, found: DocumentList) -> DocumentListOut:
+        return cls(
+            items=[DocumentSummaryOut.from_domain(s) for s in found.items], total=found.total
+        )
+
+
+class PageInfoOut(BaseModel):
+    page: int
+    method: str = Field(description="How the page text was made (`text_layer`, `latex`, ...).")
+    title: str | None = Field(default=None, description="A section title (LaTeX sources).")
+
+
+class DocumentOut(BaseModel):
+    summary: DocumentSummaryOut
+    authors: list[str]
+    year: int | None
+    doi: str | None
+    arxiv_id: str | None
+    url: str | None
+    pages: list[PageInfoOut]
+
+    @classmethod
+    def from_domain(cls, detail: DocumentDetail) -> DocumentOut:
+        return cls(
+            summary=DocumentSummaryOut.from_domain(detail.summary),
+            authors=list(detail.authors),
+            year=detail.year,
+            doi=detail.doi,
+            arxiv_id=detail.arxiv_id,
+            url=detail.url,
+            pages=[PageInfoOut(page=p.page, method=p.method, title=p.title) for p in detail.pages],
+        )
+
+
+class DocumentPageOut(BaseModel):
+    doc_id: str
+    page: int
+    pages: int
+    kind: PageKind
+    title: str | None = None
+    markdown: str = Field(description="The page as Markdown with LaTeX math.")
+
+    @classmethod
+    def from_domain(cls, page: DocumentPage) -> DocumentPageOut:
+        return cls(
+            doc_id=page.doc_id,
+            page=page.page,
+            pages=page.pages,
+            kind=page.kind,
+            title=page.title,
+            markdown=page.markdown,
         )
