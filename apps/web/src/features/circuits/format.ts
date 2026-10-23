@@ -24,15 +24,19 @@ export function formatComplex([re, im]: Complex, locale: string): string {
   return `${r} ${negative ? MINUS : "+"} ${imaginary}`;
 }
 
-/** A probability as a percentage: `50%`, `12.5%`, `0.01%`; a nonzero one is never shown as 0%. */
+/** The finest step of a shown percentage: 0.0001%, as a probability. */
+const FINEST = 1e-6;
+
+/** A probability as a percentage: `50%`, `12.5%`, `0.0005%`; a nonzero one is never shown as 0%. */
 export function formatProbability(p: number, locale: string): string {
   if (p === 0) return new Intl.NumberFormat(locale, { style: "percent" }).format(0);
   const digits = p >= 0.1 ? 1 : p >= 0.001 ? 2 : 4;
-  const text = new Intl.NumberFormat(locale, {
-    style: "percent",
-    maximumFractionDigits: digits,
-  }).format(p);
-  return Number.parseFloat(text.replace(",", ".")) === 0 ? `<0.01%` : text;
+  const percent = (value: number) =>
+    new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: digits }).format(
+      value,
+    );
+  // Below half a step the figure would round to 0%; say "less than one step", in the language's own digits
+  return p < FINEST / 2 ? `<${percent(FINEST)}` : percent(p);
 }
 
 /** `|010>` for outcome `index` of `bits` bits, first wire most significant. */

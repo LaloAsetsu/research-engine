@@ -33,8 +33,18 @@ describe("formatProbability", () => {
   });
 
   it("never shows a nonzero probability as zero", () => {
-    expect(formatProbability(1e-9, "en")).toBe("<0.01%");
+    expect(formatProbability(1e-9, "en")).toBe("<0.0001%");
     expect(formatProbability(0.00005, "en")).toBe("0.005%");
+  });
+
+  it("reads a smaller probability as a smaller figure", () => {
+    const written = [1e-9, 4e-7, 5e-6, 1e-5, 0.00005].map((p) => formatProbability(p, "en"));
+    expect(written).toEqual(["<0.0001%", "<0.0001%", "0.0005%", "0.001%", "0.005%"]);
+  });
+
+  it("builds the bound with the digits of the language", () => {
+    expect(formatProbability(1e-9, "es")).toMatch(/^<0,0001\s?%$/);
+    expect(formatProbability(5e-6, "es")).toMatch(/^0,0005\s?%$/);
   });
 });
 
