@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import socket
 import threading
 import time
@@ -73,6 +74,25 @@ def test_a_page_on_another_origin_cannot_sign_in(running: Running) -> None:
             done = client.post("/api/v1/auth/login", json=body, headers={"Origin": origin})
             assert done.status_code == 403, origin
         assert client.post("/api/v1/auth/login", json=body).status_code == 403  # none at all
+
+
+def test_a_rebinding_host_name_is_refused_over_a_real_connection(running: Running) -> None:
+    conn = http.client.HTTPConnection("127.0.0.1", running.port, timeout=5)
+    conn.putrequest("GET", "/api/v1/status", skip_host=True)
+    conn.putheader("Host", f"rebind.attacker.example:{running.port}")
+    conn.endheaders()
+    reply = conn.getresponse()
+    assert reply.status == 403
+    assert b"uptime_s" not in reply.read()
+
+
+def test_a_request_without_a_host_header_is_not_served_over_a_real_connection(
+    running: Running,
+) -> None:
+    conn = http.client.HTTPConnection("127.0.0.1", running.port, timeout=5)
+    conn.putrequest("GET", "/api/v1/health", skip_host=True)
+    conn.endheaders()
+    assert conn.getresponse().status in (400, 403)  # uvicorn itself answers 400 to HTTP/1.1
 
 
 def test_the_session_cookie_is_not_readable_by_script_but_the_csrf_cookie_is(

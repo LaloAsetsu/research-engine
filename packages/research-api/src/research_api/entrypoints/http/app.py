@@ -13,6 +13,7 @@ from .auth import admin_router
 from .auth import router as auth_router
 from .circuits import router as circuits_router
 from .guard import BindGuard, loopback_only, loopback_or_address
+from .hosts import HostGuard, hosts_allowed_by
 from .origin import OriginGuard, origin_allowed_by
 from .problems import install_problem_handlers, use_problem_media_in_openapi
 from .routes import router
@@ -40,9 +41,10 @@ def build_app(container: Container) -> FastAPI:
     app.state.container = container
     fake = container.mode == "fake"
     # Added innermost first. A request meets, in order: the access log (so refusals are logged
-    # too), the bind check (which also covers a start that skips `research-api serve`), the Origin
-    # check on writes, then the routes.
+    # too), the bind check (which also covers a start that skips `research-api serve`), the Host
+    # check, the Origin check on writes, then the routes.
     app.add_middleware(OriginGuard, allowed=origin_allowed_by(container.settings, fake=fake))
+    app.add_middleware(HostGuard, allowed=hosts_allowed_by(container.settings, fake=fake))
     app.add_middleware(
         BindGuard,
         allowed=loopback_only if fake else loopback_or_address(container.settings.bind_host),

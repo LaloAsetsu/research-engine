@@ -294,6 +294,14 @@ def test_a_request_line_has_the_user_the_status_and_a_duration(
     assert "username" not in anonymous[0]
 
 
+def test_a_refused_host_is_logged_as_a_request(logged: tuple[TestClient, Path, list[str]]) -> None:
+    client, path, _ = logged
+    client.get("/api/v1/health", headers={"Host": "evil.example"})
+    refused = [line for line in lines(path) if line.get("status") == 403]
+    assert refused and refused[0]["route"] == "-"
+    assert "evil.example" not in path.read_text(encoding="utf-8")
+
+
 def test_an_unhandled_error_is_logged_with_its_id_and_answered_without_a_trace(
     logged: tuple[TestClient, Path, list[str]],
 ) -> None:
