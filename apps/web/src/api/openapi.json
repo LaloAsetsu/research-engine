@@ -981,6 +981,11 @@
             "description": "A problem."
           }
         },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
         "summary": "Compare a circuit with a state, a unitary or another circuit",
         "tags": [
           "circuits"
@@ -1015,6 +1020,11 @@
             "description": "A problem."
           }
         },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
         "summary": "The conventions, the gate table and the limits of the simulator",
         "tags": [
           "circuits"
@@ -1097,6 +1107,11 @@
             "description": "A problem."
           }
         },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
         "summary": "Read the circuits drawn in LaTeX",
         "tags": [
           "circuits"
@@ -1181,6 +1196,11 @@
             "description": "A problem."
           }
         },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
         "summary": "Simulate a circuit",
         "tags": [
           "circuits"

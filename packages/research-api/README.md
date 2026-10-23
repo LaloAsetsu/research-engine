@@ -64,7 +64,7 @@ All paths are under `/api/v1`.
 
 Accounts are made, disabled, reset and given a role with the `users` command, never over HTTP (see Sign-in below).
 
-The circuit endpoints are described [below](#circuit-check).
+The four circuit endpoints need a signed-in member and are described [below](#circuit-check).
 
 No documentation pages and no schema URL are served (the stock pages load scripts from a CDN). The contract is exported instead:
 
@@ -144,7 +144,7 @@ A failed sign-in is recorded in the `login_attempts` table (the name it is count
 
 | | member | admin |
 |---|---|---|
-| Everything the later pull requests give a member | yes | yes |
+| The circuit check and everything the later pull requests give a member | yes | yes |
 | `GET /admin/sessions`, `DELETE /admin/sessions/{id}` | no | yes |
 
 A route takes its caller from `entrypoints/http/security.py`:
@@ -211,7 +211,7 @@ The three settings are in the `[circuit_caps]` table of the settings file ([`con
 
 **Time limit, honestly.** A Python thread cannot be stopped. The work runs in a daemon thread; when it outlives `timeout_s` the request is released with the `422` and the thread finishes on its own, still holding one of the two slots. So a slow circuit cannot pile up work without bound (the caps keep each job short, the slots keep them few), and a stopping server does not wait for them. If this ever matters, the next step is a worker process that can be killed.
 
-**No sign-in yet.** Like `/health` and `/status`, these endpoints are open until the auth pull request adds the member role to them. Run on loopback only until then. They log no request body and no circuit text.
+**Sign-in.** The four endpoints need a signed-in member (`Depends(member)` on the router): no session is a `401`, a pending password change is a `403`, and a write without the CSRF header is a `403` (see [Sign-in](#sign-in)). The check comes before the body is read, so a caller with no session gets the `401` whatever it sends and costs no body read. They log no request body and no circuit text.
 
 ## Layout
 

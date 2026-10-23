@@ -7,8 +7,10 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from helpers import SEED_FILE, sign_in_as_member
 
 from research_api.bootstrap import Settings, build_container
+from research_api.bootstrap.seed import load_seed_users
 from research_api.entrypoints.cli import openapi_document
 from research_api.entrypoints.http import build_app
 
@@ -39,6 +41,12 @@ def wide(wires: int, ops: int = 1) -> dict[str, Any]:
 
 
 @pytest.fixture
+def client(client: TestClient) -> TestClient:
+    """The circuit routes are for members: every test here signs in first."""
+    return sign_in_as_member(client)
+
+
+@pytest.fixture
 def run(client: TestClient) -> Callable[..., Any]:
     def post(**body: Any) -> Any:
         return client.post("/api/v1/circuits/run", json=body)
@@ -56,7 +64,10 @@ def check(client: TestClient) -> Callable[..., Any]:
 
 def client_with(client_for: ClientFor, **caps: Any) -> TestClient:
     settings = Settings.model_validate({"circuit_caps": caps})
-    return client_for(build_app(build_container(settings, fake=True)))
+    app = build_app(
+        build_container(settings, fake=True, seed=load_seed_users(SEED_FILE), cheap_hashing=True)
+    )
+    return sign_in_as_member(client_for(app))
 
 
 # --- parse -------------------------------------------------------------------------------------

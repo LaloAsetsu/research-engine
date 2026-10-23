@@ -10,13 +10,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.routing import APIRoute
+from starlette.concurrency import run_in_threadpool
 
 from ...bootstrap import Container
 from ...domain.circuits import USE_THE_CLI, read_json_strict
 from ...domain.errors import TooLargeError
 from .schemas import CheckRequest, GateListResponse, ParseRequest, Problem, RunRequest
+from .security import SESSION_COOKIE, member, signed_in
 
 SIMULATOR_NOTE = (
     "The body is quantum-sim's `quantum-sim-result/1` document as it is: `status` (`ok`, "
@@ -49,8 +51,16 @@ class BoundedRequest(Request):
         return TooLargeError(f"The request body is over {self.limit} bytes. {USE_THE_CLI}")
 
 
+def check_caller(request: Request) -> None:
+    member(signed_in(request, request.cookies.get(SESSION_COOKIE)))
+
+
 class CircuitRoute(APIRoute):
-    """Caps the body before FastAPI reads it and refuses a key written twice anywhere in it.
+    """Checks the caller, caps the body before FastAPI reads it and refuses a key written twice.
+
+    The caller is checked first, so a request with no session is a 401 whatever its body holds and
+    costs no body read. The router's ``member`` dependency checks again and puts the session
+    cookie in the OpenAPI contract.
 
     FastAPI would parse the body with ``json.loads``, which keeps the last value of a repeated
     key without a word. Reading the raw bytes first makes the refusal come before the model.
@@ -61,6 +71,7 @@ class CircuitRoute(APIRoute):
 
         async def handler(request: Request) -> Response:
             container: Container = request.app.state.container
+            await run_in_threadpool(check_caller, request)
             bounded = BoundedRequest(request.scope, request.receive)
             bounded.limit = container.settings.circuit_caps.max_body_bytes
             body = await bounded.body()
@@ -75,6 +86,7 @@ router = APIRouter(
     prefix="/circuits",
     tags=["circuits"],
     route_class=CircuitRoute,
+    dependencies=[Depends(member)],
     responses={"default": {"model": Problem, "description": "A problem."}},
 )
 

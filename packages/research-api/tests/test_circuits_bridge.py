@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from helpers import sign_in_as_member
 from quantum_sim import check as quantum_check
 from quantum_sim import run as quantum_run
 
@@ -63,6 +64,11 @@ HAND_UNITARIES = {
 
 def test_the_fixtures_are_there() -> None:
     assert len(SOURCES) == 37 and (FIXTURES / "bell_quantikz.json").is_file()
+
+
+@pytest.fixture
+def client(client: TestClient) -> TestClient:
+    return sign_in_as_member(client)
 
 
 def parse(client: TestClient, name: str) -> dict[str, Any]:

@@ -12,6 +12,7 @@ from starlette.types import Message
 from research_api.bootstrap import Settings, open_database
 
 LOOPBACK = "http://127.0.0.1:8090"
+MEMBER = {"username": "beto", "password": "test-password-beto-02"}
 ORIGIN = {"Origin": LOOPBACK}
 SEED_FILE = Path(__file__).parent / "fixtures" / "seed-users.json"
 
@@ -93,3 +94,11 @@ def http_scope(
 
 def status_of(messages: list[Message]) -> int:
     return next(m["status"] for m in messages if m["type"] == "http.response.start")
+
+
+def sign_in_as_member(client: Any) -> Any:
+    """Sign a client in as a seeded member and make it send the CSRF header on every request."""
+    done = client.post("/api/v1/auth/login", json=MEMBER)
+    assert done.status_code == 204, done.text
+    client.headers["X-CSRF-Token"] = client.cookies.get("re_csrf", "")
+    return client
