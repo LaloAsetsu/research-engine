@@ -14,6 +14,7 @@ from sqlalchemy import (
     MetaData,
     String,
     TypeDecorator,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -91,3 +92,33 @@ class LoginAttemptRow(Base):
     username: Mapped[str] = mapped_column(String(64))
     address: Mapped[str] = mapped_column(String(64))
     at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+
+
+class ArtifactRow(Base):
+    """The catalog of the files under ``data_dir``: one row per set version (kind ``qset``).
+
+    The file is the content and its md5 is the identity; this row says who owns it, whether it is
+    still a draft, and what the catalog shows without reading the file. ``path`` is relative to
+    the data folder.
+    """
+
+    __tablename__ = "artifacts"
+    __table_args__ = (
+        UniqueConstraint("kind", "name", "version", name="uq_artifacts_kind_name_version"),
+        CheckConstraint("kind IN ('qset')", name="kind"),
+        CheckConstraint("status IN ('draft', 'frozen')", name="status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(64))
+    version: Mapped[str] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(8))
+    owner: Mapped[str] = mapped_column(String(32))
+    md5: Mapped[str] = mapped_column(String(32))
+    items: Mapped[int] = mapped_column(Integer)
+    corpus: Mapped[str | None] = mapped_column(String(128))
+    path: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+    updated_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+    frozen_at: Mapped[dt.datetime | None] = mapped_column(UtcDateTime)

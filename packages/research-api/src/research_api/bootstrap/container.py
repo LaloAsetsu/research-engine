@@ -12,6 +12,7 @@ from datetime import timedelta
 from importlib.metadata import version
 from pathlib import Path
 
+from ..adapters.bench import QaBenchSetFormats
 from ..adapters.circuits import CircuitsAdapter
 from ..adapters.clock import SystemClock
 from ..adapters.docingest_ask import (
@@ -20,6 +21,7 @@ from ..adapters.docingest_ask import (
     open_docingest,
 )
 from ..adapters.fake import FakeAskEngine, FakeDocumentReader, FixedClock
+from ..adapters.files import SetFileStore
 from ..adapters.hashing import ArgonPasswordHasher
 from ..adapters.persistence import Database
 from ..application.ask import AskDesk
@@ -41,6 +43,7 @@ from ..application.circuits import (
     ShowCircuitConventions,
 )
 from ..application.documents import DocumentServices
+from ..application.sets import SetServices, build_set_services
 from ..application.status import ReportStatus
 from ..domain.auth import LoginPolicy, SessionPolicy
 from ..domain.status import Mode
@@ -48,9 +51,10 @@ from ..ports.ask import AskEngine
 from ..ports.auth import PasswordHasher
 from ..ports.clock import Clock
 from ..ports.documents import DocumentReader
+from .demo_sets import seed_demo_sets
 from .seed import SeedUser, default_seed_users
 from .settings import Settings, SettingsError, is_loopback
-from .storage import load_private_settings, open_current_database
+from .storage import load_private_settings, open_current_database, storage_paths
 
 CONFIG_ENV = "RESEARCH_API_CONFIG"
 FAKE_ENV = "RESEARCH_API_FAKE"
@@ -73,6 +77,7 @@ class Container:
     auth: AuthServices
     asks: AskDesk
     documents: DocumentServices
+    sets: SetServices
     close: Callable[[], None]
     """Release the database. Idempotent; the HTTP app calls it when it shuts down."""
 
@@ -134,8 +139,8 @@ def _live_ask_parts(settings: Settings) -> tuple[AskEngine, DocumentReader]:
         raise SettingsError(f"docingest_config {path} cannot be used: {e}") from e
 
 
-def _fake_database() -> tuple[Database, Callable[[], None]]:
-    """A throwaway database in a private temporary folder, removed when the process ends."""
+def _fake_storage() -> tuple[Database, Path, Callable[[], None]]:
+    """A throwaway database and data folder in a private temporary folder, removed at the end."""
     folder = Path(tempfile.mkdtemp(prefix="research-api-fake-"))
     database = Database.open(folder / "fake.sqlite3")
     database.create_all()
@@ -144,7 +149,16 @@ def _fake_database() -> tuple[Database, Callable[[], None]]:
         database.close()
         shutil.rmtree(folder, ignore_errors=True)
 
-    return database, cleanup
+    return database, folder / "data", cleanup
+
+
+def build_sets(database: Database, data_dir: Path, clock: Clock) -> SetServices:
+    return build_set_services(
+        catalog=database.sets,
+        files=SetFileStore(data_dir / "sets"),
+        formats=QaBenchSetFormats(),
+        clock=clock,
+    )
 
 
 def build_container(
@@ -183,10 +197,11 @@ def build_container(
     if fake:
         engine = ask_engine or FakeAskEngine(pause_s=fake_ask_pause_s)
         reader = document_reader or FakeDocumentReader()
-        database, release = _fake_database()
+        database, data_dir, release = _fake_storage()
     else:
         engine, reader = _live_ask_parts(settings)
         database = open_current_database(settings)
+        data_dir = storage_paths(settings)[0]
         release = database.close
 
     def cleanup() -> None:
@@ -206,6 +221,9 @@ def build_container(
     caps = settings.circuit_caps.caps()
     # quantum-sim and docingest's gate lists do no I/O, so fake mode runs the real engine.
     circuits = CircuitsAdapter(timeout_s=caps.timeout_s)
+    sets = build_sets(database, data_dir, clock)
+    if fake:
+        seed_demo_sets(sets)
     container = Container(
         mode=mode,
         settings=settings,
@@ -221,6 +239,7 @@ def build_container(
         auth=auth,
         asks=AskDesk(engine=engine, clock=ask_clock),
         documents=DocumentServices(reader=reader),
+        sets=sets,
         close=cleanup,
     )
     # A process that exits without a clean shutdown still removes the fake database's folder.

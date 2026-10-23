@@ -15,7 +15,7 @@ from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from .models import Base
-from .repos import SqlLoginAttempts, SqlSessions, SqlUsers
+from .repos import SqlLoginAttempts, SqlSessions, SqlSetCatalog, SqlUsers
 
 MIGRATIONS = Path(__file__).resolve().parent / "migrations"
 
@@ -57,6 +57,7 @@ class Database:
         self.users = SqlUsers(engine)
         self.sessions = SqlSessions(engine)
         self.attempts = SqlLoginAttempts(engine)
+        self.sets = SqlSetCatalog(engine)
 
     @classmethod
     def open(cls, path: Path) -> Database:

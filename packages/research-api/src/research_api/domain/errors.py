@@ -47,6 +47,12 @@ class ConflictError(ResearchApiError):
     slug = "conflict"
 
 
+class PreconditionRequiredError(ResearchApiError):
+    """A write that needs ``If-Match`` came without it."""
+
+    slug = "precondition-required"
+
+
 class TooLargeError(ResearchApiError):
     """A body or an input is over its cap."""
 
@@ -95,3 +101,7 @@ class UnavailableError(ResearchApiError):
     def __init__(self, detail: str = "", *, retry_after_s: int | None = None) -> None:
         super().__init__(detail)
         self.retry_after_s = retry_after_s
+
+
+class CorruptStoreError(ResearchApiError):
+    """A file the service wrote can no longer be read. It maps to a 500 and is logged."""

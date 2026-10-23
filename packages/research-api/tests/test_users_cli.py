@@ -94,17 +94,17 @@ def test_db_upgrade_makes_the_private_folders_and_the_tables(
     assert cli.main(["db", "status", "--config", str(path)]) == 1
     assert "db upgrade" in capsys.readouterr().err
     assert cli.main(["db", "upgrade", "--config", str(path)]) == 0
-    assert "revision 0001" in capsys.readouterr().out
+    assert "revision 0002" in capsys.readouterr().out
     assert stat.S_IMODE((home / "db" / "api.sqlite3").stat().st_mode) == 0o600
     assert stat.S_IMODE((home / "db").stat().st_mode) == 0o700
     assert stat.S_IMODE((home / "data").stat().st_mode) == 0o700
     assert cli.main(["db", "status", "--config", str(path)]) == 0
-    assert "revision 0001; code expects 0001" in capsys.readouterr().out
+    assert "revision 0002; code expects 0002" in capsys.readouterr().out
 
 
 def test_db_upgrade_twice_is_fine(config: Path, capsys: Capture) -> None:
     assert run(config, "db", "upgrade") == 0
-    assert "0001" in capsys.readouterr().out
+    assert "0002" in capsys.readouterr().out
 
 
 def test_db_status_says_when_the_tables_are_behind(config: Path, capsys: Capture) -> None:
@@ -114,7 +114,7 @@ def test_db_status_says_when_the_tables_are_behind(config: Path, capsys: Capture
         connection.execute("delete from alembic_version")
     capsys.readouterr()
     assert run(config, "db", "status") == 1
-    assert "revision none; code expects 0001" in capsys.readouterr().out
+    assert "revision none; code expects 0002" in capsys.readouterr().out
 
 
 def test_db_commands_need_a_settings_file(capsys: Capture, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -10,8 +10,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from ...domain.auth import Language, NewUser, Role, Session, User
-from ...domain.errors import ConflictError
-from .models import LoginAttemptRow, SessionRow, UserRow
+from ...domain.errors import ConflictError, NotFoundError
+from ...domain.sets import SetRef, SetStatus, SetVersion, version_number
+from .models import ArtifactRow, LoginAttemptRow, SessionRow, UserRow
 
 
 def _user(row: UserRow) -> User:
@@ -229,3 +230,107 @@ class SqlLoginAttempts:
     def purge_before(self, at: datetime) -> None:
         with DbSession(self._engine) as db, db.begin():
             db.execute(delete(LoginAttemptRow).where(LoginAttemptRow.at < at))
+
+
+QSET_KIND = "qset"
+
+
+def _set_version(row: ArtifactRow) -> SetVersion:
+    return SetVersion(
+        ref=SetRef(row.name, row.version),
+        status=cast(SetStatus, row.status),
+        owner=row.owner,
+        md5=row.md5,
+        items=row.items,
+        corpus=row.corpus,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        frozen_at=row.frozen_at,
+    )
+
+
+def _set_path(ref: SetRef) -> str:
+    return f"sets/{ref.name}/{ref.version}.qset.jsonl"
+
+
+class SqlSetCatalog:
+    """The catalog of question-set versions (``artifacts`` rows of kind ``qset``)."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    @staticmethod
+    def _where(ref: SetRef) -> tuple[Any, ...]:
+        return (
+            ArtifactRow.kind == QSET_KIND,
+            ArtifactRow.name == ref.name,
+            ArtifactRow.version == ref.version,
+        )
+
+    def all(self) -> list[SetVersion]:
+        with DbSession(self._engine) as db:
+            rows = db.scalars(select(ArtifactRow).where(ArtifactRow.kind == QSET_KIND))
+            found = [_set_version(r) for r in rows]
+        return sorted(found, key=lambda v: (v.ref.name, version_number(v.ref.version)))
+
+    def get(self, ref: SetRef) -> SetVersion | None:
+        with DbSession(self._engine) as db:
+            row = db.scalar(select(ArtifactRow).where(*self._where(ref)))
+            return None if row is None else _set_version(row)
+
+    def versions_of(self, name: str) -> list[SetVersion]:
+        with DbSession(self._engine) as db:
+            rows = db.scalars(
+                select(ArtifactRow).where(ArtifactRow.kind == QSET_KIND, ArtifactRow.name == name)
+            )
+            found = [_set_version(r) for r in rows]
+        return sorted(found, key=lambda v: version_number(v.ref.version))
+
+    def add(self, version: SetVersion) -> None:
+        row = ArtifactRow(
+            kind=QSET_KIND,
+            name=version.ref.name,
+            version=version.ref.version,
+            status=version.status,
+            owner=version.owner,
+            md5=version.md5,
+            items=version.items,
+            corpus=version.corpus,
+            path=_set_path(version.ref),
+            created_at=version.created_at,
+            updated_at=version.updated_at,
+            frozen_at=version.frozen_at,
+        )
+        try:
+            with DbSession(self._engine) as db, db.begin():
+                db.add(row)
+        except IntegrityError:
+            raise ConflictError(f"{version.ref.header_name} already exists.") from None
+
+    def save(self, version: SetVersion, *, expected_md5: str) -> None:
+        with DbSession(self._engine) as db, db.begin():
+            result = db.execute(
+                update(ArtifactRow)
+                .where(*self._where(version.ref), ArtifactRow.md5 == expected_md5)
+                .values(
+                    status=version.status,
+                    owner=version.owner,
+                    md5=version.md5,
+                    items=version.items,
+                    corpus=version.corpus,
+                    updated_at=version.updated_at,
+                    frozen_at=version.frozen_at,
+                )
+            )
+            if _count(result) == 1:
+                return
+            exists = db.scalar(
+                select(func.count()).select_from(ArtifactRow).where(*self._where(version.ref))
+            )
+        if not exists:
+            raise NotFoundError(f"No such version {version.ref.header_name}.")
+        raise ConflictError("The version changed while this request ran.")
+
+    def delete(self, ref: SetRef) -> None:
+        with DbSession(self._engine) as db, db.begin():
+            db.execute(delete(ArtifactRow).where(*self._where(ref)))
