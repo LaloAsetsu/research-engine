@@ -5,13 +5,29 @@ import { ANA, createAuthMock, TEMP, type MockUser } from "../src/test/auth-mock"
 export { ANA, TEMP };
 
 interface Fixtures {
-  /** Answers the sign-in endpoints with the shared mock; /health and /status reach the real API. */
+  /**
+   * Answers the sign-in endpoints with the shared mock, and /status with a fake-mode body (the
+   * real one needs a real session, which the mock does not make); /health reaches the real API.
+   * real-api.spec.ts reads the real /status after a real sign-in.
+   */
   authMock: ReturnType<typeof createAuthMock>;
 }
+
+const STATUS_BODY = {
+  mode: "fake",
+  api_version: "0.1.0",
+  started_at: "2026-01-01T00:00:00Z",
+  uptime_s: 12.5,
+  ready: true,
+  ask: { state: "ready", reason: null, index_generation: null, queued: 0, busy: false },
+};
 
 export const test = base.extend<Fixtures>({
   authMock: async ({ page }, provide) => {
     const mock = createAuthMock();
+    await page.route("**/api/v1/status", (route) =>
+      route.fulfill({ status: 200, json: STATUS_BODY }),
+    );
     await page.route("**/api/v1/auth/**", async (route) => {
       const request = route.request();
       const body: unknown = request.postData()

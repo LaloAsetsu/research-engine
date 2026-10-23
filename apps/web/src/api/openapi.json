@@ -1,6 +1,332 @@
 {
   "components": {
     "schemas": {
+      "AskAccepted": {
+        "properties": {
+          "ask_id": {
+            "title": "Ask Id",
+            "type": "string"
+          },
+          "position": {
+            "description": "How many asks are ahead of this one, the running one included (0: next).",
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ask_id",
+          "position"
+        ],
+        "title": "AskAccepted",
+        "type": "object"
+      },
+      "AskErrorOut": {
+        "description": "Why no answer came. `status` is the HTTP status the same failure would have had.",
+        "properties": {
+          "ask_id": {
+            "title": "Ask Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The problem slug: `unavailable`, `upstream-error`, ...",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retry_after_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After S"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ask_id",
+          "kind",
+          "status",
+          "message"
+        ],
+        "title": "AskErrorOut",
+        "type": "object"
+      },
+      "AskRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "bm25": {
+            "anyOf": [
+              {
+                "enum": [
+                  "english",
+                  "always",
+                  "never"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When keyword matching joins the vector search: `english` (English questions and questions with LaTeX), `always` or `never`. Null: the server setting.",
+            "title": "Bm25"
+          },
+          "question": {
+            "description": "The question, in any language. Sent in the body only: it is never put in a URL or a log.",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "return_contexts": {
+            "default": true,
+            "description": "Send the chunks the answer model read.",
+            "title": "Return Contexts",
+            "type": "boolean"
+          },
+          "use_index": {
+            "default": true,
+            "description": "False: the answer model searches the whole corpus itself (slow).",
+            "title": "Use Index",
+            "type": "boolean"
+          },
+          "whole_blocks": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Complete the equation, code block or table a chunk cuts. Null: the server setting.",
+            "title": "Whole Blocks"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "AskRequestBody",
+        "type": "object"
+      },
+      "AskResponse": {
+        "description": "The answer as a `qa-run/1` item holds it: `citations` and `contexts` have the same shape\nin both.",
+        "properties": {
+          "answer": {
+            "description": "Markdown with LaTeX; the References list is not in it.",
+            "title": "Answer",
+            "type": "string"
+          },
+          "ask_id": {
+            "title": "Ask Id",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "contexts": {
+            "items": {
+              "$ref": "#/components/schemas/ContextOut"
+            },
+            "title": "Contexts",
+            "type": "array"
+          },
+          "index_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Generation"
+          },
+          "references_text": {
+            "title": "References Text",
+            "type": "string"
+          },
+          "sources": {
+            "description": "Full ids of the papers the contexts come from.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "timings": {
+            "$ref": "#/components/schemas/TimingsOut"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ask_id",
+          "answer",
+          "references_text",
+          "citations",
+          "contexts",
+          "sources",
+          "warnings",
+          "index_generation",
+          "timings"
+        ],
+        "title": "AskResponse",
+        "type": "object"
+      },
+      "AskState": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled"
+        ],
+        "title": "AskState",
+        "type": "string"
+      },
+      "AskStatus": {
+        "description": "The answer engine and the GPU lane. Nothing here names a person or a question.",
+        "properties": {
+          "busy": {
+            "description": "True while the lane is answering a question.",
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "index_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The index commit the last answer was made from.",
+            "title": "Index Generation"
+          },
+          "queued": {
+            "description": "Asks waiting for the GPU lane.",
+            "title": "Queued",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fixed text; set when `unavailable`.",
+            "title": "Reason"
+          },
+          "state": {
+            "description": "`warming_up`: asks are refused with 503 for a few seconds. `ready`. `unavailable`: the last start or question found the index or the settings unusable (`reason` says which). Asks are still accepted, because the cause may have been fixed.",
+            "enum": [
+              "warming_up",
+              "ready",
+              "unavailable"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "queued",
+          "busy"
+        ],
+        "title": "AskStatus",
+        "type": "object"
+      },
+      "AskView": {
+        "properties": {
+          "ask_id": {
+            "title": "Ask Id",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AskErrorOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when `failed`."
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "retrieving",
+                  "answering"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a running ask is.",
+            "title": "Phase"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set while `queued`.",
+            "title": "Position"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AskResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when `done`."
+          },
+          "state": {
+            "$ref": "#/components/schemas/AskState"
+          }
+        },
+        "required": [
+          "ask_id",
+          "state"
+        ],
+        "title": "AskView",
+        "type": "object"
+      },
       "CheckRequest": {
         "additionalProperties": false,
         "properties": {
@@ -113,6 +439,288 @@
         "title": "CheckTargetBody",
         "type": "object"
       },
+      "CitationOut": {
+        "properties": {
+          "doc_id": {
+            "description": "The full document id.",
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "first_page": {
+            "title": "First Page",
+            "type": "integer"
+          },
+          "key": {
+            "description": "As printed in the answer: `<16 hex> pages 3-4`.",
+            "title": "Key",
+            "type": "string"
+          },
+          "last_page": {
+            "title": "Last Page",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "doc_id",
+          "first_page",
+          "last_page"
+        ],
+        "title": "CitationOut",
+        "type": "object"
+      },
+      "ContextOut": {
+        "properties": {
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "first_page": {
+            "title": "First Page",
+            "type": "integer"
+          },
+          "is_reference": {
+            "title": "Is Reference",
+            "type": "boolean"
+          },
+          "last_page": {
+            "title": "Last Page",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `qa-run/1` context field. Not filled yet: docingest's chunks carry no score, so it is always null. A client must not rely on it.",
+            "title": "Score"
+          },
+          "start": {
+            "title": "Start",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc_id",
+          "name",
+          "start",
+          "first_page",
+          "last_page",
+          "is_reference",
+          "text"
+        ],
+        "title": "ContextOut",
+        "type": "object"
+      },
+      "DocumentListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentSummaryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Papers that match, before the limit.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "DocumentListOut",
+        "type": "object"
+      },
+      "DocumentOut": {
+        "properties": {
+          "arxiv_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arxiv Id"
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "doi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doi"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/PageInfoOut"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DocumentSummaryOut"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "summary",
+          "authors",
+          "year",
+          "doi",
+          "arxiv_id",
+          "url",
+          "pages"
+        ],
+        "title": "DocumentOut",
+        "type": "object"
+      },
+      "DocumentPageOut": {
+        "properties": {
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "page",
+              "section"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "markdown": {
+            "description": "The page as Markdown with LaTeX math.",
+            "title": "Markdown",
+            "type": "string"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "doc_id",
+          "page",
+          "pages",
+          "kind",
+          "markdown"
+        ],
+        "title": "DocumentPageOut",
+        "type": "object"
+      },
+      "DocumentSummaryOut": {
+        "properties": {
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "page_kind": {
+            "description": "`section` for a LaTeX source (its page markers number sections), else `page`.",
+            "enum": [
+              "page",
+              "section"
+            ],
+            "title": "Page Kind",
+            "type": "string"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "short_id": {
+            "description": "The first 16 characters, as a citation prints them.",
+            "title": "Short Id",
+            "type": "string"
+          },
+          "source_kind": {
+            "description": "`pdf`, `latex`, `office`, `image` or `text`.",
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc_id",
+          "short_id",
+          "title",
+          "source_name",
+          "source_kind",
+          "pages",
+          "page_kind"
+        ],
+        "title": "DocumentSummaryOut",
+        "type": "object"
+      },
       "GateListResponse": {
         "properties": {
           "circuits": {
@@ -219,6 +827,37 @@
           "language"
         ],
         "title": "Me",
+        "type": "object"
+      },
+      "PageInfoOut": {
+        "properties": {
+          "method": {
+            "description": "How the page text was made (`text_layer`, `latex`, ...).",
+            "title": "Method",
+            "type": "string"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A section title (LaTeX sources).",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "page",
+          "method"
+        ],
+        "title": "PageInfoOut",
         "type": "object"
       },
       "ParseRequest": {
@@ -444,6 +1083,9 @@
             "title": "Api Version",
             "type": "string"
           },
+          "ask": {
+            "$ref": "#/components/schemas/AskStatus"
+          },
           "mode": {
             "description": "`live`, or `fake` when the service runs on test data.",
             "enum": [
@@ -472,9 +1114,33 @@
           "api_version",
           "started_at",
           "uptime_s",
-          "ready"
+          "ready",
+          "ask"
         ],
         "title": "Status",
+        "type": "object"
+      },
+      "TimingsOut": {
+        "properties": {
+          "answer_s": {
+            "title": "Answer S",
+            "type": "number"
+          },
+          "retrieve_s": {
+            "title": "Retrieve S",
+            "type": "number"
+          },
+          "wall_s": {
+            "title": "Wall S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "retrieve_s",
+          "answer_s",
+          "wall_s"
+        ],
+        "title": "TimingsOut",
         "type": "object"
       }
     },
@@ -632,6 +1298,374 @@
         "summary": "End a session",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/v1/asks": {
+      "post": {
+        "description": "Queues the question for the model servers, which answer one at a time, and answers `202`\nat once. Follow it with `GET /asks/{ask_id}/events`.",
+        "operationId": "createAsk",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "You have too many questions waiting."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The engine is starting or the queue is full; see `Retry-After`."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Ask a question",
+        "tags": [
+          "asks"
+        ]
+      }
+    },
+    "/api/v1/asks/{ask_id}": {
+      "delete": {
+        "description": "A waiting question is taken out of the queue. A running one is not stopped (the model\nserver is already working), but its answer is dropped when it arrives. For a question that is\nover, this forgets it and its answer at once.",
+        "operationId": "cancelAsk",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ask_id",
+            "required": true,
+            "schema": {
+              "title": "Ask Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such question (or it is not yours)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Cancel a question, or forget a finished one",
+        "tags": [
+          "asks"
+        ]
+      },
+      "get": {
+        "description": "Kept in memory for 30 minutes after the answer, never written to disk. Another member's\nquestion is a `404`.",
+        "operationId": "getAsk",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ask_id",
+            "required": true,
+            "schema": {
+              "title": "Ask Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such question (or it is not yours)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Where a question is, and its answer once done",
+        "tags": [
+          "asks"
+        ]
+      }
+    },
+    "/api/v1/asks/{ask_id}/events": {
+      "get": {
+        "description": "Server-sent events, in order, each with an `id` (a reconnecting browser resumes after the\nlast one it saw): `queued` (`{ask_id, position}`, again whenever the position changes),\n`retrieving`, `answering` (`{ask_id}`), then one of `answer` (an `AskResponse`), `error` (an\n`AskErrorOut`) or `cancelled`. The stream ends after that one. A comment line is sent every\n15 seconds so proxies keep the connection open. A plain `GET`: the browser's `EventSource`\nsends the session cookie, and no CSRF header is needed because nothing changes. The session\nis checked again before the `answer` is sent: a browser that signed out, or whose session\nended, while the question was being answered gets no answer and the stream just ends.",
+        "operationId": "followAsk",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ask_id",
+            "required": true,
+            "schema": {
+              "title": "Ask Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by EventSource on reconnect.",
+            "in": "header",
+            "name": "last-event-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Set by EventSource on reconnect.",
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "properties": {
+                    "data": {
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "204": {
+            "description": "The question is over and the reader has seen its last event."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such question (or it is not yours)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Follow a question as it is answered",
+        "tags": [
+          "asks"
         ]
       }
     },
@@ -1207,6 +2241,312 @@
         ]
       }
     },
+    "/api/v1/documents": {
+      "get": {
+        "operationId": "listDocuments",
+        "parameters": [
+          {
+            "description": "Part of a title, or the start of an id.",
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Part of a title, or the start of an id.",
+              "maxLength": 200,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Find papers by title or id",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{doc_id}": {
+      "get": {
+        "operationId": "getDocument",
+        "parameters": [
+          {
+            "description": "A document id, or the first 16 or more hex characters of one.",
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "description": "A document id, or the first 16 or more hex characters of one.",
+              "pattern": "^[0-9a-f]{16,64}$",
+              "title": "Doc Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such document."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The id prefix names more than one paper."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "A paper's title, source and pages",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{doc_id}/pages/{page}": {
+      "get": {
+        "description": "For a LaTeX source the markers number sections, not printed pages; `kind` says which.",
+        "operationId": "getDocumentPage",
+        "parameters": [
+          {
+            "description": "A document id, or the first 16 or more hex characters of one.",
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "description": "A document id, or the first 16 or more hex characters of one.",
+              "pattern": "^[0-9a-f]{16,64}$",
+              "title": "Doc Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "1-based, as the page markers of the paper.",
+            "in": "path",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "description": "1-based, as the page markers of the paper.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such document or page."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The id prefix names more than one paper."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "One page of a paper as Markdown",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "getHealth",
@@ -1237,6 +2577,7 @@
     },
     "/api/v1/status": {
       "get": {
+        "description": "For signed-in members only: it shows when someone is asking.",
         "operationId": "getStatus",
         "responses": {
           "200": {
@@ -1249,6 +2590,26 @@
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
           "default": {
             "content": {
               "application/problem+json": {
@@ -1260,6 +2621,11 @@
             "description": "A problem."
           }
         },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
         "summary": "State of the service"
       }
     }

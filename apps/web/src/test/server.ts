@@ -15,6 +15,7 @@ export const STATUS_BODY = {
   started_at: "2026-01-01T00:00:00Z",
   uptime_s: 12.5,
   ready: true,
+  ask: { state: "ready", reason: null, index_generation: null, queued: 0, busy: false },
 } as const;
 
 export const server = setupServer(

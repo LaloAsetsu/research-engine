@@ -48,7 +48,7 @@ test.describe("login", () => {
     await signIn(page, ANA);
     await expect(page).toHaveURL(/\/benchmarks$/);
     await expect(page.getByRole("heading", { name: "Benchmarks" })).toBeFocused();
-    // /status is answered by the real API in fake mode
+    // /status is answered by the fixture here and by the real API in real-api.spec.ts
     await expect(
       page.getByRole("status", { name: /Service status: Ready \(test data\)/ }),
     ).toBeVisible();

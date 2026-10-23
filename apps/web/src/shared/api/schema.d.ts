@@ -44,6 +44,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/asks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask a question
+         * @description Queues the question for the model servers, which answer one at a time, and answers `202`
+         *     at once. Follow it with `GET /asks/{ask_id}/events`.
+         */
+        post: operations["createAsk"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/asks/{ask_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Where a question is, and its answer once done
+         * @description Kept in memory for 30 minutes after the answer, never written to disk. Another member's
+         *     question is a `404`.
+         */
+        get: operations["getAsk"];
+        put?: never;
+        post?: never;
+        /**
+         * Cancel a question, or forget a finished one
+         * @description A waiting question is taken out of the queue. A running one is not stopped (the model
+         *     server is already working), but its answer is dropped when it arrives. For a question that is
+         *     over, this forgets it and its answer at once.
+         */
+        delete: operations["cancelAsk"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/asks/{ask_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Follow a question as it is answered
+         * @description Server-sent events, in order, each with an `id` (a reconnecting browser resumes after the
+         *     last one it saw): `queued` (`{ask_id, position}`, again whenever the position changes),
+         *     `retrieving`, `answering` (`{ask_id}`), then one of `answer` (an `AskResponse`), `error` (an
+         *     `AskErrorOut`) or `cancelled`. The stream ends after that one. A comment line is sent every
+         *     15 seconds so proxies keep the connection open. A plain `GET`: the browser's `EventSource`
+         *     sends the session cookie, and no CSRF header is needed because nothing changes. The session
+         *     is checked again before the `answer` is sent: a browser that signed out, or whose session
+         *     ended, while the question was being answered gets no answer and the stream just ends.
+         */
+        get: operations["followAsk"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -206,6 +281,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Find papers by title or id */
+        get: operations["listDocuments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{doc_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A paper's title, source and pages */
+        get: operations["getDocument"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{doc_id}/pages/{page}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One page of a paper as Markdown
+         * @description For a LaTeX source the markers number sections, not printed pages; `kind` says which.
+         */
+        get: operations["getDocumentPage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -230,7 +359,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** State of the service */
+        /**
+         * State of the service
+         * @description For signed-in members only: it shows when someone is asking.
+         */
         get: operations["getStatus"];
         put?: never;
         post?: never;
@@ -244,6 +376,152 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AskAccepted */
+        AskAccepted: {
+            /** Ask Id */
+            ask_id: string;
+            /**
+             * Position
+             * @description How many asks are ahead of this one, the running one included (0: next).
+             */
+            position: number;
+        };
+        /**
+         * AskErrorOut
+         * @description Why no answer came. `status` is the HTTP status the same failure would have had.
+         */
+        AskErrorOut: {
+            /** Ask Id */
+            ask_id: string;
+            /**
+             * Kind
+             * @description The problem slug: `unavailable`, `upstream-error`, ...
+             */
+            kind: string;
+            /** Message */
+            message: string;
+            /** Retry After S */
+            retry_after_s?: number | null;
+            /** Status */
+            status: number;
+        };
+        /** AskRequestBody */
+        AskRequestBody: {
+            /**
+             * Bm25
+             * @description When keyword matching joins the vector search: `english` (English questions and questions with LaTeX), `always` or `never`. Null: the server setting.
+             */
+            bm25?: ("english" | "always" | "never") | null;
+            /**
+             * Question
+             * @description The question, in any language. Sent in the body only: it is never put in a URL or a log.
+             */
+            question: string;
+            /**
+             * Return Contexts
+             * @description Send the chunks the answer model read.
+             * @default true
+             */
+            return_contexts: boolean;
+            /**
+             * Use Index
+             * @description False: the answer model searches the whole corpus itself (slow).
+             * @default true
+             */
+            use_index: boolean;
+            /**
+             * Whole Blocks
+             * @description Complete the equation, code block or table a chunk cuts. Null: the server setting.
+             */
+            whole_blocks?: boolean | null;
+        };
+        /**
+         * AskResponse
+         * @description The answer as a `qa-run/1` item holds it: `citations` and `contexts` have the same shape
+         *     in both.
+         */
+        AskResponse: {
+            /**
+             * Answer
+             * @description Markdown with LaTeX; the References list is not in it.
+             */
+            answer: string;
+            /** Ask Id */
+            ask_id: string;
+            /** Citations */
+            citations: components["schemas"]["CitationOut"][];
+            /** Contexts */
+            contexts: components["schemas"]["ContextOut"][];
+            /** Index Generation */
+            index_generation: string | null;
+            /** References Text */
+            references_text: string;
+            /**
+             * Sources
+             * @description Full ids of the papers the contexts come from.
+             */
+            sources: string[];
+            timings: components["schemas"]["TimingsOut"];
+            /** Warnings */
+            warnings: string[];
+        };
+        /**
+         * AskState
+         * @enum {string}
+         */
+        AskState: "queued" | "running" | "done" | "failed" | "cancelled";
+        /**
+         * AskStatus
+         * @description The answer engine and the GPU lane. Nothing here names a person or a question.
+         */
+        AskStatus: {
+            /**
+             * Busy
+             * @description True while the lane is answering a question.
+             */
+            busy: boolean;
+            /**
+             * Index Generation
+             * @description The index commit the last answer was made from.
+             */
+            index_generation?: string | null;
+            /**
+             * Queued
+             * @description Asks waiting for the GPU lane.
+             */
+            queued: number;
+            /**
+             * Reason
+             * @description Fixed text; set when `unavailable`.
+             */
+            reason?: string | null;
+            /**
+             * State
+             * @description `warming_up`: asks are refused with 503 for a few seconds. `ready`. `unavailable`: the last start or question found the index or the settings unusable (`reason` says which). Asks are still accepted, because the cause may have been fixed.
+             * @enum {string}
+             */
+            state: "warming_up" | "ready" | "unavailable";
+        };
+        /** AskView */
+        AskView: {
+            /** Ask Id */
+            ask_id: string;
+            /** @description Set when `failed`. */
+            error?: components["schemas"]["AskErrorOut"] | null;
+            /**
+             * Phase
+             * @description Where a running ask is.
+             */
+            phase?: ("retrieving" | "answering") | null;
+            /**
+             * Position
+             * @description Set while `queued`.
+             */
+            position?: number | null;
+            /** @description Set when `done`. */
+            response?: components["schemas"]["AskResponse"] | null;
+            state: components["schemas"]["AskState"];
+        };
         /** CheckRequest */
         CheckRequest: {
             /**
@@ -286,6 +564,119 @@ export interface components {
              * @description A unitary matrix: rows of numbers or `[re, im]` pairs.
              */
             unitary?: unknown[][] | null;
+        };
+        /** CitationOut */
+        CitationOut: {
+            /**
+             * Doc Id
+             * @description The full document id.
+             */
+            doc_id: string;
+            /** First Page */
+            first_page: number;
+            /**
+             * Key
+             * @description As printed in the answer: `<16 hex> pages 3-4`.
+             */
+            key: string;
+            /** Last Page */
+            last_page: number;
+        };
+        /** ContextOut */
+        ContextOut: {
+            /** Doc Id */
+            doc_id: string;
+            /** First Page */
+            first_page: number;
+            /** Is Reference */
+            is_reference: boolean;
+            /** Last Page */
+            last_page: number;
+            /** Name */
+            name: string;
+            /**
+             * Score
+             * @description The `qa-run/1` context field. Not filled yet: docingest's chunks carry no score, so it is always null. A client must not rely on it.
+             */
+            score?: number | null;
+            /** Start */
+            start: number;
+            /** Text */
+            text: string;
+        };
+        /** DocumentListOut */
+        DocumentListOut: {
+            /** Items */
+            items: components["schemas"]["DocumentSummaryOut"][];
+            /**
+             * Total
+             * @description Papers that match, before the limit.
+             */
+            total: number;
+        };
+        /** DocumentOut */
+        DocumentOut: {
+            /** Arxiv Id */
+            arxiv_id: string | null;
+            /** Authors */
+            authors: string[];
+            /** Doi */
+            doi: string | null;
+            /** Pages */
+            pages: components["schemas"]["PageInfoOut"][];
+            summary: components["schemas"]["DocumentSummaryOut"];
+            /** Url */
+            url: string | null;
+            /** Year */
+            year: number | null;
+        };
+        /** DocumentPageOut */
+        DocumentPageOut: {
+            /** Doc Id */
+            doc_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "page" | "section";
+            /**
+             * Markdown
+             * @description The page as Markdown with LaTeX math.
+             */
+            markdown: string;
+            /** Page */
+            page: number;
+            /** Pages */
+            pages: number;
+            /** Title */
+            title?: string | null;
+        };
+        /** DocumentSummaryOut */
+        DocumentSummaryOut: {
+            /** Doc Id */
+            doc_id: string;
+            /**
+             * Page Kind
+             * @description `section` for a LaTeX source (its page markers number sections), else `page`.
+             * @enum {string}
+             */
+            page_kind: "page" | "section";
+            /** Pages */
+            pages: number;
+            /**
+             * Short Id
+             * @description The first 16 characters, as a citation prints them.
+             */
+            short_id: string;
+            /**
+             * Source Kind
+             * @description `pdf`, `latex`, `office`, `image` or `text`.
+             */
+            source_kind: string;
+            /** Source Name */
+            source_name: string;
+            /** Title */
+            title: string;
         };
         /** GateListResponse */
         GateListResponse: {
@@ -337,6 +728,21 @@ export interface components {
             role: components["schemas"]["Role"];
             /** Username */
             username: string;
+        };
+        /** PageInfoOut */
+        PageInfoOut: {
+            /**
+             * Method
+             * @description How the page text was made (`text_layer`, `latex`, ...).
+             */
+            method: string;
+            /** Page */
+            page: number;
+            /**
+             * Title
+             * @description A section title (LaTeX sources).
+             */
+            title?: string | null;
         };
         /** ParseRequest */
         ParseRequest: {
@@ -457,6 +863,7 @@ export interface components {
         Status: {
             /** Api Version */
             api_version: string;
+            ask: components["schemas"]["AskStatus"];
             /**
              * Mode
              * @description `live`, or `fake` when the service runs on test data.
@@ -472,6 +879,15 @@ export interface components {
             started_at: string;
             /** Uptime S */
             uptime_s: number;
+        };
+        /** TimingsOut */
+        TimingsOut: {
+            /** Answer S */
+            answer_s: number;
+            /** Retrieve S */
+            retrieve_s: number;
+            /** Wall S */
+            wall_s: number;
         };
     };
     responses: never;
@@ -566,6 +982,275 @@ export interface operations {
                 };
             };
             /** @description No such session. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    createAsk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskRequestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskAccepted"];
+                };
+            };
+            /** @description No session, or it has ended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The CSRF header is missing or wrong, the password must be changed first, or the role is not enough. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description You have too many questions waiting. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The engine is starting or the queue is full; see `Retry-After`. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getAsk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ask_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskView"];
+                };
+            };
+            /** @description No session, or it has ended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The CSRF header is missing or wrong, the password must be changed first, or the role is not enough. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such question (or it is not yours). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    cancelAsk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ask_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No session, or it has ended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The CSRF header is missing or wrong, the password must be changed first, or the role is not enough. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such question (or it is not yours). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    followAsk: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Set by EventSource on reconnect. */
+                "last-event-id"?: number | null;
+            };
+            path: {
+                ask_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description The question is over and the reader has seen its last event. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No session, or it has ended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The CSRF header is missing or wrong, the password must be changed first, or the role is not enough. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such question (or it is not yours). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -1057,6 +1742,222 @@ export interface operations {
             };
         };
     };
+    listDocuments: {
+        parameters: {
+            query?: {
+                /** @description Part of a title, or the start of an id. */
+                query?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentListOut"];
+                };
+            };
+            /** @description No session, or it has ended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The CSRF header is missing or wrong, the password must be changed first, or the role is not enough. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A document id, or the first 16 or more hex characters of one. */
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentOut"];
+                };
+            };
+            /** @description No session, or it has ended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The CSRF header is missing or wrong, the password must be changed first, or the role is not enough. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such document. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The id prefix names more than one paper. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getDocumentPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A document id, or the first 16 or more hex characters of one. */
+                doc_id: string;
+                /** @description 1-based, as the page markers of the paper. */
+                page: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentPageOut"];
+                };
+            };
+            /** @description No session, or it has ended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The CSRF header is missing or wrong, the password must be changed first, or the role is not enough. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such document or page. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The id prefix names more than one paper. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     getHealth: {
         parameters: {
             query?: never;
@@ -1102,6 +2003,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Status"];
+                };
+            };
+            /** @description No session, or it has ended. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The CSRF header is missing or wrong, the password must be changed first, or the role is not enough. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description A problem. */

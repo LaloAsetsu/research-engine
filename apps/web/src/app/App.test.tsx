@@ -303,6 +303,13 @@ describe("the layout", () => {
           started_at: "2026-01-01T00:00:00Z",
           uptime_s: 1,
           ready: false,
+          ask: {
+            state: "warming_up",
+            reason: null,
+            index_generation: null,
+            queued: 0,
+            busy: false,
+          },
         }),
       ),
     );
