@@ -23,15 +23,15 @@ export const ANA: MockUser = {
 };
 
 /** Signs in with a temporary password, so the first login forces a change. */
-export const LUIS: MockUser = {
-  username: "luis",
+export const TEMP: MockUser = {
+  username: "temp",
   password: "temporary-test-0001",
-  display_name: "Luis Prueba",
+  display_name: "Cuenta Temporal",
   role: "member",
   must_change_password: true,
 };
 
-export const TEST_USERS: readonly MockUser[] = [ANA, LUIS];
+export const TEST_USERS: readonly MockUser[] = [ANA, TEMP];
 
 export const MAX_FAILURES = 5;
 export const RETRY_AFTER_S = 30;

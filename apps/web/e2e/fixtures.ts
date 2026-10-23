@@ -1,8 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test as base, type Page } from "@playwright/test";
-import { ANA, createAuthMock, LUIS, type MockUser } from "../src/test/auth-mock";
+import { ANA, createAuthMock, TEMP, type MockUser } from "../src/test/auth-mock";
 
-export { ANA, LUIS };
+export { ANA, TEMP };
 
 interface Fixtures {
   /** Answers the sign-in endpoints with the shared mock; /health and /status reach the real API. */

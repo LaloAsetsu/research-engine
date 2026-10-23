@@ -1,4 +1,4 @@
-import { ANA, expect, expectNoAxeViolations, LUIS, signIn, test } from "./fixtures";
+import { ANA, expect, expectNoAxeViolations, TEMP, signIn, test } from "./fixtures";
 
 // The page loads in each scheme, so no scan reads a page that is still switching colors.
 for (const colorScheme of ["light", "dark"] as const) {
@@ -24,7 +24,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     }) => {
       void authMock;
       await page.goto("/login");
-      await signIn(page, LUIS);
+      await signIn(page, TEMP);
       await expect(page.getByRole("heading", { name: "Change your password" })).toBeVisible();
       await expectNoAxeViolations(page);
     });
@@ -87,12 +87,12 @@ test.describe("forced password change", () => {
   test("follows the first login, then opens the app", async ({ page, authMock }) => {
     void authMock;
     await page.goto("/login");
-    await signIn(page, LUIS);
+    await signIn(page, TEMP);
     await expect(page.getByRole("heading", { name: "Change your password" })).toBeFocused();
     // the app stays closed until the password is changed
     await page.goto("/ask");
     await expect(page.getByRole("heading", { name: "Change your password" })).toBeVisible();
-    await page.getByLabel("Current password").fill(LUIS.password);
+    await page.getByLabel("Current password").fill(TEMP.password);
     await page.getByLabel("New password", { exact: true }).fill("a-brand-new-password");
     await page.getByLabel("Repeat the new password").fill("a-brand-new-password");
     await page.getByRole("button", { name: "Save password" }).click();

@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { ANA as ana, LUIS as luis, MAX_FAILURES } from "@/test/auth-mock";
+import { ANA as ana, TEMP as temp, MAX_FAILURES } from "@/test/auth-mock";
 import { renderApp } from "@/test/render";
 import { setSystemDark } from "@/test/media";
 import { authMock, server } from "@/test/server";
@@ -72,7 +72,7 @@ describe("the session guard", () => {
     authMock.handle({
       method: "POST",
       path: "/api/v1/auth/login",
-      body: { username: luis.username, password: luis.password },
+      body: { username: temp.username, password: temp.password },
     });
     const app = renderApp("/sets");
     expect(
@@ -152,7 +152,7 @@ describe("login", () => {
 describe("the forced password change", () => {
   async function reachChangeScreen(user: ReturnType<typeof userEvent.setup>) {
     renderApp("/login");
-    await signIn(user, luis.username, luis.password);
+    await signIn(user, temp.username, temp.password);
     await screen.findByRole("heading", { name: "Change your password" });
   }
 
@@ -165,7 +165,7 @@ describe("the forced password change", () => {
   it("follows a first login with the change screen, then opens the app", async () => {
     const user = userEvent.setup();
     await reachChangeScreen(user);
-    await user.type(screen.getByLabelText("Current password"), luis.password);
+    await user.type(screen.getByLabelText("Current password"), temp.password);
     await user.type(screen.getByLabelText("New password"), "a-brand-new-password");
     await user.type(screen.getByLabelText("Repeat the new password"), "a-brand-new-password");
     await user.click(screen.getByRole("button", { name: "Save password" }));
@@ -175,7 +175,7 @@ describe("the forced password change", () => {
   it("checks the new password before it calls the server", async () => {
     const user = userEvent.setup();
     await reachChangeScreen(user);
-    await user.type(screen.getByLabelText("Current password"), luis.password);
+    await user.type(screen.getByLabelText("Current password"), temp.password);
     await user.type(screen.getByLabelText("New password"), "short");
     await user.type(screen.getByLabelText("Repeat the new password"), "different");
     await user.click(screen.getByRole("button", { name: "Save password" }));
@@ -197,7 +197,7 @@ describe("the forced password change", () => {
   });
 
   async function fillChange(user: ReturnType<typeof userEvent.setup>, next: string) {
-    await user.type(screen.getByLabelText("Current password"), luis.password);
+    await user.type(screen.getByLabelText("Current password"), temp.password);
     await user.type(screen.getByLabelText("New password"), next);
     await user.type(screen.getByLabelText("Repeat the new password"), next);
     await user.click(screen.getByRole("button", { name: "Save password" }));
