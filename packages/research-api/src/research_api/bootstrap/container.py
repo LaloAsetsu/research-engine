@@ -8,8 +8,15 @@ from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
 
+from ..adapters.circuits import CircuitsAdapter
 from ..adapters.clock import SystemClock
 from ..adapters.fake import FixedClock
+from ..application.circuits import (
+    CheckCircuit,
+    ParseCircuit,
+    RunCircuit,
+    ShowCircuitConventions,
+)
 from ..application.status import ReportStatus
 from ..domain.status import Mode
 from ..ports.clock import Clock
@@ -26,6 +33,10 @@ class Container:
     version: str
     clock: Clock
     report_status: ReportStatus
+    parse_circuit: ParseCircuit
+    run_circuit: RunCircuit
+    check_circuit: CheckCircuit
+    circuit_conventions: ShowCircuitConventions
 
 
 def build_container(settings: Settings, *, fake: bool = False) -> Container:
@@ -35,6 +46,9 @@ def build_container(settings: Settings, *, fake: bool = False) -> Container:
     clock: Clock = FixedClock() if fake else SystemClock()
     mode: Mode = "fake" if fake else "live"
     api_version = version("research-api")
+    caps = settings.circuit_caps.caps()
+    # quantum-sim and docingest's gate lists do no I/O, so fake mode runs the real engine.
+    circuits = CircuitsAdapter(timeout_s=caps.timeout_s)
     return Container(
         mode=mode,
         settings=settings,
@@ -43,6 +57,10 @@ def build_container(settings: Settings, *, fake: bool = False) -> Container:
         report_status=ReportStatus(
             clock=clock, mode=mode, version=api_version, started_at=clock.now()
         ),
+        parse_circuit=ParseCircuit(engine=circuits),
+        run_circuit=RunCircuit(engine=circuits, caps=caps),
+        check_circuit=CheckCircuit(engine=circuits, caps=caps),
+        circuit_conventions=ShowCircuitConventions(engine=circuits),
     )
 
 

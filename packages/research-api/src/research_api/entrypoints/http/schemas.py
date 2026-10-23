@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    model_validator,
+)
 
+from ...domain.circuits import CheckTarget
 from ...domain.status import Mode, ServerStatus
+from ...ports.circuits import GateListReading
 
 
 class Health(BaseModel):
@@ -46,3 +57,94 @@ class Problem(BaseModel):
     instance: str
     errors: list[ProblemField] | None = None
     error_id: str | None = Field(default=None, description="Only on 500: the id in the server log.")
+
+
+class Request(BaseModel):
+    """Base of the request bodies: a key the API does not know is an error, not ignored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ParseRequest(Request):
+    latex: str = Field(
+        description="The body of one code block: a quantikz, Qcircuit, yquant or tikz-cd source."
+    )
+
+
+class GateListResponse(BaseModel):
+    status: Literal["parsed", "partial", "unparsed"] = Field(
+        description="`parsed` when every circuit was fully read, `unparsed` when none was."
+    )
+    text: str = Field(
+        description="The gate list in words, as docingest gives it to the answer model."
+    )
+    circuits: list[dict[str, Any]] = Field(
+        description="Each circuit as a `circuit/1` document. To simulate one, send it as text in "
+        "`circuit_json`."
+    )
+
+    @classmethod
+    def from_port(cls, reading: GateListReading) -> Self:
+        return cls(
+            status=reading.status,  # type: ignore[arg-type]
+            text=reading.text,
+            circuits=[dict(circuit) for circuit in reading.circuits],
+        )
+
+
+CIRCUIT_JSON = (
+    "A `circuit/1` document as JSON text. It is text, not an object, so that a key written twice "
+    "is seen and refused (answer 400) instead of the last one winning."
+)
+STATE_INPUT = (
+    "The input: a basis label such as `010` (wire 1 first) or a list of amplitudes, each a "
+    "number or a `[re, im]` pair. Default |0...0>."
+)
+VALUES = "A value for each symbol of the circuit, a number or an angle as text such as `\\pi/2`."
+
+
+class RunRequest(Request):
+    circuit_json: str = Field(description=CIRCUIT_JSON)
+    input: str | list[Any] | None = Field(default=None, description=STATE_INPUT)
+    values: dict[str, StrictStr | StrictInt | StrictFloat] | None = Field(
+        default=None, description=VALUES
+    )
+    unitary: bool = Field(default=False, description="Also list the unitary (up to 8 wires).")
+
+
+class CheckTargetBody(Request):
+    """What to compare the circuit with. Give exactly one field."""
+
+    state: str | list[Any] | None = Field(
+        default=None, description="A state: a basis label or a list of amplitudes of norm 1."
+    )
+    unitary: list[list[Any]] | None = Field(
+        default=None, description="A unitary matrix: rows of numbers or `[re, im]` pairs."
+    )
+    circuit_json: str | None = Field(
+        default=None, description="A second circuit, as JSON text (see the first `circuit_json`)."
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        given = [
+            name for name in ("state", "unitary", "circuit_json") if getattr(self, name) is not None
+        ]
+        if len(given) != 1:
+            raise ValueError("give exactly one of state, unitary and circuit_json")
+        return self
+
+    def to_domain(self) -> CheckTarget:
+        return CheckTarget(state=self.state, unitary=self.unitary, circuit_json=self.circuit_json)
+
+
+class CheckRequest(Request):
+    circuit_json: str = Field(description=CIRCUIT_JSON)
+    target: CheckTargetBody | None = Field(
+        default=None,
+        description="Leave it out to compare the two sides of an equality drawn in the circuit.",
+    )
+    input: str | list[Any] | None = Field(default=None, description=STATE_INPUT)
+    values: dict[str, StrictStr | StrictInt | StrictFloat] | None = Field(
+        default=None, description=VALUES
+    )

@@ -54,3 +54,12 @@ def test_the_environment_must_name_one_of_them() -> None:
 def test_a_fixed_clock_can_be_set() -> None:
     at = datetime(2030, 5, 1, tzinfo=UTC)
     assert FixedClock(at).now() == at
+
+
+def test_both_modes_wire_the_circuit_use_cases_with_the_settings_caps() -> None:
+    settings = Settings.model_validate({"circuit_caps": {"max_ops": 7}})
+    for fake in (True, False):
+        container = build_container(settings, fake=fake)
+        assert container.run_circuit._caps.max_ops == 7
+        assert container.check_circuit._caps.max_ops == 7
+        assert "conventions" in container.circuit_conventions()

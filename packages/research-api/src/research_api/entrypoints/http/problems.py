@@ -183,7 +183,8 @@ def use_problem_media_in_openapi(schema: dict[str, Any]) -> None:
             for code, response in operation.get("responses", {}).items():
                 content = response.get("content", {})
                 if code == "422":
-                    response["description"] = "The request is not valid."
+                    if response.get("description") == "Validation Error":
+                        response["description"] = "The request is not valid."
                     response["content"] = {PROBLEM_MEDIA: {"schema": {"$ref": PROBLEM_REF}}}
                 elif (
                     content.get("application/json", {}).get("schema", {}).get("$ref") == PROBLEM_REF
