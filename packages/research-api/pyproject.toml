@@ -9,10 +9,16 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "docingest",
     "fastapi>=0.159",
     "pydantic>=2.14",
+    "quantum-sim",
     "uvicorn>=0.54",
 ]
+
+[tool.uv.sources]
+docingest = { workspace = true }
+quantum-sim = { workspace = true }
 
 [project.scripts]
 research-api = "research_api.entrypoints.cli:main"

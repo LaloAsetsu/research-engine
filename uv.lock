@@ -3472,8 +3472,10 @@ name = "research-api"
 version = "0.1.0"
 source = { editable = "packages/research-api" }
 dependencies = [
+    { name = "docingest" },
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "quantum-sim" },
     { name = "uvicorn" },
 ]
 
@@ -3489,8 +3491,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "docingest", editable = "packages/docingest" },
     { name = "fastapi", specifier = ">=0.159" },
     { name = "pydantic", specifier = ">=2.14" },
+    { name = "quantum-sim", editable = "packages/quantum-sim" },
     { name = "uvicorn", specifier = ">=0.54" },
 ]
 
