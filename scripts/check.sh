@@ -6,7 +6,14 @@ cd "$(dirname "$0")/.."
 uv lock --check   # the one uv.lock matches every package's pyproject.toml
 uv run --frozen python scripts/check_links.py   # relative links in every Markdown file
 bash -n serving/serve.sh   # the model-server script parses
+for script in apps/web/scripts/*.sh; do bash -n "$script"; done   # the web gate scripts parse
 for check in packages/*/scripts/check.sh; do
   echo "== ${check%/scripts/check.sh}"
   "$check"
 done
+if command -v pnpm > /dev/null 2>&1; then
+  echo "== apps/web"
+  apps/web/scripts/check.sh
+else
+  echo "== apps/web skipped: pnpm is not on PATH (CI runs it)"
+fi

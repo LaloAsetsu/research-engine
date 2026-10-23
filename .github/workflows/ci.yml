@@ -47,3 +47,55 @@ jobs:
       - run: uv sync --locked --all-extras
       - run: uv run --frozen pyright
       - run: uv run --frozen pytest -q --cov
+
+  web:
+    # The web app: lint, format, types, unit tests, build, bundle budget, dependency audit.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          package_json_file: apps/web/package.json
+          cache: true
+          cache_dependency_path: apps/web/pnpm-lock.yaml
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: apps/web/.nvmrc
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test --coverage
+      - run: pnpm build
+      - run: pnpm size
+      - run: pnpm audit --prod --audit-level high
+
+  contract:
+    # The API and the web app agree: the committed OpenAPI document and generated types match
+    # the API, and a browser test runs the built app against the API in fake mode.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          package_json_file: apps/web/package.json
+          cache: true
+          cache_dependency_path: apps/web/pnpm-lock.yaml
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: apps/web/.nvmrc
+      - run: uv sync --locked
+        working-directory: .
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm contract
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
