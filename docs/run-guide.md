@@ -12,6 +12,7 @@ The guide links to the reference for each part instead of repeating it:
 | How the index works and what it stores | [packages/docingest-index/README.md](../packages/docingest-index/README.md) and [ADR 0004](../packages/docingest/docs/adr/0004-chunk-index-and-two-stage-retrieval.md) |
 | Checking a quantum circuit | [Check a circuit with quantum-sim](#check-a-circuit-with-quantum-sim) below and [packages/quantum-sim/README.md](../packages/quantum-sim/README.md) |
 | Checking or converting a question set, a run, a score or a review file | [Check a question set with qa-bench](#check-a-question-set-with-qa-bench) below and [packages/qa-bench/README.md](../packages/qa-bench/README.md) |
+| Scoring runs against a question set and comparing two runs | [Score runs with qa-bench](#score-runs-with-qa-bench) below and [packages/qa-bench/README.md](../packages/qa-bench/README.md#the-scorer) |
 
 If the three model servers already run on the machine you use, do steps 1 and 2 and skip step 3, then start at step 4; [Sharing a machine](#sharing-a-machine) shows how to check them.
 
@@ -27,6 +28,7 @@ If the three model servers already run on the machine you use, do steps 1 and 2 
 - [8. Add papers later, and stop the servers](#8-add-papers-later-and-stop-the-servers)
 - [Check a circuit with quantum-sim](#check-a-circuit-with-quantum-sim)
 - [Check a question set with qa-bench](#check-a-question-set-with-qa-bench)
+- [Score runs with qa-bench](#score-runs-with-qa-bench)
 - [Measured times](#measured-times)
 - [Sharing a machine](#sharing-a-machine)
 - [Troubleshooting](#troubleshooting)
@@ -353,9 +355,63 @@ The converter records the source file's name and md5 in the header of the new se
 
 Limits:
 
-- The files are checked, not scored: `qa-bench` has no command to score a run or to start one yet.
+- `validate` and `convert` check and convert files; `score` (next section) scores runs that already exist. `qa-bench` has no command to start a run yet.
 - A file is read strictly. A key given twice on a line, `NaN`, `Infinity`, a number out of range, an unpaired surrogate escape (`\ud800`) and nesting deeper than 64 levels are refused.
 - A shape that is not in the list is refused with the list of shapes; the command does not guess one.
+
+## Score runs with qa-bench
+
+`qa-bench score` reads a question set and the runs made on it and writes a `qa-score/1` file: the metrics of each answer, the mean and 95% interval of each group of questions, and, for each pair of runs you name, the paired bootstrap difference (second run minus first), its interval and how many questions went up and down. It never calls a model, needs no GPU and gives the same bytes for the same inputs.
+
+A run points at its set by md5, so first write a set with key facts (the strings, numbers or expressions a right answer must contain) and ask `validate` for its md5:
+
+```bash
+cat > score-set.qset.jsonl <<'EOF'
+{"format": "qset/1", "set": "score-demo/v1", "created": "2026-01-03T09:00:00+00:00"}
+{"id": "Q-001", "lang": "en", "question": "What does the toy paper call its coupling?", "form": "single", "content": "math", "corpus": "my-corpus", "gold_papers": [{"doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "passages": [{"source_text": "The coupling is called J."}]}], "key_facts": [{"type": "text", "value": "J"}]}
+{"id": "Q-002", "lang": "en", "question": "How many toy modes does the paper couple?", "form": "single", "content": "math", "corpus": "my-corpus", "gold_papers": [{"doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "passages": [{"source_text": "It couples 2 modes."}]}], "key_facts": [{"type": "num", "value": 2, "rel": 0.02}]}
+EOF
+MD5=$(uv run qa-bench validate score-set.qset.jsonl | sed 's/.*md5 //')
+```
+
+Write two runs of it by hand (a real run file comes from a runner; the package README describes the format). The first run writes the number as a word, the second as a digit:
+
+```bash
+cat > run-a.qa-run.jsonl <<EOF
+{"format": "qa-run/1", "run_id": "run-a", "created": "2026-01-04T09:00:00+00:00", "set": {"name": "score-demo/v1", "md5": "$MD5"}, "arm": {"name": "harness"}, "model": {"id": "toy-model"}, "code": {"runner": "by hand"}, "corpus": {"id": "my-corpus"}}
+{"id": "Q-001", "repeat": 1, "answer": "The coupling is J.", "contexts": []}
+{"id": "Q-002", "repeat": 1, "answer": "It couples two modes.", "contexts": []}
+EOF
+cat > run-b.qa-run.jsonl <<EOF
+{"format": "qa-run/1", "run_id": "run-b", "created": "2026-01-04T09:00:00+00:00", "set": {"name": "score-demo/v1", "md5": "$MD5"}, "arm": {"name": "harness"}, "model": {"id": "toy-model"}, "code": {"runner": "by hand"}, "corpus": {"id": "my-corpus"}}
+{"id": "Q-001", "repeat": 1, "answer": "The coupling is J.", "contexts": []}
+{"id": "Q-002", "repeat": 1, "answer": "It couples 2 modes.", "contexts": []}
+EOF
+uv run qa-bench score --set score-set.qset.jsonl --run run-a.qa-run.jsonl --run run-b.qa-run.jsonl \
+  --pair run-a:run-b -o demo.qa-score.jsonl
+uv run qa-bench validate demo.qa-score.jsonl --set score-set.qset.jsonl
+```
+
+`score` prints `wrote demo.qa-score.jsonl: qa-score/1, 43 records, md5 ...` and exits with 0. The file has one JSON object per line: the header (scorer, set md5, the runs, bootstrap settings and notes), an `item` record per answer, a `group` record per run, group and metric, and a `compare` record per pair, group and metric. Look at the comparison of the two runs:
+
+```bash
+grep '"compare"' demo.qa-score.jsonl | grep '"group": "all"' | grep '"metric": "all_keys"'
+```
+
+It shows `"base": 0.5, "var": 1.0, "diff": 0.5, ..., "up": 1, "down": 0`: the first run missed the number because it wrote "two", and a number word does not count (see the limits). With `--number-words` both runs score 1.0. The metrics ending in `_words` (`all_keys_words`, `key_share_words`, ...) always give the result with number words counted, so one table shows both.
+
+What the options do:
+
+- `--pair BASE:VAR` (repeat for more pairs) names runs by their `run_id`. `diff` is VAR minus BASE, `ci` its 95% bootstrap interval over questions, `up` and `down` the questions that rose and fell. `--noise A:B` names two runs of the same arm; their difference becomes the `floor` of each comparison, and `counts` is true only when the interval excludes 0 and the difference is larger than the floor.
+- Groups come from the set: `all`, `lang=en`, `form=...` and every tag with 2 to 8 values (`category=a`). `--group-by lang,tag:category` picks the fields, `--group category=a|b` adds the union of two values. `--no-group-ci` skips the interval of each group, which saves time on a large set.
+- `--bootstrap python_random` (the default) or `numpy_pcg64` picks the random generator of the bootstrap. The two give different last digits, and the header records which one was used. Both are written in the standard library, so numpy is not needed.
+- `--created TIME` pins the time in the header (the default is now, in UTC). An output file that exists is not overwritten unless you add `--force`.
+
+Limits:
+
+- The questions are always taken in the order of the set file, never the order of a run file, because the bootstrap resamples positions. A run written in another order gives the same numbers.
+- Number words (two, ocho) do not count for a number key unless you ask: they count wherever they stand, and a hand check found about half of them wrong. A lenient hit in a category `f` question counts only when the answer cites a gold paper.
+- Not scored: reviews, multiple choice, circuit tasks and the multi-paper metrics. A run made for another set, an answer to a question the set does not have, or a pair that names an unknown run is refused with exit status 1.
 
 ## Measured times
 

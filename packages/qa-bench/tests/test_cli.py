@@ -235,3 +235,24 @@ def test_convert_prints_the_md5_of_the_file_it_wrote(tmp_path, capsys):
     argv = ["convert", "qasper", str(SOURCES / "qasper.jsonl"), "-o", str(out)]
     assert main([*argv, "--set-name", "s/v1", "--corpus", "c", "--created", CREATED]) == 0
     assert capsys.readouterr().out.endswith(f"md5 {hashlib.md5(out.read_bytes()).hexdigest()}\n")
+
+
+@pytest.mark.parametrize("back", [False, True])
+def test_convert_to_a_path_that_cannot_be_written_is_a_refusal_not_a_traceback(
+    tmp_path, capsys, back
+):
+    blocker = tmp_path / "file"
+    blocker.write_text("x", encoding="utf-8")
+    qset = tmp_path / "set.qset.jsonl"
+    source = str(SOURCES / "qasper.jsonl")
+    made = ["convert", "qasper", source, "-o", str(qset), "--set-name", "s/v1", "--corpus", "c"]
+    assert main([*made, "--created", CREATED]) == 0
+    if back:
+        argv = ["convert", "qasper", str(qset), "-o", str(blocker / "out"), "--back"]
+    else:
+        argv = [*made[:4], str(blocker / "out"), *made[5:], "--created", CREATED]
+    capsys.readouterr()
+    assert main(argv) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("qa-bench: ")
+    assert len(err.strip().splitlines()) == 1

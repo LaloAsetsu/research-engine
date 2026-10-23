@@ -4,15 +4,21 @@
     qa-bench convert SHAPE INPUT -o OUTPUT --set-name NAME [--corpus ID] [--created TIME]
                      [--notes TEXT] [--back] [--force]
     qa-bench convert ask-capture INPUT -o OUTPUT --header FILE [--retrieval FILE]
+    qa-bench score --set QSET --run RUN... -o OUTPUT [--pair BASE:VAR] [--noise A:B]
+                   [--group-by FIELDS] [--group LABEL=V1|V2] [--bootstrap ENGINE]
+                   [--no-group-ci] [--number-words] [--created TIME] [--force]
 
 ``validate`` checks files against their formats (the format is the one line 1 names), and with
 ``--set`` also runs, scores and reviews against the set file they point at. ``convert`` turns an
 older question-set file into ``qset/1`` (or, with ``--back``, a ``qset/1`` file made from it back
 into the older shape), and the records of the ask capture script into a ``qa-run/1`` file under
-the header in ``--header``. A name ending in ``.gz`` is written as gzip. An output file that
+the header in ``--header``. ``score`` reads a question set and the runs made on it and writes a
+``qa-score/1`` file: the metrics of each answer, the mean and interval of each group and, for each
+``--pair``, the paired bootstrap difference (see ``qa_bench.score``). A name ending in ``.gz`` is
+written as gzip. An output file that
 exists is not overwritten unless ``--force`` is given. Exit status: 0 when the
-work was done, 1 when a file or a row was refused (the reasons are printed), 2 for a command line
-that does not parse.
+work was done, 1 when a file or a row was refused or a file cannot be read or written (the reason
+is printed on one line), 2 for a command line that does not parse.
 """
 
 from __future__ import annotations
@@ -36,9 +42,11 @@ from qa_bench.formats import (
     check_against_set,
     load,
     read_qset,
+    read_run,
     write,
 )
 from qa_bench.formats.jsonl import loads, parse_lines, write_bytes
+from qa_bench.score import ENGINES, NamedRun, Options, score
 
 ASK_CAPTURE = "ask-capture"
 SHOWN = 20
@@ -146,6 +154,37 @@ def _convert(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pair(text: str) -> tuple[str, str]:
+    base, sep, var = text.partition(":")
+    if not sep or not base or not var or ":" in var:
+        raise argparse.ArgumentTypeError(f"{text!r} must read BASE_RUN_ID:VAR_RUN_ID")
+    return base, var
+
+
+def _score(args: argparse.Namespace) -> int:
+    if Path(args.output).exists() and not args.force:
+        raise _Refused(f"{args.output} already exists; --force overwrites it")
+    qset = read_qset(args.set)
+    runs = [NamedRun(Path(path).name, read_run(path)) for path in args.run]
+    options = Options(
+        pairs=tuple(args.pair),
+        noise=args.noise,
+        group_by=tuple(f for f in args.group_by.split(",") if f) if args.group_by else None,
+        groups=tuple(args.group),
+        engine=args.bootstrap,
+        group_ci=not args.no_group_ci,
+        number_words=args.number_words,
+    )
+    scored = score(qset, runs, created=args.created or _clock(), options=options)
+    for warning in scored.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    md5 = write(args.output, scored.file)
+    print(
+        f"wrote {args.output}: {scored.file.format}, {len(scored.file.records)} records, md5 {md5}"
+    )
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qa-bench",
@@ -178,6 +217,59 @@ def _parser() -> argparse.ArgumentParser:
     convert.add_argument(
         "--retrieval", metavar="FILE", help="ask-capture: retrieval records (JSONL)"
     )
+
+    scoring = commands.add_parser(
+        "score",
+        help="score runs against a question set into a qa-score/1 file",
+        description="Compute the metrics of each answer, the groups and the paired comparisons.",
+    )
+    scoring.add_argument("--set", required=True, metavar="QSET", help="the qset/1 file")
+    scoring.add_argument(
+        "--run", action="append", required=True, metavar="RUN", help="a qa-run/1 file (repeat)"
+    )
+    scoring.add_argument("-o", "--output", required=True, metavar="OUTPUT")
+    scoring.add_argument(
+        "--pair",
+        action="append",
+        default=[],
+        type=_pair,
+        metavar="BASE:VAR",
+        help="compare two runs by run_id; diff = VAR minus BASE (repeat)",
+    )
+    scoring.add_argument(
+        "--noise",
+        type=_pair,
+        metavar="A:B",
+        help="two runs of the same arm: their difference is the noise floor",
+    )
+    scoring.add_argument(
+        "--group-by",
+        metavar="FIELDS",
+        help="comma list of set fields or tag:NAME (default: every field that splits the set)",
+    )
+    scoring.add_argument(
+        "--group",
+        action="append",
+        default=[],
+        metavar="LABEL=V1|V2",
+        help="an extra group: any of the values (repeat)",
+    )
+    scoring.add_argument(
+        "--bootstrap",
+        choices=sorted(ENGINES),
+        default="python_random",
+        help="random generator of the paired bootstrap (default: python_random)",
+    )
+    scoring.add_argument(
+        "--no-group-ci", action="store_true", help="skip the interval of each group (faster)"
+    )
+    scoring.add_argument(
+        "--number-words",
+        action="store_true",
+        help="let number words (two, dos) count in the main columns",
+    )
+    scoring.add_argument("--created", metavar="TIME", help="ISO 8601 with offset (default: now)")
+    scoring.add_argument("--force", action="store_true", help="overwrite OUTPUT if it exists")
     return parser
 
 
@@ -185,12 +277,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line; see the module docstring."""
     args = _parser().parse_args(argv)
     try:
-        return _validate(args) if args.command == "validate" else _convert(args)
+        if args.command == "validate":
+            return _validate(args)
+        return _score(args) if args.command == "score" else _convert(args)
     except (_Refused, ConversionError, FormatError, ValueError) as error:
         print(f"qa-bench: {error}", file=sys.stderr)
         if isinstance(error, FormatError):
             for problem in error.problems[:SHOWN]:
                 print(f"  {problem}", file=sys.stderr)
+        return 1
+    except OSError as error:
+        where = f"{error.filename}: " if error.filename else ""
+        print(f"qa-bench: {where}{error.strerror or error}", file=sys.stderr)
         return 1
 
 
