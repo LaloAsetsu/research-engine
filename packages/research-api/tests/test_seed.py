@@ -15,14 +15,14 @@ from research_api.domain.errors import InvalidInputError
 def test_the_default_seed_is_the_file_in_the_repository() -> None:
     assert DEFAULT_SEED == SEED_FILE
     names = [u.username for u in default_seed_users()]
-    assert names == ["ana", "beto", "dani", "luis"]
+    assert names == ["ana", "beto", "dani", "temp"]
 
 
 def test_the_seed_holds_one_admin_one_member_and_one_temporary_password() -> None:
     users = {u.username: u for u in load_seed_users(SEED_FILE)}
     assert users["ana"].role is Role.ADMIN
     assert users["beto"].role is Role.MEMBER
-    assert users["luis"].must_change_password and not users["ana"].must_change_password
+    assert users["temp"].must_change_password and not users["ana"].must_change_password
 
 
 def test_a_seed_account_can_be_used_to_sign_in(container: Container) -> None:

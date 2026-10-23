@@ -1,4 +1,4 @@
-"""The ``Host`` allow-list (open item O-112).
+"""The ``Host`` allow-list, against DNS rebinding.
 
 A page on ``evil.example`` whose name is pointed at this machine reaches the service with
 ``Host: evil.example``, and the browser would let that page read the answers (DNS rebinding).

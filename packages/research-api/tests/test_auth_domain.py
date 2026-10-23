@@ -22,7 +22,7 @@ T0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
 @pytest.mark.parametrize(
     ("raw", "stored"),
-    [("Ana", "ana"), ("  luis.p ", "luis.p"), ("ana\n", "ana"), ("a_b-c.9", "a_b-c.9")],
+    [("Ana", "ana"), ("  temp.p ", "temp.p"), ("ana\n", "ana"), ("a_b-c.9", "a_b-c.9")],
 )
 def test_a_username_is_trimmed_and_lowercased(raw: str, stored: str) -> None:
     assert normalize_username(raw) == stored

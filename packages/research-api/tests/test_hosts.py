@@ -1,4 +1,4 @@
-"""The Host allow-list (open item O-112)."""
+"""The Host allow-list."""
 
 from __future__ import annotations
 

@@ -40,7 +40,7 @@ def test_fake_mode_refuses_a_tailscale_address() -> None:
 def test_the_environment_can_ask_for_fake_mode() -> None:
     container = container_from_env({FAKE_ENV: "1"})
     assert container.mode == "fake"
-    assert [u.username for u in container.auth.users.all()] == ["ana", "beto", "dani", "luis"]
+    assert [u.username for u in container.auth.users.all()] == ["ana", "beto", "dani", "temp"]
 
 
 def test_the_environment_can_name_a_settings_file(tmp_path: Path) -> None:

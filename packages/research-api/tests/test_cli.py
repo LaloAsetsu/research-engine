@@ -155,7 +155,7 @@ def test_serve_fake_creates_the_seed_accounts_of_the_repository(
 ) -> None:
     assert cli.main(["serve", "--fake"]) == 0
     names = [u.username for u in served_container(served).auth.users.all()]
-    assert names == ["ana", "beto", "dani", "luis"]
+    assert names == ["ana", "beto", "dani", "temp"]
 
 
 def test_serve_fake_can_take_another_seed_file(

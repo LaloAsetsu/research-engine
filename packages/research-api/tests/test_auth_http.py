@@ -28,7 +28,7 @@ from research_api.entrypoints.http.security import (
 PROBLEM = "application/problem+json"
 ANA = {"username": "ana", "password": "test-password-ana-01"}
 BETO = {"username": "beto", "password": "test-password-beto-02"}
-LUIS = {"username": "luis", "password": "temporary-test-0001"}
+TEMP = {"username": "temp", "password": "temporary-test-0001"}
 LOGIN = "/api/v1/auth/login"
 ClientFor = Callable[..., TestClient]
 
@@ -291,7 +291,7 @@ def test_a_write_route_needs_the_csrf_header_even_for_an_admin(web: TestClient) 
 
 
 def test_until_the_password_is_changed_only_me_password_and_logout_work(web: TestClient) -> None:
-    sign_in(web, LUIS)
+    sign_in(web, TEMP)
     assert web.get("/api/v1/auth/me").json()["must_change_password"] is True
     blocked = web.get("/api/v1/members-only")
     assert blocked.status_code == 403
@@ -301,15 +301,15 @@ def test_until_the_password_is_changed_only_me_password_and_logout_work(web: Tes
         web,
         "POST",
         "/api/v1/auth/password",
-        json={"current": LUIS["password"], "new": "luis-now-has-his-own-password"},
+        json={"current": TEMP["password"], "new": "temp-now-has-its-own-password"},
     )
     assert done.status_code == 204
     assert web.get("/api/v1/auth/me").json()["must_change_password"] is False
-    assert web.get("/api/v1/members-only").json() == {"user": "luis"}
+    assert web.get("/api/v1/members-only").json() == {"user": "temp"}
 
 
 def test_a_person_who_must_change_can_still_sign_out(web: TestClient) -> None:
-    sign_in(web, LUIS)
+    sign_in(web, TEMP)
     assert write(web, "POST", "/api/v1/auth/logout").status_code == 204
 
 

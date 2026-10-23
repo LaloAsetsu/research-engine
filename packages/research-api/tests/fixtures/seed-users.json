@@ -19,8 +19,8 @@
       "role": "member"
     },
     {
-      "username": "luis",
-      "display_name": "Luis Prueba",
+      "username": "temp",
+      "display_name": "Cuenta Temporal",
       "password": "temporary-test-0001",
       "role": "member",
       "must_change_password": true
