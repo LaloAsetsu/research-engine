@@ -243,6 +243,136 @@ test.describe("S2: editing an item, with the checks of qset/1", () => {
     await expect(page.getByText("Changed since you opened it")).toHaveCount(0);
   });
 
+  test("someone changes the same item: their change is kept next to mine, and both are saved", async ({
+    page,
+  }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    const path = `/sets/${set.name}/versions/v1/items/DP-003`;
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    await page.getByLabel("Notes", { exact: true }).fill("My note on the item");
+
+    // Someone else rewrites the question of the same item.
+    const stored = (await set.api.json(path)).item;
+    const rewritten = await set.api.send("PUT", path, {
+      ifMatch: await set.api.etag(set.name, "v1"),
+      data: { ...stored, question: "The owner rewrote this question" },
+    });
+    expect(rewritten.status()).toBe(200);
+
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Changed since you opened it" }),
+    ).toBeVisible();
+    await expectNoAxeViolations(page);
+    await page.getByRole("button", { name: "Keep my edits" }).click();
+    await expect(page.getByText("Merged with the latest version")).toBeVisible();
+    await expect(page.getByLabel("Question")).toHaveValue("The owner rewrote this question");
+    await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("My note on the item");
+    await expectNoAxeViolations(page);
+
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+    const after = (await set.api.json(path)).item;
+    expect(after.question).toBe("The owner rewrote this question");
+    expect(after.notes).toBe("My note on the item");
+  });
+
+  test("a field both people changed is listed with both values, and mine is kept", async ({
+    page,
+  }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    const path = `/sets/${set.name}/versions/v1/items/DP-003`;
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    await page.getByLabel("Notes", { exact: true }).fill("Ana's note");
+    const stored = (await set.api.json(path)).item;
+    await set.api.send("PUT", path, {
+      ifMatch: await set.api.etag(set.name, "v1"),
+      data: { ...stored, notes: "The other note" },
+    });
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByRole("button", { name: "Keep my edits" }).click();
+    await expect(page.getByText("Yours (kept): Ana's note")).toBeVisible();
+    await expect(page.getByText("Latest on the server: The other note")).toBeVisible();
+    await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("Ana's note");
+    await page.getByRole("button", { name: "Use the latest value of notes" }).click();
+    await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("The other note");
+  });
+
+  test("a read under my edits stops the save instead of putting the old text back", async ({
+    page,
+  }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    const path = `/sets/${set.name}/versions/v1/items/DP-003`;
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    await page.getByLabel("Notes", { exact: true }).fill("Typed before the reconnect");
+    const stored = (await set.api.json(path)).item;
+    await set.api.send("PUT", path, {
+      ifMatch: await set.api.etag(set.name, "v1"),
+      data: { ...stored, question: "Changed while the network was away" },
+    });
+    // The browser comes back online: the queries read again.
+    await page.context().setOffline(true);
+    await page.context().setOffline(false);
+    await expect(page.getByText("This item changed while you were editing")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await expectNoAxeViolations(page);
+    await page.getByRole("button", { name: "Merge with my edits" }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+    const after = (await set.api.json(path)).item;
+    expect(after.question).toBe("Changed while the network was away");
+    expect(after.notes).toBe("Typed before the reconnect");
+  });
+
+  test("focus moves to the first field with a problem after a refused save", async ({ page }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    await page.getByLabel("Question").fill("");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("The item is not a valid qset/1 item.")).toBeVisible();
+    await expect(page.getByLabel("Question")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByLabel("Question")).toBeFocused();
+    // A check does the same.
+    await page.getByLabel("Notes", { exact: true }).focus();
+    await page.getByRole("button", { name: "Check against qset/1" }).click();
+    await expect(page.getByLabel("Question")).toBeFocused();
+  });
+
+  test("leaving with edits that are not saved asks first, and staying keeps them", async ({
+    page,
+  }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    await page.getByLabel("Notes", { exact: true }).fill("Not saved yet");
+    await page.getByRole("link", { name: `Back to ${set.name} v1` }).click();
+    await expect(page.getByText("You have unsaved edits")).toBeVisible();
+    await expect(page).toHaveURL(/items\/DP-003$/);
+    await page.getByRole("button", { name: "Stay and keep editing" }).click();
+    await expect(page.getByLabel("Notes", { exact: true })).toHaveValue("Not saved yet");
+    await page.getByRole("link", { name: `Back to ${set.name} v1` }).click();
+    await page.getByRole("button", { name: "Leave and drop my edits" }).click();
+    await expect(page).toHaveURL(new RegExp(`/sets/${set.name}/v1$`));
+  });
+
+  test("the whole-item JSON tab names the field of every problem", async ({ page }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    await page.goto(`/sets/${set.name}/v1/items/DP-003`);
+    await page.getByLabel("Question").fill("");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("The item is not a valid qset/1 item.")).toBeVisible();
+    await page.getByRole("tab", { name: "JSON" }).click();
+    const box = page.getByLabel("The whole item as JSON");
+    await expect(box).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText(/^\/question: /)).toBeVisible();
+    await expectNoAxeViolations(page);
+  });
+
   test("adds an item and deletes it", async ({ page }) => {
     await signInAs(page, "ana");
     const set = await seedDraft(page);
@@ -405,6 +535,47 @@ test.describe("S3: reviewing items", () => {
     stored = await set.api.json(`/sets/${set.name}/versions/v1/items/DP-003`);
     expect(stored.reviews).toHaveLength(1);
     expect(stored.reviews[0].note).toBe("Checked it twice.");
+    await context.close();
+  });
+
+  test("a decision on an item whose text moved is decided again on the new text", async ({
+    page,
+    browser,
+  }) => {
+    await signInAs(page, "ana");
+    const set = await seedDraft(page);
+    const path = `/sets/${set.name}/versions/v1/items/DP-003`;
+    const { page: dani, context } = await secondPerson(
+      browser,
+      "dani",
+      `/sets/${set.name}/v1/items/DP-003`,
+    );
+    await expect(dani.getByRole("button", { name: "Accept" })).toBeEnabled();
+    const oldQuestion = await dani.getByLabel("Question").inputValue();
+
+    // The owner rewrites the question of this very item while dani is reading it.
+    const stored = (await set.api.json(path)).item;
+    await set.api.send("PUT", path, {
+      ifMatch: await set.api.etag(set.name, "v1"),
+      data: { ...stored, question: "THE OWNER REWROTE THIS QUESTION" },
+    });
+
+    await dani.getByLabel("Note", { exact: true }).fill("Checked it twice.");
+    await dani.getByRole("button", { name: "Accept" }).click();
+    await expect(dani.getByText("The draft changed while you were reading")).toBeVisible();
+    // Nothing was recorded, and dani now sees the text that a decision would be about.
+    expect((await set.api.json(path)).reviews).toHaveLength(0);
+    await expect(dani.getByLabel("Question")).toHaveValue("THE OWNER REWROTE THIS QUESTION");
+    await expect(dani.getByLabel("Question")).not.toHaveValue(oldQuestion);
+    await expect(dani.getByText("This item changed while you had it open")).toBeVisible();
+    await expect(dani.getByLabel("Note", { exact: true })).toHaveValue("Checked it twice.");
+    await expectNoAxeViolations(dani);
+
+    await dani.getByRole("button", { name: "Accept" }).click();
+    await expect(dani.getByText("Recorded: accept.")).toBeVisible();
+    const after = await set.api.json(path);
+    expect(after.reviews).toHaveLength(1);
+    expect(after.reviews[0].set_md5).toBe(after.version.md5);
     await context.close();
   });
 
