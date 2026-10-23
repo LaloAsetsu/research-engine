@@ -21,11 +21,14 @@ export default defineConfig({
   projects: [{ name: "chromium" }],
   webServer: [
     {
-      // The real HTTP layer over fake ports: /health and /status are the API's own.
+      // The real HTTP layer over fake ports. /health and /status are the API's own in every test;
+      // real-api.spec.ts also signs in here, with the seeded test accounts.
       command: `uv run --frozen research-api serve --fake --port ${apiPort}`,
       cwd: "../..",
       url: `http://127.0.0.1:${apiPort}/api/v1/health`,
-      reuseExistingServer: !process.env.CI,
+      // Never reused: the fake server keeps its accounts until it stops, and real-api.spec.ts
+      // changes a password that only a fresh server still has as the temporary one.
+      reuseExistingServer: false,
     },
     {
       // The production bundle, with /api forwarded to the API above.
