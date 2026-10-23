@@ -24,6 +24,7 @@
     "contract": "bash scripts/check-contract.sh",
     "gen:api": "openapi-typescript src/api/openapi.json -o src/shared/api/schema.d.ts",
     "capture:circuits": "node scripts/capture-circuit-fixtures.mjs",
+    "capture:sets": "node scripts/capture-sets-fixtures.mjs",
     "e2e": "playwright test",
     "check": "bash scripts/check.sh"
   },

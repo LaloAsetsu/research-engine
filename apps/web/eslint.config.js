@@ -104,6 +104,17 @@ export default tseslint.config(
     rules: { "no-restricted-globals": "off" },
   },
   {
+    // The answers recorded from the API are plain JSON: tests read and change them by key.
+    files: ["src/test/sets-api.ts", "src/features/qsets/**/*.test.{ts,tsx}", "e2e/sets*.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+    },
+  },
+  {
     files: ["src/**/*.test.{ts,tsx}", "src/test/**/*.{ts,tsx}", "e2e/**/*.ts"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",

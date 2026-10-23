@@ -3,6 +3,7 @@ import { setupServer } from "msw/node";
 import { createAuthMock, type AuthMock } from "./auth-mock";
 import { circuitHandlers } from "./circuits-api";
 import { askHandlers } from "./ask-api";
+import { setsHandlers } from "./sets-api";
 
 export let authMock: AuthMock = createAuthMock();
 
@@ -23,6 +24,7 @@ export const STATUS_BODY = {
 
 export const server = setupServer(
   ...circuitHandlers,
+  ...setsHandlers,
   http.get("*/api/v1/status", () => HttpResponse.json(STATUS_BODY)),
   http.all("*/api/v1/auth/*", async ({ request }) => {
     const path = new URL(request.url).pathname;
