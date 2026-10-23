@@ -1,0 +1,9 @@
+# pnpm settings for apps/web (pnpm 12 reads them from this file).
+savePrefix: "" # exact versions in package.json
+minimumReleaseAge: 10080 # minutes: never install a release younger than 7 days
+peerDependencyRules:
+  allowedVersions:
+    # Both packages declare an older range than the one the scope pins; checked by
+    # `pnpm lint` (jsx-a11y rules run under ESLint 10) and `pnpm gen:api` (TypeScript 6).
+    eslint-plugin-jsx-a11y>eslint: "10"
+    openapi-typescript>typescript: "6"

@@ -37,3 +37,10 @@ serving/env.local
 # Local settings and databases of the research API (config.example.toml is the tracked example)
 **/research-api.local.toml
 *.sqlite3
+
+# Web app (apps/web): installed packages, build output, test output
+apps/web/node_modules/
+apps/web/dist/
+apps/web/coverage/
+apps/web/playwright-report/
+apps/web/test-results/
