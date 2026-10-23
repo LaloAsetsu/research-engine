@@ -26,8 +26,7 @@
       "placeholder": "Here you will review, edit and import question sets. It arrives in a later release."
     },
     "circuits": {
-      "title": "Circuits",
-      "placeholder": "Here you will read and check a quantum circuit. It arrives in a later release."
+      "title": "Circuits"
     },
     "comingSoon": "Coming soon",
     "notFound": {
@@ -100,5 +99,255 @@
     "label": "Language",
     "es": "Español",
     "en": "English"
+  },
+  "circuits": {
+    "intro": "Paste the code of a circuit from a paper, see the gates the reader found, simulate it and check it against a state, a unitary or another circuit. Nothing here leaves your machines.",
+    "input": {
+      "title": "Circuit",
+      "description": "Paste LaTeX (quantikz, Qcircuit, yquant or tikz-cd) or a circuit/1 document.",
+      "kind": "Kind of input",
+      "latex": "LaTeX",
+      "json": "circuit/1 JSON",
+      "latexLabel": "LaTeX code of one circuit",
+      "jsonLabel": "circuit/1 document as JSON",
+      "latexPlaceholder": "\\begin{quantikz}\n\\lstick{\\ket{0}} & \\gate{H} & \\ctrl{1} & \\qw \\\\\n\\lstick{\\ket{0}} & \\qw & \\targ{} & \\qw\n\\end{quantikz}",
+      "jsonPlaceholder": "{\"format\": \"circuit/1\", \"wires\": 2, \"parts\": [[[{\"kind\": \"gate\", \"label\": \"H\", \"targets\": [1]}]]]}",
+      "latexHint": "The body of one code block. The reader lists every gate it understands and every part it does not. Press Ctrl+Enter to read.",
+      "jsonHint": "Used as written: wires are numbered from 1, top to bottom. A key written twice is refused. Press Ctrl+Enter to read.",
+      "read": "Read circuit",
+      "reading": "Reading",
+      "clear": "Clear",
+      "example": "Try an example",
+      "examplePick": "Choose one"
+    },
+    "examples": {
+      "bell": "Bell pair (quantikz)",
+      "ghz": "GHZ state (Qcircuit)",
+      "rotation": "Rotation with a symbol",
+      "hzhEqualsX": "H Z H = X (drawn equality)",
+      "cnotFromCz": "CNOT from CZ (drawn equality)",
+      "qft3": "Quantum Fourier transform, 3 wires",
+      "measured": "Bell pair measured",
+      "partial": "Partly unreadable drawing",
+      "bundle": "Drawing with a bundle (refused)",
+      "bellJson": "Bell pair (circuit/1)"
+    },
+    "reading": {
+      "title": "Gate list",
+      "status": {
+        "parsed": "Read in full",
+        "partial": "Read in part",
+        "unparsed": "Not read"
+      },
+      "explain": {
+        "parsed": "Every part of the drawing was understood.",
+        "partial": "Some parts of the drawing were not understood. The simulator refuses a circuit with unread parts.",
+        "unparsed": "No circuit was found in this text."
+      },
+      "choose": "Circuit to use",
+      "choice": "Circuit {{n}}: {{kind}}, wires: {{wires}}, {{status}}",
+      "wires": "Wires ({{count}})",
+      "wiresPlain": "Wires: {{count}}, numbered from 1 at the top.",
+      "captionOne": "Gates of circuit {{n}}, left to right",
+      "captionLeft": "Circuit {{n}}, left side of the equality",
+      "captionRight": "Circuit {{n}}, right side, after \"{{sign}}\"",
+      "step": "Step",
+      "gate": "Gate",
+      "targets": "Targets",
+      "controls": "Controls",
+      "openControls": "Open controls",
+      "none": "none",
+      "noGates": "No gates.",
+      "notRead": "Not read",
+      "classical": "classical",
+      "unreadTitle": "Parts that were not read",
+      "unreadBody": "These parts of the drawing were not understood, so the circuit cannot be simulated until they are removed or rewritten.",
+      "unreadItem": "Step {{step}}, wire {{wires}}:",
+      "nothing": "There is no circuit to show.",
+      "words": "Gate list in words"
+    },
+    "kinds": {
+      "cnot": "(CNOT)",
+      "toffoli": "(Toffoli)",
+      "fredkin": "(Fredkin)",
+      "zDots": "(control dots only)",
+      "measure": "measurement",
+      "barrier": "barrier",
+      "text": "text"
+    },
+    "run": {
+      "title": "Simulate",
+      "description": "The final state and the outcome probabilities, up to 12 wires.",
+      "input": "Input state",
+      "inputHint": "A basis label such as 010 (wire 1 first) or a list of amplitudes such as [0, 1]. Empty means all wires in 0.",
+      "values": "Parameter values",
+      "valuesHint": "One per line, name = value. A value is a number or an angle such as \\pi/2.",
+      "unitary": "Also show the unitary (up to 8 wires)",
+      "simulate": "Simulate",
+      "running": "Simulating"
+    },
+    "check": {
+      "title": "Check",
+      "description": "Is the circuit equal to a target, up to a global phase?",
+      "against": "Compare against",
+      "kinds": {
+        "state": "A state",
+        "unitary": "A unitary",
+        "circuit": "Another circuit",
+        "drawn": "The drawn equality"
+      },
+      "label": {
+        "state": "Target state",
+        "unitary": "Target unitary",
+        "circuit": "Second circuit"
+      },
+      "placeholder": {
+        "state": "11",
+        "unitary": "[[0, 1], [1, 0]]",
+        "circuit": "\\begin{quantikz} ... \\end{quantikz}"
+      },
+      "hint": {
+        "state": "A basis label such as 11 or a list of amplitudes of norm 1, for example [0.7071, 0, 0, 0.7071].",
+        "unitary": "A square matrix as a list of rows. Each entry is a number or a pair [re, im].",
+        "circuit": "LaTeX of one circuit, or a circuit/1 document starting with {."
+      },
+      "drawnHint": "Compares the two sides of the equality drawn in the circuit, left against right.",
+      "drawnNone": "The circuit read has no equality drawn in it.",
+      "submit": "Check",
+      "checking": "Checking"
+    },
+    "result": {
+      "runTitle": "Simulation",
+      "checkTitle": "Check",
+      "refusedTitle": "Refused",
+      "refusedBody": "The simulator did not run this circuit, so there is no result. These are its reasons.",
+      "reasons": "Reasons",
+      "equal": "Equal up to global phase",
+      "notEqual": "Not equal",
+      "deviation": "Largest deviation: {{value}}",
+      "comparisons": "Comparisons",
+      "between": "Between",
+      "method": "Method",
+      "equalColumn": "Equal",
+      "exact": "Exactly",
+      "phase": "Phase",
+      "maxDeviation": "Largest deviation",
+      "yes": "yes",
+      "no": "no",
+      "partSummary": "Part {{part}}: wires {{wires}}, operations {{operations}}",
+      "symbolicTitle": "Values are missing",
+      "symbolicBody": "The circuit has symbols with no value: {{names}}. Give each a value and simulate again.",
+      "addNames": "Add the names to the values",
+      "inputUsed": "Input state",
+      "valuesUsed": "Values",
+      "leftPart": "Left side",
+      "rightPart": "Right side, after \"{{sign}}\"",
+      "stateCaption": "Final state (wires: {{wires}}). Wire 1 is the most significant bit.",
+      "basis": "Basis state",
+      "amplitude": "Amplitude",
+      "probability": "Probability",
+      "noState": "The state is not listed for a circuit of this size.",
+      "probabilitiesTitle": "Outcome probabilities of wires {{wires}}",
+      "showing": "Showing {{shown}} of {{total}}",
+      "more": "Show more",
+      "showZeros": "Show the {{count}} zero rows",
+      "hideZeros": "Hide the zero rows",
+      "measured": "Measured wires: {{wires}}",
+      "unitaryCaption": "Unitary, {{size}} by {{size}}",
+      "row": "Row",
+      "corner": "Showing the top left {{shown}} by {{shown}} of {{size}} by {{size}}.",
+      "downloadUnitary": "Download the unitary (JSON)",
+      "notes": "Notes",
+      "seeConventions": "See the conventions and the gate table"
+    },
+    "conventions": {
+      "title": "Conventions",
+      "ofResult": "As stated in the last result.",
+      "ofSimulator": "What the simulator assumes. Every result repeats them.",
+      "unavailable": "The conventions could not be loaded.",
+      "limits": "The simulator itself takes up to {{statevector}} wires for a state, {{unitary}} for a unitary and {{ops}} operations.",
+      "apiCaps": "This screen is for small circuits: up to 12 wires, or 8 for a unitary or for a comparison of two circuits. For larger ones use the quantum-sim command line.",
+      "gateTable": "Gate table ({{count}} gates)",
+      "gateTableCaption": "Gates the simulator knows, by name",
+      "gate": "Name",
+      "targets": "Wires",
+      "params": "Angles",
+      "definition": "Definition",
+      "keys": {
+        "source": "Source",
+        "wire_order": "Wire order",
+        "wire_numbers": "Wire numbers",
+        "rotations": "Rotations",
+        "two_qubit_rotations": "Two-qubit rotations",
+        "phase": "Phase gates",
+        "sqrt_x": "Square root of X",
+        "qft_rk": "QFT rotation R_k",
+        "controls": "Controls",
+        "equality": "Equality",
+        "input_state": "Input state",
+        "step_order": "Step order",
+        "measurement": "Measurement"
+      }
+    },
+    "problem": {
+      "badRequest": "The server refused the text",
+      "tooLarge": "The request is too large",
+      "tooBig": "This circuit is too big for the screen",
+      "busy": "The circuit service is busy",
+      "notAllowed": "You are not allowed to do this",
+      "failed": "The request failed",
+      "malformed": "The server's answer could not be read",
+      "retry": "Try again in {{seconds}} seconds."
+    },
+    "local": {
+      "emptyInput": {
+        "title": "Nothing to read",
+        "detail": "Paste a circuit first."
+      },
+      "invalidJson": {
+        "title": "Not valid JSON",
+        "detail": "The text is not valid JSON. Check the commas and the brackets."
+      },
+      "duplicateKey": {
+        "title": "A key is written twice",
+        "detail": "The key \"{{key}}\" appears twice in one object. The text does not say which value is meant, so it is refused."
+      },
+      "notACircuit": {
+        "title": "Not a circuit/1 document",
+        "detail": "A circuit/1 document needs a number of wires and a list of parts."
+      },
+      "notRead": {
+        "title": "Read the circuit first",
+        "detail": "Press Read circuit, then simulate or check."
+      },
+      "badValues": {
+        "title": "A parameter value is not valid",
+        "detail": "Line {{line}} ({{name}}): write name = value, once per name."
+      },
+      "badState": {
+        "title": "The state is not valid",
+        "detail": "Write a basis label such as 010, or a list of amplitudes such as [0, 1]."
+      },
+      "badUnitary": {
+        "title": "The unitary is not valid",
+        "detail": "Write a matrix as a list of rows, for example [[0, 1], [1, 0]]."
+      },
+      "emptyTarget": {
+        "title": "No target given",
+        "detail": "Write what to compare the circuit with."
+      },
+      "secondUnread": {
+        "title": "The second circuit was not read",
+        "detail": "No circuit was found in the second text."
+      },
+      "secondMany": {
+        "title": "More than one circuit in the second text",
+        "detail": "The second text holds {{count}} circuits. Keep one."
+      },
+      "network": {
+        "title": "The server could not be reached",
+        "detail": "Check the connection and try again."
+      }
+    }
   }
 }

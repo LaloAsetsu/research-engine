@@ -26,8 +26,7 @@
       "placeholder": "Aquí se revisarán, editarán e importarán los conjuntos de preguntas. Llega en una versión próxima."
     },
     "circuits": {
-      "title": "Circuitos",
-      "placeholder": "Aquí se leerá y se comprobará un circuito cuántico. Llega en una versión próxima."
+      "title": "Circuitos"
     },
     "comingSoon": "Próximamente",
     "notFound": {
@@ -100,5 +99,255 @@
     "label": "Idioma",
     "es": "Español",
     "en": "English"
+  },
+  "circuits": {
+    "intro": "Pega el código de un circuito de un artículo, mira las compuertas que encontró el lector, simúlalo y compáralo con un estado, una unitaria u otro circuito. Nada de esto sale de tus equipos.",
+    "input": {
+      "title": "Circuito",
+      "description": "Pega LaTeX (quantikz, Qcircuit, yquant o tikz-cd) o un documento circuit/1.",
+      "kind": "Tipo de entrada",
+      "latex": "LaTeX",
+      "json": "JSON circuit/1",
+      "latexLabel": "Código LaTeX de un circuito",
+      "jsonLabel": "Documento circuit/1 en JSON",
+      "latexPlaceholder": "\\begin{quantikz}\n\\lstick{\\ket{0}} & \\gate{H} & \\ctrl{1} & \\qw \\\\\n\\lstick{\\ket{0}} & \\qw & \\targ{} & \\qw\n\\end{quantikz}",
+      "jsonPlaceholder": "{\"format\": \"circuit/1\", \"wires\": 2, \"parts\": [[[{\"kind\": \"gate\", \"label\": \"H\", \"targets\": [1]}]]]}",
+      "latexHint": "El cuerpo de un bloque de código. El lector enumera cada compuerta que entiende y cada parte que no. Ctrl+Enter para leer.",
+      "jsonHint": "Se usa tal como está escrito: los cables se numeran desde 1, de arriba abajo. Una clave escrita dos veces se rechaza. Ctrl+Enter para leer.",
+      "read": "Leer circuito",
+      "reading": "Leyendo",
+      "clear": "Limpiar",
+      "example": "Probar un ejemplo",
+      "examplePick": "Elige uno"
+    },
+    "examples": {
+      "bell": "Par de Bell (quantikz)",
+      "ghz": "Estado GHZ (Qcircuit)",
+      "rotation": "Rotación con un símbolo",
+      "hzhEqualsX": "H Z H = X (igualdad dibujada)",
+      "cnotFromCz": "CNOT a partir de CZ (igualdad dibujada)",
+      "qft3": "Transformada cuántica de Fourier, 3 cables",
+      "measured": "Par de Bell medido",
+      "partial": "Dibujo parcialmente ilegible",
+      "bundle": "Dibujo con un haz de cables (rechazado)",
+      "bellJson": "Par de Bell (circuit/1)"
+    },
+    "reading": {
+      "title": "Lista de compuertas",
+      "status": {
+        "parsed": "Leído completo",
+        "partial": "Leído en parte",
+        "unparsed": "No leído"
+      },
+      "explain": {
+        "parsed": "Se entendió todo el dibujo.",
+        "partial": "Hay partes del dibujo que no se entendieron. El simulador rechaza un circuito con partes sin leer.",
+        "unparsed": "No se encontró ningún circuito en este texto."
+      },
+      "choose": "Circuito a usar",
+      "choice": "Circuito {{n}}: {{kind}}, cables: {{wires}}, {{status}}",
+      "wires": "Cables ({{count}})",
+      "wiresPlain": "Cables: {{count}}, numerados desde 1 en la parte de arriba.",
+      "captionOne": "Compuertas del circuito {{n}}, de izquierda a derecha",
+      "captionLeft": "Circuito {{n}}, lado izquierdo de la igualdad",
+      "captionRight": "Circuito {{n}}, lado derecho, después de \"{{sign}}\"",
+      "step": "Paso",
+      "gate": "Compuerta",
+      "targets": "Objetivos",
+      "controls": "Controles",
+      "openControls": "Controles abiertos",
+      "none": "ninguno",
+      "noGates": "Sin compuertas.",
+      "notRead": "No leído",
+      "classical": "clásico",
+      "unreadTitle": "Partes que no se leyeron",
+      "unreadBody": "Estas partes del dibujo no se entendieron, así que el circuito no se puede simular hasta quitarlas o reescribirlas.",
+      "unreadItem": "Paso {{step}}, cable {{wires}}:",
+      "nothing": "No hay ningún circuito que mostrar.",
+      "words": "Lista de compuertas en palabras"
+    },
+    "kinds": {
+      "cnot": "(CNOT)",
+      "toffoli": "(Toffoli)",
+      "fredkin": "(Fredkin)",
+      "zDots": "(solo puntos de control)",
+      "measure": "medición",
+      "barrier": "barrera",
+      "text": "texto"
+    },
+    "run": {
+      "title": "Simular",
+      "description": "El estado final y las probabilidades de los resultados, hasta 12 cables.",
+      "input": "Estado de entrada",
+      "inputHint": "Una etiqueta de base como 010 (primero el cable 1) o una lista de amplitudes como [0, 1]. Vacío significa todos los cables en 0.",
+      "values": "Valores de los parámetros",
+      "valuesHint": "Uno por línea, nombre = valor. Un valor es un número o un ángulo como \\pi/2.",
+      "unitary": "Mostrar también la unitaria (hasta 8 cables)",
+      "simulate": "Simular",
+      "running": "Simulando"
+    },
+    "check": {
+      "title": "Comprobar",
+      "description": "¿El circuito es igual a un objetivo, salvo una fase global?",
+      "against": "Comparar con",
+      "kinds": {
+        "state": "Un estado",
+        "unitary": "Una unitaria",
+        "circuit": "Otro circuito",
+        "drawn": "La igualdad dibujada"
+      },
+      "label": {
+        "state": "Estado objetivo",
+        "unitary": "Unitaria objetivo",
+        "circuit": "Segundo circuito"
+      },
+      "placeholder": {
+        "state": "11",
+        "unitary": "[[0, 1], [1, 0]]",
+        "circuit": "\\begin{quantikz} ... \\end{quantikz}"
+      },
+      "hint": {
+        "state": "Una etiqueta de base como 11 o una lista de amplitudes de norma 1, por ejemplo [0.7071, 0, 0, 0.7071].",
+        "unitary": "Una matriz cuadrada como lista de filas. Cada entrada es un número o un par [re, im].",
+        "circuit": "LaTeX de un circuito, o un documento circuit/1 que empiece con {."
+      },
+      "drawnHint": "Compara los dos lados de la igualdad dibujada en el circuito, izquierda contra derecha.",
+      "drawnNone": "El circuito leído no tiene ninguna igualdad dibujada.",
+      "submit": "Comprobar",
+      "checking": "Comprobando"
+    },
+    "result": {
+      "runTitle": "Simulación",
+      "checkTitle": "Comprobación",
+      "refusedTitle": "Rechazado",
+      "refusedBody": "El simulador no ejecutó este circuito, así que no hay resultado. Estas son sus razones.",
+      "reasons": "Razones",
+      "equal": "Igual salvo fase global",
+      "notEqual": "No es igual",
+      "deviation": "Mayor desviación: {{value}}",
+      "comparisons": "Comparaciones",
+      "between": "Entre",
+      "method": "Método",
+      "equalColumn": "Igual",
+      "exact": "Exacta",
+      "phase": "Fase",
+      "maxDeviation": "Mayor desviación",
+      "yes": "sí",
+      "no": "no",
+      "partSummary": "Parte {{part}}: cables {{wires}}, operaciones {{operations}}",
+      "symbolicTitle": "Faltan valores",
+      "symbolicBody": "El circuito tiene símbolos sin valor: {{names}}. Dale un valor a cada uno y simula de nuevo.",
+      "addNames": "Agregar los nombres a los valores",
+      "inputUsed": "Estado de entrada",
+      "valuesUsed": "Valores",
+      "leftPart": "Lado izquierdo",
+      "rightPart": "Lado derecho, después de \"{{sign}}\"",
+      "stateCaption": "Estado final (cables: {{wires}}). El cable 1 es el bit más significativo.",
+      "basis": "Estado de la base",
+      "amplitude": "Amplitud",
+      "probability": "Probabilidad",
+      "noState": "El estado no se lista para un circuito de este tamaño.",
+      "probabilitiesTitle": "Probabilidades de los resultados de los cables {{wires}}",
+      "showing": "Mostrando {{shown}} de {{total}}",
+      "more": "Mostrar más",
+      "showZeros": "Mostrar las {{count}} filas en cero",
+      "hideZeros": "Ocultar las filas en cero",
+      "measured": "Cables medidos: {{wires}}",
+      "unitaryCaption": "Unitaria, {{size}} por {{size}}",
+      "row": "Fila",
+      "corner": "Mostrando la esquina superior izquierda de {{shown}} por {{shown}} de {{size}} por {{size}}.",
+      "downloadUnitary": "Descargar la unitaria (JSON)",
+      "notes": "Notas",
+      "seeConventions": "Ver las convenciones y la tabla de compuertas"
+    },
+    "conventions": {
+      "title": "Convenciones",
+      "ofResult": "Tal como las declara el último resultado.",
+      "ofSimulator": "Lo que supone el simulador. Cada resultado las repite.",
+      "unavailable": "No se pudieron cargar las convenciones.",
+      "limits": "El simulador admite hasta {{statevector}} cables para un estado, {{unitary}} para una unitaria y {{ops}} operaciones.",
+      "apiCaps": "Esta pantalla es para circuitos pequeños: hasta 12 cables, u 8 para una unitaria o para comparar dos circuitos. Para los más grandes usa la línea de comandos de quantum-sim.",
+      "gateTable": "Tabla de compuertas ({{count}} compuertas)",
+      "gateTableCaption": "Compuertas que conoce el simulador, por nombre",
+      "gate": "Nombre",
+      "targets": "Cables",
+      "params": "Ángulos",
+      "definition": "Definición",
+      "keys": {
+        "source": "Fuente",
+        "wire_order": "Orden de los cables",
+        "wire_numbers": "Numeración de los cables",
+        "rotations": "Rotaciones",
+        "two_qubit_rotations": "Rotaciones de dos cúbits",
+        "phase": "Compuertas de fase",
+        "sqrt_x": "Raíz cuadrada de X",
+        "qft_rk": "Rotación R_k de la QFT",
+        "controls": "Controles",
+        "equality": "Igualdad",
+        "input_state": "Estado de entrada",
+        "step_order": "Orden de los pasos",
+        "measurement": "Medición"
+      }
+    },
+    "problem": {
+      "badRequest": "El servidor rechazó el texto",
+      "tooLarge": "La solicitud es demasiado grande",
+      "tooBig": "Este circuito es demasiado grande para la pantalla",
+      "busy": "El servicio de circuitos está ocupado",
+      "notAllowed": "No tienes permiso para hacer esto",
+      "failed": "La solicitud falló",
+      "malformed": "No se pudo leer la respuesta del servidor",
+      "retry": "Intenta de nuevo en {{seconds}} segundos."
+    },
+    "local": {
+      "emptyInput": {
+        "title": "Nada que leer",
+        "detail": "Pega primero un circuito."
+      },
+      "invalidJson": {
+        "title": "JSON no válido",
+        "detail": "El texto no es JSON válido. Revisa las comas y los corchetes."
+      },
+      "duplicateKey": {
+        "title": "Una clave está escrita dos veces",
+        "detail": "La clave \"{{key}}\" aparece dos veces en un mismo objeto. El texto no dice cuál valor se quiere, así que se rechaza."
+      },
+      "notACircuit": {
+        "title": "No es un documento circuit/1",
+        "detail": "Un documento circuit/1 necesita un número de cables y una lista de partes."
+      },
+      "notRead": {
+        "title": "Lee primero el circuito",
+        "detail": "Pulsa Leer circuito y después simula o comprueba."
+      },
+      "badValues": {
+        "title": "Un valor de parámetro no es válido",
+        "detail": "Línea {{line}} ({{name}}): escribe nombre = valor, una vez por nombre."
+      },
+      "badState": {
+        "title": "El estado no es válido",
+        "detail": "Escribe una etiqueta de base como 010, o una lista de amplitudes como [0, 1]."
+      },
+      "badUnitary": {
+        "title": "La unitaria no es válida",
+        "detail": "Escribe una matriz como lista de filas, por ejemplo [[0, 1], [1, 0]]."
+      },
+      "emptyTarget": {
+        "title": "Falta el objetivo",
+        "detail": "Escribe con qué comparar el circuito."
+      },
+      "secondUnread": {
+        "title": "No se leyó el segundo circuito",
+        "detail": "No se encontró ningún circuito en el segundo texto."
+      },
+      "secondMany": {
+        "title": "Hay más de un circuito en el segundo texto",
+        "detail": "El segundo texto tiene {{count}} circuitos. Deja uno."
+      },
+      "network": {
+        "title": "No se pudo contactar al servidor",
+        "detail": "Revisa la conexión e intenta de nuevo."
+      }
+    }
   }
 }
