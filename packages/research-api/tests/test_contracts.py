@@ -25,6 +25,7 @@ PORTS_ONLY = "Application and ports reach docingest, quantum-sim and qa-bench on
 DOCINGEST = "Only the docingest adapters import docingest"
 QUANTUM = "Only the circuits adapter imports quantum_sim"
 QA_BENCH = "Only the bench adapter imports qa_bench"
+HASHING = "Only the hashing adapter imports pwdlib and argon2"
 SQL = "Only the persistence adapter imports sqlalchemy and alembic"
 PROTECTED = "Only the composition root and entrypoints wire concrete adapters"
 PLUGIN = "research_api never imports a docingest plugin (docingest finds it by entry point)"
@@ -166,6 +167,88 @@ CASES = {
         "import quantum_sim\nimport docingest",
         set(),
     ),
+    "domain imports pwdlib": ("domain/status.py", "import pwdlib", {PURE, PORTS_ONLY, HASHING}),
+    "domain imports argon2": ("domain/status.py", "import argon2", {PURE, PORTS_ONLY, HASHING}),
+    "the persistence adapter imports pwdlib": (
+        "adapters/persistence/__init__.py",
+        "import pwdlib",
+        {HASHING},
+    ),
+    "the files adapter imports argon2": ("adapters/files/private.py", "import argon2", {HASHING}),
+    "a new adapter module imports pwdlib": ("adapters/sessions.py", "import pwdlib", {HASHING}),
+    "bootstrap imports argon2 itself": ("bootstrap/container.py", "import argon2", {HASHING}),
+    "an entrypoint imports pwdlib itself": ("entrypoints/cli.py", "import pwdlib", {HASHING}),
+    "a module inside the hashing adapter imports sqlalchemy": (
+        "adapters/hashing/policy.py",
+        "import sqlalchemy",
+        {SQL},
+    ),
+    "application imports sqlalchemy": (
+        "application/auth.py",
+        "import sqlalchemy",
+        {PORTS_ONLY, SQL},
+    ),
+    "ports import alembic": ("ports/auth.py", "import alembic", {PORTS_ONLY, SQL}),
+    "application imports the hashing adapter": (
+        "application/auth.py",
+        "from ..adapters import hashing",
+        {LAYERS, PROTECTED, PORTS_ONLY},  # and the hashing adapter's pwdlib, through the chain
+    ),
+    "the persistence adapter imports the hashing adapter": (
+        "adapters/persistence/repos.py",
+        "from .. import hashing",
+        {INDEPENDENT},
+    ),
+    "the hashing adapter imports the files adapter": (
+        "adapters/hashing/__init__.py",
+        "from .. import files",
+        {INDEPENDENT},
+    ),
+    "the files adapter imports the persistence adapter": (
+        "adapters/files/private.py",
+        "from .. import persistence",
+        {INDEPENDENT},
+    ),
+    "bootstrap storage imports sqlalchemy itself": (
+        "bootstrap/storage.py",
+        "import sqlalchemy",
+        {SQL},
+    ),
+    "the http auth routes import sqlalchemy": (
+        "entrypoints/http/auth.py",
+        "import sqlalchemy",
+        {SQL},
+    ),
+    "the migrations import docingest": (
+        "adapters/persistence/migrations/env.py",
+        "import docingest",
+        {DOCINGEST},
+    ),
+    "a migration imports quantum_sim": (
+        "adapters/persistence/migrations/versions/0001_users_sessions_login_attempts.py",
+        "import quantum_sim",
+        {QUANTUM},
+    ),
+    "control: the migrations import alembic and sqlalchemy": (
+        "adapters/persistence/migrations/env.py",
+        "import alembic\nimport sqlalchemy",
+        set(),
+    ),
+    "control: the hashing adapter imports pwdlib": (
+        "adapters/hashing/__init__.py",
+        "import pwdlib\nimport argon2",
+        set(),
+    ),
+    "control: a module inside the hashing adapter imports argon2": (
+        "adapters/hashing/policy.py",
+        "import argon2",
+        set(),
+    ),
+    "control: bootstrap storage imports two adapters": (
+        "bootstrap/storage.py",
+        "from ..adapters import files, persistence",
+        set(),
+    ),
     "control: a module inside the docingest adapter imports docingest": (
         "adapters/docingest_ask/parsing.py",
         "import docingest",
@@ -258,6 +341,7 @@ def test_a_contract_breaks_on_the_import_it_forbids(sandbox: Path, case: str) ->
             DOCINGEST,
             QUANTUM,
             QA_BENCH,
+            HASHING,
             SQL,
             PROTECTED,
             PLUGIN,

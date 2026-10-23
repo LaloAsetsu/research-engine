@@ -172,6 +172,20 @@ allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
+name = "Only the hashing adapter imports pwdlib and argon2"
+type = "forbidden"
+source_modules = ["research_api"]
+forbidden_modules = ["pwdlib", "argon2"]
+ignore_imports = [
+    "research_api.adapters.hashing -> pwdlib",
+    "research_api.adapters.hashing.** -> pwdlib",
+    "research_api.adapters.hashing -> argon2",
+    "research_api.adapters.hashing.** -> argon2",
+]
+allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
 name = "Only the persistence adapter imports sqlalchemy and alembic"
 type = "forbidden"
 source_modules = ["research_api"]
