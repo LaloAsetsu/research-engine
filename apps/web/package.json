@@ -22,6 +22,7 @@
     "size": "node scripts/check-size.mjs",
     "contract": "bash scripts/check-contract.sh",
     "gen:api": "openapi-typescript src/api/openapi.json -o src/shared/api/schema.d.ts",
+    "capture:circuits": "node scripts/capture-circuit-fixtures.mjs",
     "e2e": "playwright test",
     "check": "bash scripts/check.sh"
   },

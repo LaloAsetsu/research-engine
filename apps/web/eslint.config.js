@@ -99,6 +99,11 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node } },
   },
   {
+    // Scripts run in Node and talk to the API directly; the fetch rule is for the screens.
+    files: ["scripts/**"],
+    rules: { "no-restricted-globals": "off" },
+  },
+  {
     files: ["src/**/*.test.{ts,tsx}", "src/test/**/*.{ts,tsx}", "e2e/**/*.ts"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",

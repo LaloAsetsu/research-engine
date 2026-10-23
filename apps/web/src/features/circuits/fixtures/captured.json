@@ -1,0 +1,2145 @@
+[
+  {
+    "name": "parse bell",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n\\lstick{\\ket{0}} & \\gate{H} & \\ctrl{1} & \\qw \\\\\n\\lstick{\\ket{0}} & \\qw & \\targ{} & \\qw\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1 = \\ket{0}; 2 = \\ket{0}\nStep 1: H on wire 1\nStep 2: CNOT: control wire 1, target wire 2",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 2,
+          "wire_labels": ["1 = \\ket{0}", "2 = \\ket{0}"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [2],
+                  "controls": [1],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse ghz qcircuit",
+    "path": "parse",
+    "request": {
+      "latex": "\\Qcircuit @C=1em @R=1em {\n& \\gate{H} & \\ctrl{1} & \\qw & \\qw \\\\\n& \\qw & \\targ & \\ctrl{1} & \\qw \\\\\n& \\qw & \\qw & \\targ & \\qw\n}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1; 2; 3\nStep 1: H on wire 1\nStep 2: CNOT: control wire 1, target wire 2\nStep 3: CNOT: control wire 2, target wire 3",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "qcircuit",
+          "status": "parsed",
+          "label": "",
+          "wires": 3,
+          "wire_labels": ["1", "2", "3"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [2],
+                  "controls": [1],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [3],
+                  "controls": [2],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse rotation",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n& \\gate{R_y(\\theta)} & \\qw\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1\nStep 1: R_y(\\theta) on wire 1",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 1,
+          "wire_labels": ["1"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "R_y(\\theta)",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse hzh equals x",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n& \\gate{H} & \\gate{Z} & \\gate{H} & \\qw & \\push{=} & \\gate{X} & \\qw\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1\nStep 1: H on wire 1\nStep 2: Z on wire 1\nStep 3: H on wire 1\n[=: the steps below draw the right-hand side, an equivalent circuit]\nStep 1: X on wire 1",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 1,
+          "wire_labels": ["1"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "Z",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "kind": "sep",
+                  "label": "=",
+                  "targets": [],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "X",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse cnot from cz",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n& \\qw & \\ctrl{1} & \\qw & \\qw & \\push{=} & \\ctrl{1} & \\qw \\\\\n& \\gate{H} & \\control{} & \\gate{H} & \\qw & & \\targ{} & \\qw\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1; 2\nStep 1: H on wire 2\nStep 2: controlled-Z on wires 1 and 2 (control dots on both, symmetric: no target)\nStep 3: H on wire 2\n[=: the steps below draw the right-hand side, an equivalent circuit]\nStep 1: CNOT: control wire 1, target wire 2",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 2,
+          "wire_labels": ["1", "2"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [2],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "z_dots",
+                  "label": "Z",
+                  "targets": [],
+                  "controls": [1, 2],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [2],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "kind": "sep",
+                  "label": "=",
+                  "targets": [],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [2],
+                  "controls": [1],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse qft3",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n& \\gate{H} & \\gate{R_2} & \\gate{R_3} & \\qw & \\qw & \\qw & \\swap{2} & \\qw \\\\\n& \\qw & \\ctrl{-1} & \\qw & \\gate{H} & \\gate{R_2} & \\qw & \\qw & \\qw \\\\\n& \\qw & \\qw & \\ctrl{-2} & \\qw & \\ctrl{-1} & \\gate{H} & \\targX{} & \\qw\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1; 2; 3\nStep 1: H on wire 1\nStep 2: controlled-R_2: control wire 2, target wire 1\nStep 3: controlled-R_3: control wire 3, target wire 1\nStep 4: H on wire 2\nStep 5: controlled-R_2: control wire 3, target wire 2\nStep 6: H on wire 3\nStep 7: SWAP wires 1 and 3",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 3,
+          "wire_labels": ["1", "2", "3"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "R_2",
+                  "targets": [1],
+                  "controls": [2],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "R_3",
+                  "targets": [1],
+                  "controls": [3],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [2],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "R_2",
+                  "targets": [2],
+                  "controls": [3],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [3],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "swap",
+                  "label": "",
+                  "targets": [1, 3],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse measured",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n& \\gate{H} & \\ctrl{1} & \\qw & \\meter{} \\\\\n& \\qw & \\targ{} & \\qw & \\meter{}\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1; 2\nStep 1: H on wire 1\nStep 2: CNOT: control wire 1, target wire 2\nStep 3: measure wire 1; measure wire 2",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 2,
+          "wire_labels": ["1", "2"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [2],
+                  "controls": [1],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "measure",
+                  "label": "",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                },
+                {
+                  "kind": "measure",
+                  "label": "",
+                  "targets": [2],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse partial",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n\\lstick{$q_1$} & \\ctrl{1} & \\qw \\\\\n\\lstick{$q_2$} & \\targ{} & \\ctrl{1} \\wire[l][1][\"\\iddots\"{below,pos=0.1}]{a} \\\\\n\\lstick{$q_3$} & \\qw & \\targ{}\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "partial",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1 = q_1; 2 = q_2; 3 = q_3\nStep 1: CNOT: control wire 1, target wire 2\nStep 2: CNOT: control wire 2, target wire 3; unparsed on wire 2: \\wire[l][1][\"\\iddots\"{below,pos=0.1}]{a}",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "partial",
+          "label": "",
+          "wires": 3,
+          "wire_labels": ["1 = q_1", "2 = q_2", "3 = q_3"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [2],
+                  "controls": [1],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [3],
+                  "controls": [2],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                },
+                {
+                  "kind": "unparsed",
+                  "label": "",
+                  "targets": [2],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": "\\wire[l][1][\"\\iddots\"{below,pos=0.1}]{a}"
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse bundle",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n& \\gate{H} & \\ctrl{1} & \\qw \\\\\n\\lstick{$a$} & \\qwbundle{m} & \\targ{} & \\qw\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nWires: 1; 2 = a, bundle m\nStep 1: H on wire 1\nStep 2: CNOT: control wire 1, target wire 2",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 2,
+          "wire_labels": ["1", "2 = a, bundle m"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [2],
+                  "controls": [1],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse two circuits",
+    "path": "parse",
+    "request": {
+      "latex": "\\begin{quantikz}\n\\lstick{\\ket{0}} & \\gate{H} & \\ctrl{1} & \\qw \\\\\n\\lstick{\\ket{0}} & \\qw & \\targ{} & \\qw\n\\end{quantikz}\n\n\\begin{quantikz}\n& \\gate{H} & \\gate{Z} & \\gate{H} & \\qw & \\push{=} & \\gate{X} & \\qw\n\\end{quantikz}"
+    },
+    "status": 200,
+    "response": {
+      "status": "parsed",
+      "text": "Gate list (from the circuit code above; wires numbered top to bottom; one step per drawn column, left to right):\nCircuit 1 of 2:\nWires: 1 = \\ket{0}; 2 = \\ket{0}\nStep 1: H on wire 1\nStep 2: CNOT: control wire 1, target wire 2\nCircuit 2 of 2:\nWires: 1\nStep 1: H on wire 1\nStep 2: Z on wire 1\nStep 3: H on wire 1\n[=: the steps below draw the right-hand side, an equivalent circuit]\nStep 1: X on wire 1",
+      "circuits": [
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 2,
+          "wire_labels": ["1 = \\ket{0}", "2 = \\ket{0}"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "x",
+                  "label": "X",
+                  "targets": [2],
+                  "controls": [1],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        },
+        {
+          "format": "circuit/1",
+          "kind": "quantikz",
+          "status": "parsed",
+          "label": "",
+          "wires": 1,
+          "wire_labels": ["1"],
+          "parts": [
+            [
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "Z",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "H",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ],
+            [
+              [
+                {
+                  "kind": "sep",
+                  "label": "=",
+                  "targets": [],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ],
+              [
+                {
+                  "kind": "gate",
+                  "label": "X",
+                  "targets": [1],
+                  "controls": [],
+                  "open_controls": [],
+                  "classical": false,
+                  "source": ""
+                }
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "parse unparsed",
+    "path": "parse",
+    "request": {
+      "latex": "no circuit here"
+    },
+    "status": 200,
+    "response": {
+      "status": "unparsed",
+      "text": "",
+      "circuits": []
+    }
+  },
+  {
+    "name": "run bell",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1 = \\\\ket{0}\",\"2 = \\\\ket{0}\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "00",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 2,
+          "measured_wires": [],
+          "state": [
+            [0.707106781187, 0],
+            [0, 0],
+            [0, 0],
+            [0.707106781187, 0]
+          ],
+          "probabilities": {
+            "wires": [1, 2],
+            "values": [0.5, 0, 0, 0.5]
+          },
+          "unitary": null,
+          "sign": null
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run bell unitary",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1 = \\\\ket{0}\",\"2 = \\\\ket{0}\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "unitary": true
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "00",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 2,
+          "measured_wires": [],
+          "state": [
+            [0.707106781187, 0],
+            [0, 0],
+            [0, 0],
+            [0.707106781187, 0]
+          ],
+          "probabilities": {
+            "wires": [1, 2],
+            "values": [0.5, 0, 0, 0.5]
+          },
+          "unitary": [
+            [
+              [0.707106781187, 0],
+              [0, 0],
+              [0.707106781187, 0],
+              [0, 0]
+            ],
+            [
+              [0, 0],
+              [0.707106781187, 0],
+              [0, 0],
+              [0.707106781187, 0]
+            ],
+            [
+              [0, 0],
+              [0.707106781187, 0],
+              [0, 0],
+              [-0.707106781187, 0]
+            ],
+            [
+              [0.707106781187, 0],
+              [0, 0],
+              [-0.707106781187, 0],
+              [0, 0]
+            ]
+          ],
+          "sign": null
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run ghz",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"qcircuit\",\"status\":\"parsed\",\"label\":\"\",\"wires\":3,\"wire_labels\":[\"1\",\"2\",\"3\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[3],\"controls\":[2],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "000",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 3,
+          "measured_wires": [],
+          "state": [
+            [0.707106781187, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0.707106781187, 0]
+          ],
+          "probabilities": {
+            "wires": [1, 2, 3],
+            "values": [0.5, 0, 0, 0, 0, 0, 0, 0.5]
+          },
+          "unitary": null,
+          "sign": null
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run bell input 10",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1 = \\\\ket{0}\",\"2 = \\\\ket{0}\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "input": "10",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "10",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 2,
+          "measured_wires": [],
+          "state": [
+            [0.707106781187, 0],
+            [0, 0],
+            [0, 0],
+            [-0.707106781187, 0]
+          ],
+          "probabilities": {
+            "wires": [1, 2],
+            "values": [0.5, 0, 0, 0.5]
+          },
+          "unitary": null,
+          "sign": null
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run measured",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1\",\"2\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"measure\",\"label\":\"\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"},{\"kind\":\"measure\",\"label\":\"\",\"targets\":[2],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "00",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 2,
+          "measured_wires": [1, 2],
+          "state": [
+            [0.707106781187, 0],
+            [0, 0],
+            [0, 0],
+            [0.707106781187, 0]
+          ],
+          "probabilities": {
+            "wires": [1, 2],
+            "values": [0.5, 0, 0, 0.5]
+          },
+          "unitary": null,
+          "sign": null
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run hzh both sides",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":1,\"wire_labels\":[\"1\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"Z\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]],[[{\"kind\":\"sep\",\"label\":\"=\",\"targets\":[],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"X\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "0",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 1,
+          "measured_wires": [],
+          "state": [
+            [0, 0],
+            [1, 0]
+          ],
+          "probabilities": {
+            "wires": [1],
+            "values": [0, 1]
+          },
+          "unitary": null,
+          "sign": null
+        },
+        {
+          "part": 2,
+          "wires": 1,
+          "measured_wires": [],
+          "state": [
+            [0, 0],
+            [1, 0]
+          ],
+          "probabilities": {
+            "wires": [1],
+            "values": [0, 1]
+          },
+          "unitary": null,
+          "sign": "="
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run symbolic",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":1,\"wire_labels\":[\"1\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"R_y(\\\\theta)\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "symbolic",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "0",
+      "parameters": ["theta"],
+      "values": {},
+      "unbound": ["theta"],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 1,
+          "operations": 1,
+          "parameters": ["theta"]
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run symbolic bound",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":1,\"wire_labels\":[\"1\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"R_y(\\\\theta)\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "values": {
+        "theta": "\\pi/2"
+      },
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "0",
+      "parameters": ["theta"],
+      "values": {
+        "theta": 1.5707963267948966
+      },
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 1,
+          "measured_wires": [],
+          "state": [
+            [0.707106781187, 0],
+            [0.707106781187, 0]
+          ],
+          "probabilities": {
+            "wires": [1],
+            "values": [0.5, 0.5]
+          },
+          "unitary": null,
+          "sign": null
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run qft3",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":3,\"wire_labels\":[\"1\",\"2\",\"3\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"R_2\",\"targets\":[1],\"controls\":[2],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"R_3\",\"targets\":[1],\"controls\":[3],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[2],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"R_2\",\"targets\":[2],\"controls\":[3],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[3],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"swap\",\"label\":\"\",\"targets\":[1,3],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "unitary": true
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "000",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 3,
+          "measured_wires": [],
+          "state": [
+            [0.353553390593, 0],
+            [0.353553390593, 0],
+            [0.353553390593, 0],
+            [0.353553390593, 0],
+            [0.353553390593, 0],
+            [0.353553390593, 0],
+            [0.353553390593, 0],
+            [0.353553390593, 0]
+          ],
+          "probabilities": {
+            "wires": [1, 2, 3],
+            "values": [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125]
+          },
+          "unitary": [
+            [
+              [0.353553390593, 0],
+              [0.353553390593, 0],
+              [0.353553390593, 0],
+              [0.353553390593, 0],
+              [0.353553390593, 0],
+              [0.353553390593, 0],
+              [0.353553390593, 0],
+              [0.353553390593, 0]
+            ],
+            [
+              [0.353553390593, 0],
+              [0.25, 0.25],
+              [0, 0.353553390593],
+              [-0.25, 0.25],
+              [-0.353553390593, 0],
+              [-0.25, -0.25],
+              [0, -0.353553390593],
+              [0.25, -0.25]
+            ],
+            [
+              [0.353553390593, 0],
+              [0, 0.353553390593],
+              [-0.353553390593, 0],
+              [0, -0.353553390593],
+              [0.353553390593, 0],
+              [0, 0.353553390593],
+              [-0.353553390593, 0],
+              [0, -0.353553390593]
+            ],
+            [
+              [0.353553390593, 0],
+              [-0.25, 0.25],
+              [0, -0.353553390593],
+              [0.25, 0.25],
+              [-0.353553390593, 0],
+              [0.25, -0.25],
+              [0, 0.353553390593],
+              [-0.25, -0.25]
+            ],
+            [
+              [0.353553390593, 0],
+              [-0.353553390593, 0],
+              [0.353553390593, 0],
+              [-0.353553390593, 0],
+              [0.353553390593, 0],
+              [-0.353553390593, 0],
+              [0.353553390593, 0],
+              [-0.353553390593, 0]
+            ],
+            [
+              [0.353553390593, 0],
+              [-0.25, -0.25],
+              [0, 0.353553390593],
+              [0.25, -0.25],
+              [-0.353553390593, 0],
+              [0.25, 0.25],
+              [0, -0.353553390593],
+              [-0.25, 0.25]
+            ],
+            [
+              [0.353553390593, 0],
+              [0, -0.353553390593],
+              [-0.353553390593, 0],
+              [0, 0.353553390593],
+              [0.353553390593, 0],
+              [0, -0.353553390593],
+              [-0.353553390593, 0],
+              [0, 0.353553390593]
+            ],
+            [
+              [0.353553390593, 0],
+              [0.25, -0.25],
+              [0, -0.353553390593],
+              [-0.25, -0.25],
+              [-0.353553390593, 0],
+              [-0.25, 0.25],
+              [0, 0.353553390593],
+              [0.25, 0.25]
+            ]
+          ],
+          "sign": null
+        }
+      ],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "run partial refused",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"partial\",\"label\":\"\",\"wires\":3,\"wire_labels\":[\"1 = q_1\",\"2 = q_2\",\"3 = q_3\"],\"parts\":[[[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[3],\"controls\":[2],\"open_controls\":[],\"classical\":false,\"source\":\"\"},{\"kind\":\"unparsed\",\"label\":\"\",\"targets\":[2],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\\\\wire[l][1][\\\"\\\\iddots\\\"{below,pos=0.1}]{a}\"}]]]}",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "refused",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": ["status: the circuit was read as 'partial', not 'parsed'"]
+    }
+  },
+  {
+    "name": "run bundle refused",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1\",\"2 = a, bundle m\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "refused",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": [
+        "wire 2: the legend '2 = a, bundle m' shows a bundle, a register, a row of dots or a classical wire"
+      ]
+    }
+  },
+  {
+    "name": "run bad input",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\n  \"format\": \"circuit/1\",\n  \"wires\": 2,\n  \"parts\": [\n    [\n      [\n        {\n          \"kind\": \"gate\",\n          \"label\": \"H\",\n          \"targets\": [\n            1\n          ]\n        }\n      ],\n      [\n        {\n          \"kind\": \"x\",\n          \"label\": \"X\",\n          \"targets\": [\n            2\n          ],\n          \"controls\": [\n            1\n          ]\n        }\n      ]\n    ]\n  ]\n}",
+      "input": "2",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "refused",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": ["'2' is not a basis label of 2 bits (wire 1 first)"]
+    }
+  },
+  {
+    "name": "run not a circuit",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"a\": 1}",
+      "unitary": false
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "run",
+      "version": "0.1.0",
+      "status": "refused",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": ["format: expected 'circuit/1', got 'None'"]
+    }
+  },
+  {
+    "name": "run duplicate key",
+    "path": "run",
+    "request": {
+      "raw": "{\"circuit_json\":\"{\\\"format\\\":\\\"circuit/1\\\",\\\"wires\\\":1,\\\"wires\\\":2,\\\"parts\\\":[]}\"}"
+    },
+    "status": 400,
+    "response": {
+      "type": "urn:research-api:problem:bad-request",
+      "title": "Bad Request",
+      "status": 400,
+      "detail": "circuit_json gives the key 'wires' twice; the document does not say which value is meant.",
+      "instance": "/api/v1/circuits/run"
+    }
+  },
+  {
+    "name": "run thirteen wires",
+    "path": "run",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"wires\":13,\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1]}]]]}",
+      "unitary": false
+    },
+    "status": 422,
+    "response": {
+      "type": "urn:research-api:problem:invalid-input",
+      "title": "Unprocessable Entity",
+      "status": 422,
+      "detail": "The circuit has 13 wires; this check takes at most 12. Use `quantum-sim` on the command line for a circuit this size.",
+      "instance": "/api/v1/circuits/run",
+      "errors": [
+        {
+          "path": "/circuit_json",
+          "message": "The circuit has 13 wires; this check takes at most 12. Use `quantum-sim` on the command line for a circuit this size."
+        }
+      ]
+    }
+  },
+  {
+    "name": "check bell state equal",
+    "path": "check",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1 = \\\\ket{0}\",\"2 = \\\\ket{0}\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "target": {
+        "state": [0.7071067811865476, 0, 0, 0.7071067811865476]
+      }
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "check",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "00",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 2,
+          "operations": 2,
+          "parameters": []
+        }
+      ],
+      "equal_to_target": true,
+      "comparisons": [
+        {
+          "between": ["circuit", "state"],
+          "equal": true,
+          "exact": true,
+          "phase": 0,
+          "max_deviation": 0,
+          "method": "arrays"
+        }
+      ],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "check bell state not equal",
+    "path": "check",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1 = \\\\ket{0}\",\"2 = \\\\ket{0}\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "target": {
+        "state": "11"
+      }
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "check",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": "00",
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 2,
+          "operations": 2,
+          "parameters": []
+        }
+      ],
+      "equal_to_target": false,
+      "comparisons": [
+        {
+          "between": ["circuit", "state"],
+          "equal": false,
+          "exact": false,
+          "phase": 0,
+          "max_deviation": 0.707107,
+          "method": "arrays"
+        }
+      ],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "check bell json against latex",
+    "path": "check",
+    "request": {
+      "circuit_json": "{\n  \"format\": \"circuit/1\",\n  \"wires\": 2,\n  \"parts\": [\n    [\n      [\n        {\n          \"kind\": \"gate\",\n          \"label\": \"H\",\n          \"targets\": [\n            1\n          ]\n        }\n      ],\n      [\n        {\n          \"kind\": \"x\",\n          \"label\": \"X\",\n          \"targets\": [\n            2\n          ],\n          \"controls\": [\n            1\n          ]\n        }\n      ]\n    ]\n  ]\n}",
+      "target": {
+        "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1 = \\\\ket{0}\",\"2 = \\\\ket{0}\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}"
+      }
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "check",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 2,
+          "operations": 2,
+          "parameters": []
+        },
+        {
+          "part": 2,
+          "wires": 2,
+          "operations": 2,
+          "parameters": []
+        }
+      ],
+      "equal_to_target": true,
+      "comparisons": [
+        {
+          "between": ["a", "b"],
+          "equal": true,
+          "exact": true,
+          "phase": 0,
+          "max_deviation": 0,
+          "method": "unitary"
+        }
+      ],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "check hzh drawn",
+    "path": "check",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":1,\"wire_labels\":[\"1\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"Z\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]],[[{\"kind\":\"sep\",\"label\":\"=\",\"targets\":[],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"X\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}"
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "check",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 1,
+          "operations": 3,
+          "parameters": []
+        },
+        {
+          "part": 2,
+          "wires": 1,
+          "operations": 1,
+          "parameters": []
+        }
+      ],
+      "equal_to_target": true,
+      "comparisons": [
+        {
+          "between": ["part 1", "part 2"],
+          "equal": true,
+          "exact": true,
+          "phase": 0,
+          "max_deviation": 2.22045e-16,
+          "method": "unitary"
+        }
+      ],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "check cnot from cz drawn",
+    "path": "check",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1\",\"2\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[2],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"z_dots\",\"label\":\"Z\",\"targets\":[],\"controls\":[1,2],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[2],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]],[[{\"kind\":\"sep\",\"label\":\"=\",\"targets\":[],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}"
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "check",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 2,
+          "operations": 3,
+          "parameters": []
+        },
+        {
+          "part": 2,
+          "wires": 2,
+          "operations": 1,
+          "parameters": []
+        }
+      ],
+      "equal_to_target": true,
+      "comparisons": [
+        {
+          "between": ["part 1", "part 2"],
+          "equal": true,
+          "exact": true,
+          "phase": 0,
+          "max_deviation": 2.22045e-16,
+          "method": "unitary"
+        }
+      ],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "check hzh unitary x",
+    "path": "check",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"wires\":1,\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1]}],[{\"kind\":\"gate\",\"label\":\"Z\",\"targets\":[1]}],[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1]}]]]}",
+      "target": {
+        "unitary": [
+          [0, 1],
+          [1, 0]
+        ]
+      }
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "check",
+      "version": "0.1.0",
+      "status": "ok",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [
+        {
+          "part": 1,
+          "wires": 1,
+          "operations": 3,
+          "parameters": []
+        }
+      ],
+      "equal_to_target": true,
+      "comparisons": [
+        {
+          "between": ["circuit", "unitary"],
+          "equal": true,
+          "exact": true,
+          "phase": 0,
+          "max_deviation": 2.22045e-16,
+          "method": "unitary"
+        }
+      ],
+      "notes": [],
+      "refused": []
+    }
+  },
+  {
+    "name": "check no target refused",
+    "path": "check",
+    "request": {
+      "circuit_json": "{\n  \"format\": \"circuit/1\",\n  \"wires\": 2,\n  \"parts\": [\n    [\n      [\n        {\n          \"kind\": \"gate\",\n          \"label\": \"H\",\n          \"targets\": [\n            1\n          ]\n        }\n      ],\n      [\n        {\n          \"kind\": \"x\",\n          \"label\": \"X\",\n          \"targets\": [\n            2\n          ],\n          \"controls\": [\n            1\n          ]\n        }\n      ]\n    ]\n  ]\n}"
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "check",
+      "version": "0.1.0",
+      "status": "refused",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": ["a check needs two circuits, a target, or a drawn equality in the document"]
+    }
+  },
+  {
+    "name": "check unitary wrong size",
+    "path": "check",
+    "request": {
+      "circuit_json": "{\"format\":\"circuit/1\",\"kind\":\"quantikz\",\"status\":\"parsed\",\"label\":\"\",\"wires\":2,\"wire_labels\":[\"1 = \\\\ket{0}\",\"2 = \\\\ket{0}\"],\"parts\":[[[{\"kind\":\"gate\",\"label\":\"H\",\"targets\":[1],\"controls\":[],\"open_controls\":[],\"classical\":false,\"source\":\"\"}],[{\"kind\":\"x\",\"label\":\"X\",\"targets\":[2],\"controls\":[1],\"open_controls\":[],\"classical\":false,\"source\":\"\"}]]]}",
+      "target": {
+        "unitary": [
+          [1, 0],
+          [0, 1]
+        ]
+      }
+    },
+    "status": 200,
+    "response": {
+      "format": "quantum-sim-result/1",
+      "command": "check",
+      "version": "0.1.0",
+      "status": "refused",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "input": null,
+      "parameters": [],
+      "values": {},
+      "unbound": [],
+      "circuits": [],
+      "equal_to_target": null,
+      "comparisons": [],
+      "notes": [],
+      "refused": ["a circuit of 2 wires is a 4 x 4 matrix, but the array has shape (2, 2)"]
+    }
+  },
+  {
+    "name": "conventions",
+    "path": "conventions",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": "0.1.0",
+      "conventions": {
+        "source": "Nielsen and Chuang, Quantum Computation and Quantum Information",
+        "wire_order": "wire 1 is the top wire of the drawing and the most significant bit: amplitude k belongs to the basis label |w1 w2 ... wn> that is k in binary (opposite of Qiskit)",
+        "wire_numbers": "1-based in every user-facing structure; 0-based only inside the engine",
+        "rotations": "R_a(theta) = exp(-i theta sigma_a / 2) for a in x, y, z",
+        "two_qubit_rotations": "R_aa(theta) = exp(-i theta sigma_a ⊗ sigma_a / 2) for a in x, y, z",
+        "phase": "P(theta) = diag(1, e^{i theta}); S = P(pi/2); T = P(pi/4)",
+        "sqrt_x": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]",
+        "qft_rk": "R_k = diag(1, e^{2 pi i / 2^k})",
+        "controls": "a closed control acts on |1>, an open control on |0>; any gate takes any number of controls, and controls are never part of the gate's own matrix",
+        "equality": "equal up to global phase: max |a - e^{i phi} b| < 1e-9, with phi taken from the largest entry of b; exact equality is reported too",
+        "input_state": "|0...0> unless the request gives a basis label or a list of amplitudes",
+        "step_order": "operations apply left to right, in the order of Circuit.ops",
+        "measurement": "version 1: computational-basis measurement at the end of a wire only; no operation may touch a wire after its measurement, and classically controlled operations are refused"
+      },
+      "gates": [
+        {
+          "name": "id",
+          "targets": 1,
+          "params": 0,
+          "definition": "I = [[1, 0], [0, 1]]"
+        },
+        {
+          "name": "h",
+          "targets": 1,
+          "params": 0,
+          "definition": "H = (1/sqrt 2) [[1, 1], [1, -1]]"
+        },
+        {
+          "name": "x",
+          "targets": 1,
+          "params": 0,
+          "definition": "X = [[0, 1], [1, 0]]"
+        },
+        {
+          "name": "y",
+          "targets": 1,
+          "params": 0,
+          "definition": "Y = [[0, -i], [i, 0]]"
+        },
+        {
+          "name": "z",
+          "targets": 1,
+          "params": 0,
+          "definition": "Z = [[1, 0], [0, -1]]"
+        },
+        {
+          "name": "s",
+          "targets": 1,
+          "params": 0,
+          "definition": "S = P(pi/2) = diag(1, i)"
+        },
+        {
+          "name": "sdg",
+          "targets": 1,
+          "params": 0,
+          "definition": "S^dagger = diag(1, -i)"
+        },
+        {
+          "name": "t",
+          "targets": 1,
+          "params": 0,
+          "definition": "T = P(pi/4) = diag(1, e^{i pi/4})"
+        },
+        {
+          "name": "tdg",
+          "targets": 1,
+          "params": 0,
+          "definition": "T^dagger = diag(1, e^{-i pi/4})"
+        },
+        {
+          "name": "sx",
+          "targets": 1,
+          "params": 0,
+          "definition": "sqrt(X) = (1/2) [[1+i, 1-i], [1-i, 1+i]]"
+        },
+        {
+          "name": "sxdg",
+          "targets": 1,
+          "params": 0,
+          "definition": "sqrt(X)^dagger = (1/2) [[1-i, 1+i], [1+i, 1-i]]"
+        },
+        {
+          "name": "rx",
+          "targets": 1,
+          "params": 1,
+          "definition": "R_x(theta) = exp(-i theta X / 2)"
+        },
+        {
+          "name": "ry",
+          "targets": 1,
+          "params": 1,
+          "definition": "R_y(theta) = exp(-i theta Y / 2)"
+        },
+        {
+          "name": "rz",
+          "targets": 1,
+          "params": 1,
+          "definition": "R_z(theta) = exp(-i theta Z / 2) = diag(e^{-i theta/2}, e^{i theta/2})"
+        },
+        {
+          "name": "p",
+          "targets": 1,
+          "params": 1,
+          "definition": "P(theta) = diag(1, e^{i theta})"
+        },
+        {
+          "name": "rk",
+          "targets": 1,
+          "params": 1,
+          "definition": "R_k = diag(1, e^{2 pi i / 2^k}), k a positive integer (the QFT's R_k)"
+        },
+        {
+          "name": "rxx",
+          "targets": 2,
+          "params": 1,
+          "definition": "R_xx(theta) = exp(-i theta X⊗X / 2)"
+        },
+        {
+          "name": "ryy",
+          "targets": 2,
+          "params": 1,
+          "definition": "R_yy(theta) = exp(-i theta Y⊗Y / 2)"
+        },
+        {
+          "name": "rzz",
+          "targets": 2,
+          "params": 1,
+          "definition": "R_zz(theta) = exp(-i theta Z⊗Z / 2)"
+        },
+        {
+          "name": "swap",
+          "targets": 2,
+          "params": 0,
+          "definition": "SWAP: |ab> -> |ba>"
+        },
+        {
+          "name": "iswap",
+          "targets": 2,
+          "params": 0,
+          "definition": "iSWAP = [[1, 0, 0, 0], [0, 0, i, 0], [0, i, 0, 0], [0, 0, 0, 1]]"
+        }
+      ],
+      "limits": {
+        "statevector_wires": 20,
+        "unitary_wires": 10,
+        "ops": 10000,
+        "random_states": 8,
+        "atol": 1e-9
+      }
+    }
+  }
+]
