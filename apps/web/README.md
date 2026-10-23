@@ -2,7 +2,7 @@
 
 The browser front end of the research engine. It talks to [research-api](../../packages/research-api/README.md) and nothing else, and it runs on your own machines: no analytics, no third-party scripts, no hosted fonts.
 
-It has the build, the providers, sign-in and the forced password change, the layout with a status badge, light and dark themes, Spanish and English, the TypeScript client generated from the API's OpenAPI document, and the test and CI setup. The **Circuits** screen is built (see [Circuit check](#circuit-check)) and so is the **Ask** screen (see [The Ask screen](#the-ask-screen)). The other two screens (Benchmarks, Question sets) are placeholders that later pull requests fill in.
+It has the build, the providers, sign-in and the forced password change, the layout with a status badge, light and dark themes, Spanish and English, the TypeScript client generated from the API's OpenAPI document, and the test and CI setup. The **Circuits** screen is built (see [Circuit check](#circuit-check)) and so are the **Ask** screen (see [The Ask screen](#the-ask-screen)) and the **Question sets** screens (see [Question sets](#question-sets)). The other screen (Benchmarks) is a placeholder that a later pull request fills in.
 
 ## Run it
 
@@ -38,6 +38,7 @@ The API does not serve sign-in yet, so in development `/login` finds no `/api/v1
 | `pnpm test`                         | Vitest and Testing Library; `pnpm test --coverage` enforces 80% of lines                                                                                                                    |
 | `pnpm size`                         | Bundle budget after a build: entry chunk at most 250 KiB gzipped, other chunks at most 400 KiB, KaTeX out of the entry                                                                      |
 | `pnpm gen:api`                      | Regenerate `src/shared/api/schema.d.ts` from `src/api/openapi.json`                                                                                                                         |
+| `pnpm capture:sets`                 | Record real answers of the question-set endpoints for the unit tests (see [Question sets](#question-sets)); the API must be running in fake mode                                            |
 | `pnpm contract`                     | Fail when `openapi.json` or `schema.d.ts` differ from what the API and the generator produce now (needs uv)                                                                                 |
 | `pnpm capture:circuits`             | Record the circuit endpoints' answers from a running API as test fixtures (see [Circuit check](#circuit-check))                                                                             |
 | `pnpm capture:ask`                  | Record the API's answers for the Ask tests again (needs the API in fake mode on port 8091, see the script)                                                                                  |
@@ -79,6 +80,34 @@ The sign-in endpoints (`/auth/login`, `/auth/logout`, `/auth/me`, `/auth/passwor
 State: what was typed, what was read and the last answer are in one Zustand store (`store.ts`), in memory only. Anything that a request depends on clears the answer, so the screen never shows a result for text that is no longer there; an answer that arrives after the circuit text changed is dropped, but a reading survives edits of the options. The three requests (`flows.ts`) go through TanStack mutations, so a `401` sends the person to sign in.
 
 The API passes `quantum-sim-result/1` and `circuit/1` through as open objects, so `types.ts` types them by hand and reads every answer through guards; an answer of another shape is a problem panel, not a crash. `src/features/circuits/fixtures/captured.json` holds 35 real answers of the API (parse, run and check, refusals and errors). The unit tests replay them through MSW (`src/test/circuits-api.ts`; a request with no recording fails the test), and the end-to-end test asks the API for every request again and fails when an answer differs, so the file cannot go stale. After a change in the API or in quantum-sim, start the API in fake mode and run `pnpm capture:circuits http://127.0.0.1:8091`.
+
+## Question sets
+
+The screens of the question sets (`src/features/qsets`) work on the API's `/sets` endpoints, through the generated client. Every rule about what a set may hold is the API's (the `qset/1` JSON Schema, checked by the server); the screens shape the input, show each problem where it belongs and never copy a rule that could drift.
+
+| Route                            | Screen                                                                                                                                                                                 |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/sets`                          | The catalog of every version (status, items, review progress, md5, corpus, owner), a form to start an empty draft or the next version as a copy, and the import of a file              |
+| `/sets/:name/:version`           | One version: its md5, review progress, export, and the items in a table that is filtered and paged by the address (`form`, `content`, `lang`, `split`, `tag`, `review`, `q`, `offset`) |
+| `/sets/:name/:version/items/:id` | One item: the editor, the review and the decisions so far. A frozen version shows the item read only                                                                                   |
+| `/sets/:name/:version/new-item`  | A new item for a draft                                                                                                                                                                 |
+| `/sets/:name/:version/freeze`    | What freezing does, by item, and the freeze itself                                                                                                                                     |
+
+**The editor.** The fields follow the form kind: a multi-paper form shows `synthesis` and `necessity`, a circuit form shows `circuit`, `unanswerable` and `multi_list` show the search record, a `circuit_verify` answer is yes or no. Key facts and tags are rows. What has no control of its own (the gold papers, the necessity, the circuit, the search record, and every field that is not listed, such as `choices`, `confusers` or `ext`) is a box of JSON, and a second tab holds the whole item as JSON. While a box cannot be read as JSON, saving, checking and deciding are off, so what the person sees is what is sent. Saving sends the whole item with the `etag` of the draft that was read in `If-Match`; the `422` list is shown at each field by its JSON pointer, and any problem at a part the form does not show is listed above the form, so none is lost. "Check against qset/1" is a dry run (`POST /sets/validate`): nothing is stored.
+
+**Conflicts (the rules of the API that the screens answer).**
+
+- A `409` on a save says the draft changed since the item was opened. The person loads the latest version (the edits are dropped) or keeps the edits on top of it (the item is read again and the next save carries the new `etag`).
+- A `409` of type `item-has-decisions` says the item has review decisions, so its text is fixed. The page leads the person to propose the same changes as an `edit` decision.
+- A `409` on a review says the draft changed while the item was open (the `etag` covers the whole draft, so an edit to any item gives every open reviewer one). The item is read again, the note stays, and the person decides again.
+- The freeze names the plan that was read (`If-Match` with the plan's `etag`). A `409` says a decision or an item changed: the plan is read again before the freeze can be tried again. The plan page explains what a `stale` decision is: made before the draft last changed, and still applied, because an item with decisions keeps its text.
+- A refused import (`422`) lists the lines and fields at fault (the first dozen, and how many more).
+
+**Who sees what.** The owner of a draft and an admin edit it and freeze it. Any member reads, imports, exports and reviews, and another member's page says so instead of offering a save. The API refuses what the page does not offer, and the page shows the refusal in the server's words.
+
+**Export and import.** Export downloads the file exactly as stored, so its md5 is the md5 shown for the version. Import sends the chosen file as the request body (no multipart), for a `qset/1` file or one of the older shapes the API lists.
+
+**Tests.** Vitest covers each screen against recorded answers of the real API (`src/features/qsets/fixtures/captured.json`, made by `pnpm capture:sets`, served by `src/test/sets-api.ts`; an item with no recording is a 404). `e2e/sets.spec.ts` runs the acceptance checks S1 to S5 against the API in fake mode with its seeded accounts, with a private copy of the demo draft for each test that changes something, two browsers for the two-reviewer and conflict cases, axe scans in light and dark, Spanish, a 375 px width and a check that the recorded answers still equal the API's. The demo sets are only read.
 
 ## Structure
 
