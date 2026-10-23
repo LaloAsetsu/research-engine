@@ -559,6 +559,64 @@ describe("the circuit check screen", () => {
       expect(second.findIndex(Boolean)).not.toBe(first.findIndex(Boolean));
     });
 
+    it("clears the hidden sentence when a refusal arrives, so it never describes a result that is not there", async () => {
+      const user = await openPage();
+      await readExample(user, "bell");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("state-table");
+      expect(regions().filter(Boolean)).toEqual(["Simulation finished."]);
+      await readExample(user, "bundle");
+      await screen.findByText("Read in full");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("refusal");
+      expect(regions()).toEqual(["", ""]);
+      expect(screen.getByTestId("live-status")).not.toHaveTextContent("Simulation finished.");
+    });
+
+    it("clears the hidden sentence when a problem arrives, and speaks again after", async () => {
+      const user = await openPage();
+      await readExample(user, "rotation");
+      await screen.findByText("Read in full");
+      expect(regions().filter(Boolean)).toHaveLength(1);
+      await user.type(screen.getByLabelText("Parameter values"), "theta");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByText("Line 1 (theta): write name = value, once per name.");
+      expect(regions()).toEqual(["", ""]);
+      await user.clear(screen.getByLabelText("Parameter values"));
+      await user.type(screen.getByLabelText("Parameter values"), "theta = \\pi/2");
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("state-table");
+      expect(regions().filter(Boolean)).toEqual(["Simulation finished."]);
+    });
+
+    it("clears the hidden sentence when the server answers with a problem", async () => {
+      server.use(
+        http.post("*/api/v1/circuits/run", () =>
+          HttpResponse.json(
+            {
+              type: "urn:x",
+              title: "Service Unavailable",
+              status: 503,
+              detail: "Busy.",
+              instance: "/",
+            },
+            {
+              status: 503,
+              headers: { "content-type": "application/problem+json", "retry-after": "5" },
+            },
+          ),
+        ),
+      );
+      const user = await openPage();
+      await readExample(user, "bell");
+      await screen.findByText("Read in full");
+      expect(regions().filter(Boolean)).toHaveLength(1);
+      await user.click(screen.getByRole("button", { name: "Simulate" }));
+      await screen.findByTestId("problem");
+      expect(regions()).toEqual(["", ""]);
+    });
+
     it("announces the verdict of a check", async () => {
       const user = await openPage();
       await readExample(user, "hzhEqualsX");

@@ -86,13 +86,18 @@ function showReading(reading: Reading) {
   });
 }
 
-/** Show an answer and announce it (a refusal is announced by its own alert). */
+/**
+ * Show an answer and announce it. A refusal is announced by its own alert and clears the last
+ * announcement, so the hidden status never keeps a sentence the screen no longer shows.
+ */
 function showOutcome(outcome: Outcome) {
   const said = announcementFor(outcome);
-  useCircuitStore.setState({
-    outcome,
-    ...(said ? { announcement: announce(said) } : {}),
-  });
+  useCircuitStore.setState({ outcome, announcement: said ? announce(said) : null });
+}
+
+/** Show a problem. Its own panel speaks, and the last announcement is cleared with it. */
+function showProblem(problem: Problem, extra: { reading?: null; outcome?: null } = {}) {
+  useCircuitStore.setState({ ...extra, problem, announcement: null });
 }
 
 function toProblem(error: unknown): Problem {
@@ -121,7 +126,7 @@ export function createFlows(calls: CircuitCalls) {
       const value = await work();
       if (store.getState()[watch] === revision) apply(value);
     } catch (error) {
-      if (store.getState()[watch] === revision) store.setState({ problem: toProblem(error) });
+      if (store.getState()[watch] === revision) showProblem(toProblem(error));
     } finally {
       // Nothing else starts while the flag is set (see the first lines), so the flag is always ours.
       store.setState({ busy: null });
@@ -135,12 +140,12 @@ export function createFlows(calls: CircuitCalls) {
     if (state.inputKind === "json") {
       const bad = checkJsonText(text);
       if (bad) {
-        useCircuitStore.setState({ problem: bad.problem, reading: null, outcome: null });
+        showProblem(bad.problem, { reading: null, outcome: null });
         return;
       }
       const document = readCircuitDocument(JSON.parse(text));
       if (!document) {
-        useCircuitStore.setState({ problem: local("notACircuit"), reading: null, outcome: null });
+        showProblem(local("notACircuit"), { reading: null, outcome: null });
         return;
       }
       const status =
@@ -152,7 +157,7 @@ export function createFlows(calls: CircuitCalls) {
       return;
     }
     if (text.trim() === "") {
-      useCircuitStore.setState({ problem: local("emptyInput") });
+      showProblem(local("emptyInput"));
       return;
     }
     await guarded(
@@ -166,9 +171,9 @@ export function createFlows(calls: CircuitCalls) {
 
   async function run(): Promise<void> {
     const circuit = circuitJson();
-    if (failed(circuit)) return void useCircuitStore.setState({ problem: circuit.problem });
+    if (failed(circuit)) return showProblem(circuit.problem);
     const options = requestOptions();
-    if (failed(options)) return void useCircuitStore.setState({ problem: options.problem });
+    if (failed(options)) return showProblem(options.problem);
     const { selected, unitary } = useCircuitStore.getState();
     await guarded(
       "run",
@@ -204,9 +209,9 @@ export function createFlows(calls: CircuitCalls) {
 
   async function check(): Promise<void> {
     const circuit = circuitJson();
-    if (failed(circuit)) return void useCircuitStore.setState({ problem: circuit.problem });
+    if (failed(circuit)) return showProblem(circuit.problem);
     const options = requestOptions();
-    if (failed(options)) return void useCircuitStore.setState({ problem: options.problem });
+    if (failed(options)) return showProblem(options.problem);
     const { selected, targetKind, targetText } = useCircuitStore.getState();
     await guarded(
       "check",
@@ -221,7 +226,7 @@ export function createFlows(calls: CircuitCalls) {
         return { result: await calls.check(request) };
       },
       (outcome) => {
-        if ("problem" in outcome) useCircuitStore.setState({ problem: outcome.problem });
+        if ("problem" in outcome) showProblem(outcome.problem);
         else
           showOutcome(
             makeOutcome({

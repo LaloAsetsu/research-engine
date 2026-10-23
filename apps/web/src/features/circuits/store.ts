@@ -80,7 +80,10 @@ export interface CircuitState {
   targetKind: TargetKind;
   targetText: string;
   outcome: Outcome | null;
-  /** The last thing announced. Editing the screen does not clear it: only a new reading or answer replaces it. */
+  /**
+   * The last thing announced. Editing the screen does not clear it: a new reading or answer
+   * replaces it, and a refusal or a problem clears it, so the hidden text stays true.
+   */
   announcement: NumberedAnnouncement | null;
   problem: Problem | null;
   busy: Busy;
