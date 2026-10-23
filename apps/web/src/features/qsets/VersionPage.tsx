@@ -289,11 +289,14 @@ export function VersionPage() {
           {data.items.length === 0 && data.total > 0 && data.offset > 0 ? (
             <div className="grid justify-items-start gap-2">
               <p className="text-muted-foreground">
-                {t("sets.items.pastEnd", { offset: data.offset, total: data.total })}
+                {t("sets.items.pastEnd", { offset: data.offset + 1, total: data.total })}
               </p>
               <Button
                 variant="outline"
-                onClick={() => setParams((current) => withOffset(current, lastOffset(data.total)))}
+                onClick={() => {
+                  paged.current = true;
+                  setParams((current) => withOffset(current, lastOffset(data.total)));
+                }}
               >
                 {t("sets.items.lastPage")}
               </Button>

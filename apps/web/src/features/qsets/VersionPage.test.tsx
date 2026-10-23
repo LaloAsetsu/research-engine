@@ -126,6 +126,11 @@ describe("a version (S1)", () => {
     await user.selectOptions(screen.getByLabelText("Content"), "other");
     await waitFor(() => expect(rowIds()).toEqual(["DP-003", "DP-004"]));
     await user.selectOptions(screen.getByLabelText("Language"), "en");
+    // The address is read again before the next list is used: two changes within one render would
+    // each start from the same address. The router holds the new address a moment before the page
+    // has drawn it, and the page builds the next address from what it drew, so wait for the list.
+    await waitFor(() => expect(screen.getByLabelText("Language")).toHaveValue("en"));
+    expect(new URLSearchParams(app.router.state.location.search).get("lang")).toBe("en");
     await user.selectOptions(screen.getByLabelText("Review"), "rejected");
     await waitFor(() => expect(rowIds()).toEqual(["DP-004"]));
     expect(app.router.state.location.search).toBe("?content=other&lang=en&review=rejected");
@@ -208,14 +213,14 @@ describe("a version (S1)", () => {
       const user = userEvent.setup();
       const app = renderApp("/sets/demo-papers/v2?offset=99999");
       expect(
-        await screen.findByText(/starts at item 99999, but the list has only 120/),
+        await screen.findByText(/starts at item 100000, but the list has only 120/),
       ).toBeInTheDocument();
       expect(screen.queryByText("No item matches these filters.")).not.toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Go to the last page" }));
-      expect(
-        await screen.findByRole("table", { name: "Items 101 to 120 of 120" }),
-      ).toBeInTheDocument();
+      expect(await findItemsTable("Items 101 to 120 of 120")).toBeInTheDocument();
       expect(app.router.state.location.search).toBe("?offset=100");
+      // The button is gone by now: focus goes to the table, as it does after Previous and Next.
+      await waitFor(() => expect(screen.getByRole("region", { name: /scroll/i })).toHaveFocus());
     });
 
     it("steps back to the last page, not 50 items from the address", async () => {
@@ -223,9 +228,7 @@ describe("a version (S1)", () => {
       const user = userEvent.setup();
       renderApp("/sets/demo-papers/v2?offset=99999");
       await user.click(await screen.findByRole("button", { name: "Previous page" }));
-      expect(
-        await screen.findByRole("table", { name: "Items 101 to 120 of 120" }),
-      ).toBeInTheDocument();
+      expect(await findItemsTable("Items 101 to 120 of 120")).toBeInTheDocument();
     });
   });
 
@@ -258,7 +261,7 @@ describe("a version (S1)", () => {
     expect(next).toBeEnabled();
     await user.click(next);
     release();
-    await screen.findByRole("table", { name: "Items 51 to 100 of 120" });
+    await findItemsTable("Items 51 to 100 of 120");
     expect(seen).toEqual([0, 50]);
   });
 

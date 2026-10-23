@@ -436,7 +436,7 @@ test.describe("S2: editing an item, with the checks of qset/1", () => {
     await signInAs(page, "ana");
     const set = await seedDraft(page, { count: 120 });
     await page.goto(`/sets/${set.name}/v1?offset=99999`);
-    await expect(page.getByText(/starts at item 99999, but the list has only 120/)).toBeVisible();
+    await expect(page.getByText(/starts at item 100000, but the list has only 120/)).toBeVisible();
     await expect(page.getByText("No item matches these filters.")).toHaveCount(0);
     await page.getByRole("button", { name: "Go to the last page" }).click();
     await expect(page.getByRole("table", { name: "Items 101 to 120 of 120" })).toBeVisible();
