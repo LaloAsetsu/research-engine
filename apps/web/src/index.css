@@ -177,6 +177,18 @@
     background: none;
     padding: 0;
   }
+  /* A formula inside a line cannot wrap: one wider than its line scrolls inside its own box. */
+  .markdown .math-scroll {
+    display: inline-block;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    vertical-align: bottom;
+  }
+  .markdown .math-scroll:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+  }
   .markdown .katex-display {
     overflow-x: auto;
     overflow-y: hidden;

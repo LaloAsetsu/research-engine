@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { isWebUrl, MarkdownMath } from "./MarkdownMath";
 
 describe("which addresses become links", () => {
@@ -21,6 +21,101 @@ describe("which addresses become links", () => {
   });
 });
 
+describe("a formula wider than its line", () => {
+  /** The width each formula needs, by its TeX source; the line they sit in is 300 wide. */
+  const needs: Record<string, number> = {};
+  const observers = new Set<() => void>();
+  const remeasure = () => act(() => observers.forEach((callback) => callback()));
+
+  beforeEach(() => {
+    class FakeResizeObserver {
+      private readonly callback: () => void;
+      constructor(callback: () => void) {
+        this.callback = callback;
+      }
+      observe() {
+        observers.add(this.callback);
+      }
+      disconnect() {
+        observers.delete(this.callback);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const source = this.classList.contains("katex")
+        ? this.querySelector("annotation")?.textContent
+        : undefined;
+      // The paragraph itself is as wide as the widest thing in it, which is what once misled.
+      if (this.tagName === "P") return Math.max(300, ...Object.values(needs));
+      return source === undefined ? 0 : (needs[source] ?? 0);
+    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.tagName === "P" ? 300 : 0;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    observers.clear();
+    for (const key of Object.keys(needs)) delete needs[key];
+  });
+
+  const formula = (container: HTMLElement, source: string) =>
+    Array.from(container.querySelectorAll(".katex")).find(
+      (node) => node.querySelector("annotation")?.textContent === source,
+    );
+
+  it("scrolls inside its own box and takes the keyboard focus", () => {
+    needs["x^2 + y^2"] = 500;
+    const { container } = render(<MarkdownMath>{"A line with $x^2 + y^2$ in it."}</MarkdownMath>);
+    const box = container.querySelector(".katex");
+    expect(box).toHaveClass("math-scroll");
+    expect(box).toHaveAttribute("tabindex", "0");
+  });
+
+  it("stays a plain part of the line when it fits, and follows the line as it changes", () => {
+    needs["x^2"] = 300;
+    const { container } = render(<MarkdownMath>{"A line with $x^2$ in it."}</MarkdownMath>);
+    const box = () => container.querySelector(".katex");
+    expect(box()).not.toHaveClass("math-scroll");
+    expect(box()).not.toHaveAttribute("tabindex");
+    needs["x^2"] = 420;
+    remeasure();
+    expect(box()).toHaveClass("math-scroll");
+    expect(box()).toHaveAttribute("tabindex", "0");
+    needs["x^2"] = 280;
+    remeasure();
+    expect(box()).not.toHaveClass("math-scroll");
+    expect(box()).not.toHaveAttribute("tabindex");
+  });
+
+  it("marks only the formula that is wider than the line, not its neighbours", () => {
+    needs["x^2"] = 40;
+    needs["\\alpha_1\\hat{x}_1"] = 700;
+    needs.y = 12;
+    const { container } = render(
+      <MarkdownMath>{"Short $x^2$, long $\\alpha_1\\hat{x}_1$, short $y$."}</MarkdownMath>,
+    );
+    expect(container.querySelectorAll(".katex")).toHaveLength(3);
+    expect(formula(container, "x^2")).not.toHaveClass("math-scroll");
+    expect(formula(container, "\\alpha_1\\hat{x}_1")).toHaveClass("math-scroll");
+    expect(formula(container, "y")).not.toHaveClass("math-scroll");
+    expect(container.querySelectorAll("[tabindex]")).toHaveLength(1);
+  });
+
+  it("does not touch display formulas or other spans", () => {
+    needs["x^2"] = 500;
+    const { container } = render(<MarkdownMath>{"$$\nx^2\n$$"}</MarkdownMath>);
+    expect(container.querySelector(".math-scroll")).toBeNull();
+    expect(container.querySelector(".katex-display")).not.toBeNull();
+  });
+});
+
 describe("Markdown with math", () => {
   it("renders formulas as HTML with MathML for a screen reader", () => {
     const { container } = render(
@@ -30,6 +125,17 @@ describe("Markdown with math", () => {
     expect(container.querySelector(".katex-display")).not.toBeNull();
     expect(container.querySelector("math")).not.toBeNull();
     expect(container.querySelector(".katex-html")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("puts no syntax node on the elements it renders", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {"Energy $E = mc^2$, a **bold** [link](https://example.org) and\n\n$$\nx\n$$"}
+      </MarkdownMath>,
+    );
+    expect(container.querySelectorAll(".katex span").length).toBeGreaterThan(10);
+    expect(container.querySelectorAll("[node]")).toHaveLength(0);
+    expect(container.innerHTML).not.toContain("[object Object]");
   });
 
   it("shows a formula it cannot read as typed, without failing", () => {
@@ -45,16 +151,36 @@ describe("Markdown with math", () => {
     expect(container.querySelector("a")).toBeNull();
   });
 
-  it("drops raw HTML instead of rendering or showing it", () => {
+  it("caps the size a formula can ask for", () => {
+    const { container } = render(
+      <MarkdownMath>{"$\\rule{1000em}{1000em}$ and $$\\rule{900em}{900em}$$"}</MarkdownMath>,
+    );
+    expect(container.querySelector(".katex")).not.toBeNull();
+    const rules = Array.from(container.querySelectorAll<HTMLElement>(".katex-rule"));
+    expect(rules).toHaveLength(2);
+    for (const rule of rules) {
+      expect(rule.style.borderRightWidth).toBe("10em");
+      expect(rule.style.borderTopWidth).toBe("10em");
+    }
+  });
+
+  it("shows raw HTML as the text it was written as and renders none of it", () => {
     const { container } = render(
       <MarkdownMath>
         {'Before\n\n<script>window.__x = 1</script>\n\n<b onclick="x()">bold</b>\n\nAfter'}
       </MarkdownMath>,
     );
     expect(container.querySelector("script, b")).toBeNull();
+    expect(container.querySelector("[onclick]")).toBeNull();
     expect(container.textContent).toContain("Before");
     expect(container.textContent).toContain("After");
-    expect(container.textContent).not.toContain("<script>");
+    expect(container.textContent).toContain("<script>window.__x = 1</script>");
+  });
+
+  it("keeps a comparison in a paper's text instead of reading it as a tag", () => {
+    const { container } = render(<MarkdownMath>{"When a <b and c> d holds, a<b."}</MarkdownMath>);
+    expect(container.querySelector("b")).toBeNull();
+    expect(container.textContent).toContain("When a <b and c> d holds, a<b.");
   });
 
   it("links web addresses and nothing else", () => {

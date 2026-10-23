@@ -1,5 +1,5 @@
 import "katex/dist/katex.min.css";
-import { type ComponentProps, type ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
@@ -15,6 +15,8 @@ const KATEX_OPTIONS = {
   strict: "ignore",
   trust: false,
   output: "htmlAndMathml",
+  // Sizes a formula asks for (`\rule{1000em}{1000em}`) stop at 10 em, so text cannot cover the page.
+  maxSize: 10,
 } as const;
 
 const REMARK_PLUGINS = [remarkMath];
@@ -55,7 +57,65 @@ const heading = (level: 3 | 4 | 5 | 6) => {
   };
 };
 
+/**
+ * A formula inside a line cannot wrap, so one wider than its line would widen the page. When
+ * that happens it scrolls inside its own box, which then takes the keyboard focus so it can be
+ * read. Each formula is measured by itself: a short one beside a wide one stays plain text, and
+ * a box goes back to plain when the line becomes wide enough. KaTeX's own spans carry their
+ * layout as inline styles and attributes, which are kept.
+ */
+function KatexSpan({ children, ...rest }: ComponentProps<"span">) {
+  const own = useRef<HTMLSpanElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useLayoutEffect(() => {
+    const formula = own.current;
+    if (!formula || formula.parentElement?.classList.contains("katex-display")) return;
+    const line = formula.closest("p, li, td, th, h3, h4, h5, h6, blockquote, div");
+    if (!line || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const style = getComputedStyle(line);
+      const padding =
+        (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+      // An inline formula breaks between its parts, so one that overflows has a line of its own
+      // wider than the room; once it is a scroll box, its scroll width says the same. The mark
+      // therefore does not change what is measured. A pixel of slack keeps rounding from flipping it.
+      const needed = Math.max(
+        formula.scrollWidth,
+        ...Array.from(formula.getClientRects(), (rect) => rect.width),
+      );
+      setScrolls(needed > line.clientWidth - padding + 1);
+    };
+    measure();
+    const watcher = new ResizeObserver(measure);
+    watcher.observe(line);
+    return () => watcher.disconnect();
+  }, []);
+  return (
+    <span
+      {...rest}
+      ref={own}
+      className={cn("katex", scrolls && "math-scroll")}
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+      tabIndex={scrolls ? 0 : undefined}
+    >
+      {children}
+    </span>
+  );
+}
+
 const SAFE_COMPONENTS: Components = {
+  // react-markdown also hands the syntax node to a custom component; left in `rest` it would
+  // reach the DOM as `node="[object Object]"`.
+  span: ({ className, children, node, ...rest }) => {
+    void node;
+    return className === "katex" ? (
+      <KatexSpan {...rest}>{children}</KatexSpan>
+    ) : (
+      <span className={className} {...rest}>
+        {children}
+      </span>
+    );
+  },
   a: ({ href, children }) => <SafeLink href={href}>{children}</SafeLink>,
   img: ({ alt }) => <NoImage alt={alt} />,
   h1: heading(3),
@@ -74,8 +134,9 @@ export interface MarkdownMathProps {
 }
 
 /**
- * Markdown with LaTeX math for answers and papers. Raw HTML in the text is dropped (not
- * rendered, not escaped into view), links open only for web addresses, and no image is fetched.
+ * Markdown with LaTeX math for answers and papers. Raw HTML in the text is never rendered: it
+ * stays as the text it was written as (there is no `rehype-raw`), so `a <b and c> d` reads as
+ * typed. Links open only for web addresses, and no image is fetched.
  */
 export function MarkdownMath({ children, components, className }: MarkdownMathProps) {
   return (
@@ -83,7 +144,6 @@ export function MarkdownMath({ children, components, className }: MarkdownMathPr
       <Markdown
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={REHYPE_PLUGINS}
-        skipHtml
         components={{ ...SAFE_COMPONENTS, ...components }}
       >
         {children}
