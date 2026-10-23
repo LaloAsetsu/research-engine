@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import threading
 from typing import Any
 
 import pytest
@@ -500,3 +501,137 @@ async def test_every_move_the_desk_makes_is_one_the_rulebook_allows(
         (JobState.RUNNING, JobState.DONE),
     } <= seen
     assert all(move_allowed(state, to) for state, to in seen), seen
+
+
+# --- a cancelled job waits for nothing -------------------------------------------------------
+
+
+@arun
+async def test_the_reason_a_job_was_waiting_does_not_outlive_its_cancel(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    arms.waiting["bare"] = "The model server is down."
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await until(lambda: desk.get(view.job.id).waiting_for is not None)
+    cancelled = desk.cancel(ANA_ACTOR, view.job.id)
+    assert cancelled.job.state is JobState.CANCELLED and cancelled.waiting_for is None
+    assert desk.get(view.job.id).waiting_for is None
+    arms.waiting["bare"] = None
+    desk.resume(ANA_ACTOR, view.job.id)
+    assert (await finished(desk, view)).job.state is JobState.DONE
+
+
+# --- a scoring reads files that are not growing ---------------------------------------------
+
+
+@arun
+async def test_a_run_resumed_while_its_scoring_waits_for_the_lane_fails_the_scoring(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-003")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await until(lambda: ("bare", "DP-003", 1) in arms.calls)
+    desk.cancel(ANA_ACTOR, view.job.id)
+    gate.set()
+    await finished(desk, view)  # cancelled: a file that does not grow, so it can be scored
+    run_id = view.job.artifact_id or ""
+    release = asyncio.Event()
+
+    async def hold() -> None:
+        await release.wait()
+
+    desk._cpu.submit(hold)
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (run_id,)))
+    arms.hold("DP-004")  # the resumed run stays in flight
+    desk.resume(ANA_ACTOR, view.job.id)
+    await until(lambda: ("bare", "DP-004", 1) in arms.calls)
+    release.set()
+    failed = await finished(desk, score)
+    assert failed.job.state is JobState.FAILED and failed.job.error is not None
+    assert failed.job.error.kind == "conflict" and "has not ended" in failed.job.error.message
+    assert desk._files.read_score(score.job.id) is None
+
+
+@arun
+async def test_a_scoring_in_flight_when_the_service_stops_is_interrupted_and_can_be_resumed(
+    desk: JobDesk,
+) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    run_id = view.job.artifact_id or ""
+    started, release, over = threading.Event(), threading.Event(), threading.Event()
+    real = desk._score_blocking
+
+    def slow(job: Job) -> Any:
+        started.set()
+        release.wait(10)
+        try:
+            return real(job)
+        finally:
+            over.set()
+
+    desk._score_blocking = slow  # type: ignore[method-assign]
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (run_id,)))
+    await until(started.is_set)
+    await desk.stop()
+    release.set()
+    await until(over.is_set)  # the worker thread went on to the end of its work
+    stopped = desk.get(score.job.id)
+    assert stopped.job.state is JobState.INTERRUPTED and stopped.job.ended_at is not None
+    assert stopped.job.error is not None and stopped.job.error.kind == "interrupted"
+    assert desk._files.read_score(score.job.id) is None  # the thread left no finished score
+    assert desk._files.score_ids() == []
+    desk._score_blocking = real  # type: ignore[method-assign]
+    await desk.start()
+    desk.resume(ANA_ACTOR, score.job.id)
+    assert (await finished(desk, stopped)).job.state is JobState.DONE
+    assert desk._files.read_score(score.job.id)
+
+
+@arun
+async def test_a_dropped_gzip_run_reaches_the_scorer_under_a_name_that_says_it_is_zipped(
+    desk: JobDesk,
+) -> None:
+    import gzip  # noqa: PLC0415
+
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    run_id = view.job.artifact_id or ""
+    plain = desk._files.root / "runs" / f"{run_id}.qa-run.jsonl"
+    packed = desk._files.root / "runs" / f"gz-{run_id}.qa-run.jsonl.gz"
+    data = plain.read_bytes().replace(run_id.encode(), f"gz-{run_id}".encode())
+    packed.write_bytes(gzip.compress(data))
+    seen: list[list[str]] = []
+    real = desk._scorer.score
+
+    def spy(set_data: bytes, runs: Any, options: Any, created: str) -> Any:
+        seen.append([name for name, _ in runs])
+        return real(set_data, runs, options, created)
+
+    desk._scorer.score = spy  # type: ignore[method-assign]
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (f"gz-{run_id}", run_id)))
+    assert (await finished(desk, score)).job.state is JobState.DONE
+    assert seen == [[f"gz-{run_id}.qa-run.jsonl.gz", f"{run_id}.qa-run.jsonl"]]
+
+
+@arun
+async def test_the_open_runs_are_looked_up_once_for_all_runs_of_a_scoring(desk: JobDesk) -> None:
+    views = await desk.start_runs(ANA_ACTOR, request("bare", "harness"))
+    ids = []
+    for view in views:
+        await finished(desk, view)
+        ids.append(view.job.artifact_id or "")
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, tuple(ids)))
+    await finished(desk, score)
+    job = desk._repo.get(score.job.id)
+    assert job is not None
+    lookups: list[object] = []
+    real = desk._open_run_ids
+
+    def counted() -> set[str]:
+        lookups.append(1)
+        return real()
+
+    desk._open_run_ids = counted  # type: ignore[method-assign]
+    desk._refuse_open_runs(job)
+    assert len(ids) == 2 and len(lookups) == 1

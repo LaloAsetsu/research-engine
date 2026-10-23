@@ -99,6 +99,7 @@ MAX_PAGE = 200
 BUSY_RETRY_S = 60
 MODEL_RETRY_S = 30
 MESSAGE_CHARS = 300
+GZIP_MAGIC = b"\x1f\x8b"
 
 
 @dataclass(frozen=True)
@@ -198,7 +199,9 @@ class JobDesk:
             for job in self._repo.recover(self._clock.now()):
                 self._log(job.id, f"found at start-up and now {job.state.value}")
                 if job.kind == "run":
-                    self._mark_partial(job, "Stopped")
+                    self._mark_partial(
+                        job, "Cancelled" if job.state is JobState.CANCELLED else "Stopped"
+                    )
         if self._task is not None and not self._task.done() and self._loop is loop:
             return
         self._loop, self._wake = loop, asyncio.Event()
@@ -435,7 +438,8 @@ class JobDesk:
             ahead = [j.id for j in queued_runs]
             if job.id in ahead:
                 position = ahead.index(job.id) + (1 if self._running_id is not None else 0)
-        return JobView(job, position, self._waiting.get(job.id))
+        waiting = self._waiting.get(job.id) if job.state is JobState.QUEUED else None
+        return JobView(job, position, waiting)
 
     # --- cancel and resume ------------------------------------------------------------------
 
@@ -450,6 +454,7 @@ class JobDesk:
             if current.state not in (JobState.CANCELLING, JobState.CANCELLED):
                 raise ConflictError(f"The job is now {current.state.value}; it is not cancelled.")
             return self._view(current, self._repo.queued("run"))
+        self._waiting.pop(job_id, None)  # a cancelled job waits for nothing
         self._log(job_id, f"cancel asked by {actor.username}")
         self._poke()
         return self._view(moved, self._repo.queued("run"))
@@ -839,7 +844,18 @@ class JobDesk:
         self._scoring_id = job_id
         self._log(job_id, "scoring started")
         try:
+            self._refuse_open_runs(job)
             warnings = await asyncio.to_thread(self._score_blocking, job)
+        except asyncio.CancelledError:  # the service is stopping: the scoring can be resumed
+            self._move(
+                job_id,
+                expected={JobState.RUNNING},
+                to=JobState.INTERRUPTED,
+                ended_at=self._clock.now(),
+                error=JobError("interrupted", "The service stopped while this job ran."),
+            )
+            self._log(job_id, "interrupted by a stop of the service")
+            raise
         except ResearchApiError as error:
             self._fail(job, JobError(error.slug, _reasons(error)))
         except Exception as error:
@@ -863,6 +879,14 @@ class JobDesk:
         finally:
             self._scoring_id = None
 
+    def _refuse_open_runs(self, job: Job) -> None:
+        """A run may have been resumed while this scoring waited for the lane: its file grows."""
+        assert isinstance(job.params, ScoreParams)
+        busy = self._open_run_ids()
+        for run_id in job.params.runs:
+            if run_id in busy:
+                raise _not_ended(run_id)
+
     def _score_blocking(self, job: Job) -> Sequence[str]:
         params = job.params
         assert isinstance(params, ScoreParams)
@@ -872,12 +896,24 @@ class JobDesk:
             data = self._files.read_run(run_id)
             if data is None:
                 raise NotFoundError(f"The run {run_id} is gone.")
-            runs.append((f"{run_id}.qa-run.jsonl", data))
+            suffix = ".qa-run.jsonl.gz" if data[:2] == GZIP_MAGIC else ".qa-run.jsonl"
+            runs.append((f"{run_id}{suffix}", data))
         scored = self._scorer.score(
             set_data, runs, params.options, self._clock.now().isoformat(timespec="seconds")
         )
+        if not self._still_running(job):  # stopped while it worked: no score of its own to keep
+            return scored.warnings
         self._files.write_score(job.id, scored.data)
         return scored.warnings
+
+    def _still_running(self, job: Job) -> bool:
+        """Whether ``job`` is the scoring that is running now. A clean stop interrupts the job
+        while its worker thread still computes; the thread must not leave a finished score behind
+        a job that says it was interrupted (a resume starts the work again)."""
+        now = self._repo.get(job.id)
+        return (
+            now is not None and now.state is JobState.RUNNING and now.started_at == job.started_at
+        )
 
     def _read_run(self, run_id: str) -> RunData:
         """A run as ``GET /runs`` would show it: the file's name is the run id of its header."""

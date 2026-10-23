@@ -600,7 +600,7 @@ async def test_a_run_found_cancelling_at_start_up_is_cancelled(arms: ScriptedArm
         await desk.start()
         assert state_of(desk, job_id) is JobState.CANCELLED
         header, _ = run_file(desk, desk.get(job_id))
-        assert "Partial" in header["notes"]
+        assert "Partial: Cancelled at" in header["notes"]
     finally:
         container.close()
 

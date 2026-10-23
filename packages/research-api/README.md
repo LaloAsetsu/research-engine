@@ -392,7 +392,7 @@ The job table (`jobs`, migration `0003`) holds who started each job, its state, 
 
 ### Scoring
 
-`POST /scores` names a set version, the runs to score (at most twelve, all on that version, none still running), the pairs to compare and optionally a noise pair. The job runs `qa_bench.score` and writes the file it returns, so a score made here equals the one `qa-bench score` makes from the same files (a test compares the bytes). A run that does not fit the set (another set, another md5) fails the job with qa-bench's own words.
+`POST /scores` names a set version, the runs to score (at most twelve, all on that version, none still running), the pairs to compare and optionally a noise pair. The job runs `qa_bench.score` and writes the file it returns, so a score made here equals the one `qa-bench score` makes from the same files (a test compares the bytes). A run that does not fit the set (another set, another md5) fails the job with qa-bench's own words. A scoring that a clean stop interrupts leaves no score file: its worker thread checks that the job is still the running one before it writes (a stop that lands in the instant between that check and the write can still leave a complete file for an `interrupted` job; a resume writes it again). The recovery at start-up (`JobRepo.recover`) writes `interrupted` and `cancelled` itself, outside the state machine's table; `test_jobs_repo.py` pins that both moves are in the table.
 
 ### Fake mode
 
