@@ -42,9 +42,27 @@ describe("formatProbability", () => {
     expect(written).toEqual(["<0.0001%", "<0.0001%", "0.0005%", "0.001%", "0.005%"]);
   });
 
+  it("never shows a probability below 1 as 100%", () => {
+    expect(formatProbability(0.9996, "en")).toBe("99.96%");
+    expect(formatProbability(0.9994, "en")).toBe("99.9%");
+    expect(formatProbability(0.999999, "en")).toBe("99.9999%");
+    expect(formatProbability(1 - 1e-9, "en")).toBe(">99.9999%");
+    expect(formatProbability(1, "en")).toBe("100%");
+    expect(formatProbability(1 + 1e-12, "en")).toBe("100%");
+  });
+
+  it("reads a larger probability near 1 as a larger figure", () => {
+    const written = [0.9994, 0.9996, 0.99999, 0.9999999, 1 - 1e-9].map((p) =>
+      formatProbability(p, "en"),
+    );
+    expect(written).toEqual(["99.9%", "99.96%", "99.999%", ">99.9999%", ">99.9999%"]);
+    expect(written).not.toContain("100%");
+  });
+
   it("builds the bound with the digits of the language", () => {
     expect(formatProbability(1e-9, "es")).toMatch(/^<0,0001\s?%$/);
     expect(formatProbability(5e-6, "es")).toMatch(/^0,0005\s?%$/);
+    expect(formatProbability(1 - 1e-9, "es")).toMatch(/^>99,9999\s?%$/);
   });
 });
 
