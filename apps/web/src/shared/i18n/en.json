@@ -14,8 +14,7 @@
   },
   "pages": {
     "ask": {
-      "title": "Ask",
-      "placeholder": "Here you will ask a question and read the answer with its cited sources. It arrives in a later release."
+      "title": "Ask"
     },
     "benchmarks": {
       "title": "Benchmarks",
@@ -88,6 +87,155 @@
     "starting": "Starting",
     "unreachable": "Unreachable",
     "loading": "Checking"
+  },
+  "ask": {
+    "intro": "Ask a question about the papers in the corpus. The answer cites its sources: click a citation to read the paper at that page. Questions and answers stay in this tab and are not saved on the server.",
+    "form": {
+      "label": "Your question",
+      "placeholder": "For example: What limits T1 in transmons?",
+      "hint": "Press Ctrl+Enter to send. At most {{max}} characters.",
+      "counter": "{{count}} of {{max}} characters",
+      "submit": "Ask",
+      "sending": "Asking",
+      "cancel": "Cancel question",
+      "blank": "Write a question to send it.",
+      "busy": "A question is being answered. Wait for it or cancel it to send another."
+    },
+    "options": {
+      "trigger": "Options for this question",
+      "changed": "{{count}} changed",
+      "title": "Options",
+      "description": "They apply to the questions you send until you reset them. Each option can also stay on the server's own setting.",
+      "useIndex": {
+        "label": "Search with the index",
+        "help": "Off: the answering model looks through the whole corpus itself, which is slow."
+      },
+      "bm25": {
+        "label": "Keyword matching",
+        "help": "When keyword matching joins the vector search.",
+        "default": "Server setting (default)",
+        "english": "English questions and LaTeX",
+        "always": "Always",
+        "never": "Never"
+      },
+      "wholeBlocks": {
+        "label": "Complete equations and tables",
+        "help": "Complete the equation, code block or table that a passage cuts.",
+        "default": "Server setting (default)",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "reset": "Use the server settings"
+    },
+    "engine": {
+      "warming": {
+        "title": "The engine is starting",
+        "body": "Questions can be sent in a few seconds."
+      },
+      "unavailable": {
+        "title": "The engine reports a problem",
+        "body": "{{reason}} You can still send a question: the cause may already be fixed.",
+        "noReason": "You can still send a question: the cause may already be fixed."
+      },
+      "unreachable": {
+        "title": "The service cannot be reached",
+        "body": "Check that the API is running. Questions will fail until it answers."
+      }
+    },
+    "progress": {
+      "label": "Progress of your question",
+      "sending": "Sending the question",
+      "queued": "Waiting for the model servers",
+      "queuedAhead_one": "{{count}} question ahead of yours",
+      "queuedAhead_other": "{{count}} questions ahead of yours",
+      "queuedNext": "Yours is next",
+      "retrieving": "Searching the papers",
+      "answering": "Writing the answer",
+      "done": "Answer ready",
+      "failed": "The question failed",
+      "cancelled": "Question cancelled",
+      "step": {
+        "done": "done",
+        "current": "in progress",
+        "next": "next"
+      }
+    },
+    "answer": {
+      "title": "Answer",
+      "asked": "You asked",
+      "warnings": "Warnings",
+      "sources": "Sources",
+      "noSources": "This answer cites no paper.",
+      "timings": "Searched in {{retrieve}} s, answered in {{answer}} s ({{wall}} s in all).",
+      "timingsNoSearch": "Answered in {{answer}} s, without the index.",
+      "again": "Edit and ask again",
+      "openCitation": "Open the paper at this citation"
+    },
+    "pages": {
+      "page_one": "page {{first}}",
+      "page_other": "pages {{first}}-{{last}}",
+      "section_one": "section {{first}}",
+      "section_other": "sections {{first}}-{{last}}"
+    },
+    "contexts": {
+      "title": "What the model read",
+      "count_one": "{{count}} passage",
+      "count_other": "{{count}} passages",
+      "show": "Show the passages",
+      "hide": "Hide the passages",
+      "none": "No passages came with this answer.",
+      "item": "Passage {{n}}",
+      "reference": "Reference list",
+      "score": "Score {{score}}",
+      "open": "Open the paper at {{pages}}"
+    },
+    "failure": {
+      "title": {
+        "503": "The service cannot answer right now",
+        "502": "A model server returned an error",
+        "429": "Too many questions are waiting",
+        "422": "The question was refused",
+        "default": "The question failed"
+      },
+      "network": "The connection to the service was lost while waiting for the answer.",
+      "lost": "The service no longer has this question. It keeps them for 30 minutes.",
+      "malformed": "The service sent something this page does not understand.",
+      "retry": "Try again",
+      "retryAfter": "The service suggests waiting {{seconds}} s.",
+      "errorId": "Error id: {{id}}"
+    },
+    "cancelled": "You cancelled this question.",
+    "history": {
+      "title": "This session",
+      "empty": "Your questions will appear here.",
+      "note": "Kept in this tab only. Closing the tab or signing out erases them.",
+      "status": {
+        "sending": "Sending",
+        "queued": "Waiting",
+        "retrieving": "Searching",
+        "answering": "Writing",
+        "done": "Answered",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
+    },
+    "source": {
+      "fallbackTitle": "Paper",
+      "close": "Close",
+      "cited": "Cited: {{pages}}",
+      "pageOf": "Page {{page}} of {{total}}",
+      "sectionOf": "Section {{page}} of {{total}}",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "previousSection": "Previous section",
+      "nextSection": "Next section",
+      "text": "Text of the page",
+      "loading": "Loading the page",
+      "notFound": "This page is not in the paper.",
+      "ambiguous": "That short id names more than one paper.",
+      "error": "The page could not be loaded.",
+      "retry": "Try again"
+    }
   },
   "theme": {
     "label": "Theme",

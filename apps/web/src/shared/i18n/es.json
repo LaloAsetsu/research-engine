@@ -14,8 +14,7 @@
   },
   "pages": {
     "ask": {
-      "title": "Preguntar",
-      "placeholder": "Aquí se hará una pregunta y se leerá la respuesta con sus fuentes citadas. Llega en una versión próxima."
+      "title": "Preguntar"
     },
     "benchmarks": {
       "title": "Benchmarks",
@@ -88,6 +87,155 @@
     "starting": "Iniciando",
     "unreachable": "Sin conexión",
     "loading": "Comprobando"
+  },
+  "ask": {
+    "intro": "Haz una pregunta sobre los artículos del corpus. La respuesta cita sus fuentes: pulsa una cita para leer el artículo en esa página. Las preguntas y respuestas se quedan en esta pestaña y no se guardan en el servidor.",
+    "form": {
+      "label": "Tu pregunta",
+      "placeholder": "Por ejemplo: ¿Qué limita T1 en los transmones?",
+      "hint": "Pulsa Ctrl+Intro para enviar. Máximo {{max}} caracteres.",
+      "counter": "{{count}} de {{max}} caracteres",
+      "submit": "Preguntar",
+      "sending": "Preguntando",
+      "cancel": "Cancelar pregunta",
+      "blank": "Escribe una pregunta para enviarla.",
+      "busy": "Se está respondiendo una pregunta. Espera o cancélala para enviar otra."
+    },
+    "options": {
+      "trigger": "Opciones de esta pregunta",
+      "changed": "{{count}} cambiadas",
+      "title": "Opciones",
+      "description": "Valen para las preguntas que envíes hasta que las restablezcas. Cada opción también puede quedarse en el valor del propio servidor.",
+      "useIndex": {
+        "label": "Buscar con el índice",
+        "help": "Apagado: el modelo que responde recorre todo el corpus por su cuenta, lo cual es lento."
+      },
+      "bm25": {
+        "label": "Búsqueda por palabras clave",
+        "help": "Cuándo se une la búsqueda por palabras clave a la búsqueda vectorial.",
+        "default": "Valor del servidor (por defecto)",
+        "english": "Preguntas en inglés y LaTeX",
+        "always": "Siempre",
+        "never": "Nunca"
+      },
+      "wholeBlocks": {
+        "label": "Completar ecuaciones y tablas",
+        "help": "Completa la ecuación, el bloque de código o la tabla que un fragmento corta.",
+        "default": "Valor del servidor (por defecto)",
+        "yes": "Sí",
+        "no": "No"
+      },
+      "reset": "Usar los valores del servidor"
+    },
+    "engine": {
+      "warming": {
+        "title": "El motor está arrancando",
+        "body": "Podrás enviar preguntas en unos segundos."
+      },
+      "unavailable": {
+        "title": "El motor informa de un problema",
+        "body": "{{reason}} Aun así puedes enviar una pregunta: la causa puede estar ya resuelta.",
+        "noReason": "Aun así puedes enviar una pregunta: la causa puede estar ya resuelta."
+      },
+      "unreachable": {
+        "title": "No se puede contactar con el servicio",
+        "body": "Comprueba que la API esté en marcha. Las preguntas fallarán hasta que responda."
+      }
+    },
+    "progress": {
+      "label": "Avance de tu pregunta",
+      "sending": "Enviando la pregunta",
+      "queued": "Esperando a los servidores de modelos",
+      "queuedAhead_one": "{{count}} pregunta antes que la tuya",
+      "queuedAhead_other": "{{count}} preguntas antes que la tuya",
+      "queuedNext": "La tuya es la siguiente",
+      "retrieving": "Buscando en los artículos",
+      "answering": "Redactando la respuesta",
+      "done": "Respuesta lista",
+      "failed": "La pregunta falló",
+      "cancelled": "Pregunta cancelada",
+      "step": {
+        "done": "hecho",
+        "current": "en curso",
+        "next": "siguiente"
+      }
+    },
+    "answer": {
+      "title": "Respuesta",
+      "asked": "Preguntaste",
+      "warnings": "Avisos",
+      "sources": "Fuentes",
+      "noSources": "Esta respuesta no cita ningún artículo.",
+      "timings": "Búsqueda en {{retrieve}} s, respuesta en {{answer}} s ({{wall}} s en total).",
+      "timingsNoSearch": "Respondida en {{answer}} s, sin el índice.",
+      "again": "Editar y preguntar de nuevo",
+      "openCitation": "Abrir el artículo en esta cita"
+    },
+    "pages": {
+      "page_one": "página {{first}}",
+      "page_other": "páginas {{first}}-{{last}}",
+      "section_one": "sección {{first}}",
+      "section_other": "secciones {{first}}-{{last}}"
+    },
+    "contexts": {
+      "title": "Lo que leyó el modelo",
+      "count_one": "{{count}} fragmento",
+      "count_other": "{{count}} fragmentos",
+      "show": "Mostrar los fragmentos",
+      "hide": "Ocultar los fragmentos",
+      "none": "Esta respuesta no trajo fragmentos.",
+      "item": "Fragmento {{n}}",
+      "reference": "Lista de referencias",
+      "score": "Puntaje {{score}}",
+      "open": "Abrir el artículo en {{pages}}"
+    },
+    "failure": {
+      "title": {
+        "503": "El servicio no puede responder ahora",
+        "502": "Un servidor de modelos devolvió un error",
+        "429": "Hay demasiadas preguntas en espera",
+        "422": "Se rechazó la pregunta",
+        "default": "La pregunta falló"
+      },
+      "network": "Se perdió la conexión con el servicio mientras se esperaba la respuesta.",
+      "lost": "El servicio ya no tiene esta pregunta. Las guarda durante 30 minutos.",
+      "malformed": "El servicio envió algo que esta página no entiende.",
+      "retry": "Intentar de nuevo",
+      "retryAfter": "El servicio sugiere esperar {{seconds}} s.",
+      "errorId": "Id del error: {{id}}"
+    },
+    "cancelled": "Cancelaste esta pregunta.",
+    "history": {
+      "title": "Esta sesión",
+      "empty": "Tus preguntas aparecerán aquí.",
+      "note": "Solo se guardan en esta pestaña. Al cerrarla o cerrar sesión se borran.",
+      "status": {
+        "sending": "Enviando",
+        "queued": "En espera",
+        "retrieving": "Buscando",
+        "answering": "Redactando",
+        "done": "Respondida",
+        "failed": "Fallida",
+        "cancelled": "Cancelada"
+      }
+    },
+    "source": {
+      "fallbackTitle": "Artículo",
+      "close": "Cerrar",
+      "cited": "Citado: {{pages}}",
+      "pageOf": "Página {{page}} de {{total}}",
+      "sectionOf": "Sección {{page}} de {{total}}",
+      "previousPage": "Página anterior",
+      "nextPage": "Página siguiente",
+      "previousSection": "Sección anterior",
+      "nextSection": "Sección siguiente",
+      "text": "Texto de la página",
+      "loading": "Cargando la página",
+      "notFound": "Esta página no está en el artículo.",
+      "ambiguous": "Ese id corto corresponde a más de un artículo.",
+      "error": "No se pudo cargar la página.",
+      "retry": "Intentar de nuevo"
+    }
   },
   "theme": {
     "label": "Tema",
