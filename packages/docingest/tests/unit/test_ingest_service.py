@@ -192,6 +192,24 @@ def test_converters_produce_segments_and_metadata(src):
     assert m.title == "Paper" and m.metadata.year == 2024
 
 
+def test_latex_ingest_persists_source_backed_circuit_artifacts(src):
+    source = r"""\begin{quantikz}
+& \gate{H} & \ctrl{1} & \qw \\
+& \qw & \targ{} & \qw
+\end{quantikz}"""
+    conv = FakeConverter([Segment(f"Intro\n```latex\n{source}\n```\n", "Introduction")])
+    svc = make_service(converters={SourceKind.LATEX: conv})
+
+    doc = svc.ingest(src("paper.tex"))
+
+    artifacts = svc.store.circuits(doc)
+    assert len(artifacts) == 1
+    assert artifacts[0]["status"] == "parsed"
+    assert artifacts[0]["source"].strip() == source
+    assert artifacts[0]["circuits"][0]["format"] == "circuit/1"
+    assert "```latex" in svc.store.markdown(doc)
+
+
 def test_a_segment_can_carry_its_own_method_and_warnings(src):
     """A LaTeX section that fell back to plain text is a page record of its own kind."""
     note = "pandoc exited with code 64; used the pylatexenc plain-text fallback"

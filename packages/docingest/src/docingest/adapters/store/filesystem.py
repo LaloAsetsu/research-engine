@@ -97,6 +97,31 @@ class FilesystemStore:
     def markdown(self, doc: StoredDocument) -> str:
         return (Path(doc.location) / "document.md").read_text()
 
+    def save_circuits(
+        self, doc: StoredDocument, artifacts: list[dict[str, object]]
+    ) -> None:
+        """Persist source-backed circuit readings beside the normalized document."""
+        _atomic_write(
+            Path(doc.location) / "circuits.json",
+            json.dumps({"format": "circuits/1", "artifacts": artifacts}, indent=2),
+        )
+
+    def circuits(self, doc: StoredDocument) -> list[dict[str, object]]:
+        """Load persisted circuit readings, returning an empty list for older documents."""
+        path = Path(doc.location) / "circuits.json"
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError) as error:
+            if isinstance(error, OSError) and not path.exists():
+                return []
+            raise ValueError(f"invalid circuit artifact {path}") from error
+        if not isinstance(data, dict) or data.get("format") != "circuits/1":
+            raise ValueError(f"invalid circuit artifact format in {path}")
+        artifacts = data.get("artifacts")
+        if not isinstance(artifacts, list) or not all(isinstance(item, dict) for item in artifacts):
+            raise ValueError(f"invalid circuit artifacts in {path}")
+        return artifacts
+
     def corpus(self) -> tuple[list[StoredDocument], list[str]]:
         best: dict[str, StoredDocument] = {}
         warnings: list[str] = []

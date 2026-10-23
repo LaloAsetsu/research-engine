@@ -40,3 +40,13 @@ class DocumentStore(Protocol):
     def corpus(self) -> tuple[list[StoredDocument], list[str]]:
         """One entry per document (canonical, else most complete variant) + warnings."""
         ...
+
+    def save_circuits(
+        self, doc: StoredDocument, artifacts: list[dict[str, object]]
+    ) -> None:
+        """Persist source-backed circuit artifacts beside a stored document."""
+        ...
+
+    def circuits(self, doc: StoredDocument) -> list[dict[str, object]]:
+        """Load persisted circuit artifacts for a stored document."""
+        ...

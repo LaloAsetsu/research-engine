@@ -11,6 +11,7 @@ from pathlib import Path
 
 from PIL.Image import Image
 
+from ..domain.circuits import extract_circuit_artifacts
 from ..domain.errors import UnsupportedInputError
 from ..domain.layout import PageLayout
 from ..domain.models import (
@@ -56,7 +57,7 @@ from ..ports import (
 )
 from .ink import ink_ratio
 
-PIPELINE_VERSION = "0.4.1"
+PIPELINE_VERSION = "0.4.2"
 SIDECAR_SUFFIX = ".meta.json"  # optional SourceMetadata next to an input file
 
 Log = Callable[[str], None]
@@ -218,7 +219,12 @@ class IngestService:
                 "  warning: degraded fallback conversion (timeout / crash): stored outside the"
                 " cache, the next run retries the converter"
             )
-        return self.store.save(manifest, render_markdown(manifest, texts), degraded=degraded)
+        markdown = render_markdown(manifest, texts)
+        stored = self.store.save(manifest, markdown, degraded=degraded)
+        save_circuits = getattr(self.store, "save_circuits", None)
+        if callable(save_circuits):
+            save_circuits(stored, extract_circuit_artifacts(markdown))
+        return stored
 
     def _refresh_metadata(
         self, cached: StoredDocument, metadata: SourceMetadata

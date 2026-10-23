@@ -224,6 +224,7 @@ class InMemoryStore:
     def __init__(self):
         self.canonical: dict[str, tuple[DocumentManifest, str]] = {}
         self.variants: dict[tuple[str, str, int | None], tuple[DocumentManifest, str]] = {}
+        self.circuit_artifacts: dict[str, list[dict[str, object]]] = {}
         # Environment-caused fallbacks: kept for the corpus, never served by lookup().
         self.degraded: dict[tuple[str, str, int | None], tuple[DocumentManifest, str]] = {}
 
@@ -248,6 +249,12 @@ class InMemoryStore:
             return StoredDocument(manifest, f"mem://{manifest.doc_id}", canonical=True)
         self.variants[key] = (manifest, markdown)
         return StoredDocument(manifest, f"mem://{key}", canonical=False)
+
+    def save_circuits(self, doc, artifacts):
+        self.circuit_artifacts[doc.manifest.doc_id] = artifacts
+
+    def circuits(self, doc):
+        return self.circuit_artifacts.get(doc.manifest.doc_id, [])
 
     def markdown(self, doc):
         m = doc.manifest

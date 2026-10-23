@@ -74,6 +74,7 @@ __all__ = [
     "add_gate_lists",
     "circuit_code_blocks",
     "gate_list",
+    "extract_circuit_artifacts",
 ]
 
 MAX_STEPS = 60  # a longer circuit is listed up to here, then "... N more lines not listed"
@@ -2534,6 +2535,29 @@ class CodeBlock:
     start: int
     end: int
     source: str
+
+
+def extract_circuit_artifacts(markdown: str) -> list[dict[str, object]]:
+    """Extract every circuit code block as provenance-preserving JSON data.
+
+    The returned records deliberately retain the original source and parser status.  Callers
+    must not treat a ``partial`` or ``unparsed`` record as an executable circuit.
+    """
+    artifacts: list[dict[str, object]] = []
+    for index, block in enumerate(circuit_code_blocks(markdown), start=1):
+        reading = gate_list(block.source)
+        artifacts.append(
+            {
+                "index": index,
+                "start": block.start,
+                "end": block.end,
+                "source": block.source,
+                "status": reading.status,
+                "n_circuits": reading.n_circuits,
+                "circuits": [circuit.to_dict() for circuit in reading.circuits],
+            }
+        )
+    return artifacts
 
 
 def circuit_code_blocks(text: str) -> list[CodeBlock]:
