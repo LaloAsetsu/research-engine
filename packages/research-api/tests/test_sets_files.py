@@ -105,6 +105,7 @@ def test_a_reference_that_is_a_path_is_refused_everywhere(store: SetFileStore, r
         lambda: store.append_reviews(ref, b"x"),
         lambda: store.write_reviews(ref, b"x"),
         lambda: store.keep_copy(ref, "prefreeze", b"x"),
+        lambda: store.read_copy(ref, "prefreeze"),
     ):
         with pytest.raises(ValueError, match="not a set reference"):
             call()
@@ -115,6 +116,15 @@ def test_a_reference_that_is_a_path_is_refused_everywhere(store: SetFileStore, r
 def test_a_copy_label_is_letters_and_digits_only(store: SetFileStore, label: str) -> None:
     with pytest.raises(ValueError, match="label"):
         store.keep_copy(REF, label, b"x")
+    with pytest.raises(ValueError, match="label"):
+        store.read_copy(REF, label)
+
+
+def test_a_kept_copy_reads_back_and_a_missing_one_is_none(store: SetFileStore) -> None:
+    assert store.read_copy(REF, "prefreeze") is None
+    store.keep_copy(REF, "prefreeze", b"the draft")
+    assert store.read_copy(REF, "prefreeze") == b"the draft"
+    assert store.read(REF) is None  # a copy is not the version
 
 
 def test_reviews_are_appended_never_rewritten(store: SetFileStore) -> None:
@@ -152,3 +162,18 @@ def test_keep_copy_does_not_touch_the_version(store: SetFileStore) -> None:
     store.write(REF, b"frozen")
     assert store.read(REF) == b"frozen"
     assert (store.root / "demo" / "v1.prefreeze.qset.jsonl").read_bytes() == b"draft"
+
+
+def test_a_replaced_file_has_its_folder_flushed_so_the_rename_survives_a_power_cut(
+    store: SetFileStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flushed: list[bool] = []
+    real = os.fsync
+
+    def watching(descriptor: int) -> None:
+        flushed.append(stat.S_ISDIR(os.fstat(descriptor).st_mode))
+        real(descriptor)
+
+    monkeypatch.setattr(os, "fsync", watching)
+    store.write(REF, b"x")
+    assert flushed == [False, True]  # the file, then the folder

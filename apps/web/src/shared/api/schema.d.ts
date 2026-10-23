@@ -482,7 +482,9 @@ export interface paths {
         };
         /**
          * What freezing would do
-         * @description The reviews it would apply, by item. Nothing changes.
+         * @description The reviews it would apply, by item, and the `etag` of this plan: the freeze must send
+         *     it back in `If-Match`. Nothing changes. It answers `422` where the freeze would (nothing
+         *     left, or a set that is not valid after the reviews), naming the item by id.
          */
         get: operations["previewFreeze"];
         put?: never;
@@ -490,7 +492,7 @@ export interface paths {
          * Apply the reviews and freeze a draft
          * @description Owner or admin. The latest human decision of each item is applied (accepted and edited
          *     items stay, rejected ones go) and the file gets a new md5 that never changes again. The draft
-         *     as it was is kept beside it on the server.
+         *     as it was is kept beside it on the server. Only the plan that was read is applied.
          */
         post: operations["freezeSetVersion"];
         delete?: never;
@@ -528,6 +530,9 @@ export interface paths {
         /**
          * Replace one item of a draft
          * @description Owner or admin, drafts only. `422` lists each problem with a JSON pointer into the item.
+         *     An item that people have already decided on (accept, edit or reject) keeps its text: the
+         *     answer is `409` with the type `item-has-decisions`, because those decisions are about the
+         *     text they read. Put the change in an `edit` decision, which is applied at the freeze.
          */
         put: operations["putSetItem"];
         post?: never;
@@ -556,9 +561,11 @@ export interface paths {
         put?: never;
         /**
          * Accept, edit or reject an item
-         * @description Any member may review any item of a draft. The file is append only: a new decision
-         *     replaces yours, it never edits it. `edit` and `reject` need a `note`; an `edit` lists the
-         *     item fields to replace and is applied when the draft is frozen.
+         * @description Any member may review any item of a draft, with the `etag` of the draft they read in
+         *     `If-Match`: a decision is about the text that was read, so it is refused when the draft has
+         *     changed since. The file is append only: a new decision replaces yours, it never edits it.
+         *     `edit` and `reject` need a `note`; an `edit` lists the item fields to replace and is applied
+         *     when the draft is frozen.
          */
         post: operations["addSetReview"];
         delete?: never;
@@ -902,6 +909,11 @@ export interface components {
             accepted: string[];
             /** Edited */
             edited: string[];
+            /**
+             * Etag
+             * @description Names this plan (the `ETag` header, quoted). The freeze must send it in `If-Match`; a decision added or an item changed since gives another one (`409`).
+             */
+            etag: string;
             /** Items After */
             items_after: number;
             /** Items Before */
@@ -2620,6 +2632,15 @@ export interface operations {
                     "application/json": components["schemas"]["SetVersionOut"];
                 };
             };
+            /** @description The body is not valid JSON, or a JSON key is written twice. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description No such set, version or item. */
             404: {
                 headers: {
@@ -2631,6 +2652,15 @@ export interface operations {
             };
             /** @description A set with that name exists (copy it instead). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2779,6 +2809,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Validation"];
+                };
+            };
+            /** @description The body is not valid JSON, or a JSON key is written twice. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description A problem. */
@@ -2935,13 +2983,15 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description Names this freeze plan (quoted); send it in `If-Match` to freeze. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["FreezePreview"];
                 };
             };
-            /** @description The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing). */
+            /** @description The version is frozen already. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -2982,7 +3032,10 @@ export interface operations {
     freezeSetVersion: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The `etag` of the plan you read (`GET .../freeze`). `428` without it, `409` when a decision or an item changed since. */
+                "if-match"?: string | null;
+            };
             path: {
                 /** @description The set's name. */
                 name: string;
@@ -3020,7 +3073,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The draft changed since you read it (`If-Match`). */
+            /** @description The draft changed since you read it (`If-Match`), or the item has review decisions and its text is fixed (type `item-has-decisions`: propose the change with an `edit` decision). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3062,7 +3115,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since. */
+                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since. */
                 "if-match"?: string | null;
             };
             path: {
@@ -3092,6 +3145,15 @@ export interface operations {
                     "application/json": components["schemas"]["ItemDetail"];
                 };
             };
+            /** @description The body is not valid JSON, or a JSON key is written twice. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing). */
             403: {
                 headers: {
@@ -3110,8 +3172,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The draft changed since you read it (`If-Match`). */
+            /** @description The draft changed since you read it (`If-Match`), or the item has review decisions and its text is fixed (type `item-has-decisions`: propose the change with an `edit` decision). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3208,7 +3279,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since. */
+                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since. */
                 "if-match"?: string | null;
             };
             path: {
@@ -3240,6 +3311,15 @@ export interface operations {
                     "application/json": components["schemas"]["ItemDetail"];
                 };
             };
+            /** @description The body is not valid JSON, or a JSON key is written twice. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing). */
             403: {
                 headers: {
@@ -3258,8 +3338,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The draft changed since you read it (`If-Match`). */
+            /** @description The draft changed since you read it (`If-Match`), or the item has review decisions and its text is fixed (type `item-has-decisions`: propose the change with an `edit` decision). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3300,7 +3389,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since. */
+                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since. */
                 "if-match"?: string | null;
             };
             path: {
@@ -3344,7 +3433,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The draft changed since you read it (`If-Match`). */
+            /** @description The draft changed since you read it (`If-Match`), or the item has review decisions and its text is fixed (type `item-has-decisions`: propose the change with an `edit` decision). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3440,7 +3529,10 @@ export interface operations {
     addSetReview: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since. */
+                "if-match"?: string | null;
+            };
             path: {
                 /** @description The set's name. */
                 name: string;
@@ -3464,6 +3556,15 @@ export interface operations {
                     "application/json": components["schemas"]["ReviewLine"];
                 };
             };
+            /** @description The body is not valid JSON, or a JSON key is written twice. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The version is frozen (or the CSRF header is missing). */
             403: {
                 headers: {
@@ -3482,8 +3583,35 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description The draft changed since you read it (`If-Match`): read it again. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The body is over the cap. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The request is not valid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `If-Match` is missing (or is `*`). */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

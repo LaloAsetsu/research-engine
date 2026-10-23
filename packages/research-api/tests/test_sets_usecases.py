@@ -20,13 +20,14 @@ from sets_helpers import SOURCES, example_bytes, example_item, header, item, qse
 from research_api.adapters.bench import QaBenchSetFormats
 from research_api.adapters.files import SetFileStore
 from research_api.adapters.persistence import Database
-from research_api.application.sets import SetServices, build_set_services
+from research_api.application.sets import SetServices, _item_path, build_set_services
 from research_api.domain import sets as rules
 from research_api.domain.errors import (
     ConflictError,
     CorruptStoreError,
     ForbiddenError,
     InvalidInputError,
+    ItemHasDecisionsError,
     NotFoundError,
     PreconditionRequiredError,
     TooLargeError,
@@ -36,6 +37,7 @@ from research_api.domain.sets import Actor, ItemFilter, SetRef, etag_of
 ANA = Actor("ana")  # an owner
 BETO = Actor("beto")  # another member
 ROOT = Actor("root", admin=True)
+DANI = Actor("dani")
 V1 = SetRef("demo", "v1")
 V2 = SetRef("demo", "v2")
 
@@ -59,6 +61,11 @@ class Stack:
     @property
     def freeze(self):
         return self.services.freeze
+
+    def decide(self, who: Actor, ref: SetRef, **decision: Any) -> dict[str, Any]:
+        """A decision made on the draft as it is now, as a reviewer who just read it makes it."""
+        read = etag_of(self.manage.get_version(ref).version.md5)
+        return self.review.add(who, ref, if_match=read, **decision)
 
     def path(self, ref: SetRef, suffix: str = ".qset.jsonl") -> Path:
         return self.root / "sets" / ref.name / f"{ref.version}{suffix}"
@@ -87,6 +94,12 @@ def draft(stack: Stack, items: list[dict[str, Any]] | None = None, owner: Actor 
     return V1
 
 
+def freeze_now(stack: Stack, who: Actor = ANA, ref: SetRef = V1):
+    """Read the plan, then freeze exactly that plan, as a client does."""
+    _, plan = stack.freeze.plan(ref)
+    return stack.freeze.freeze(who, ref, etag_of(plan.token))
+
+
 def etag(stack: Stack, ref: SetRef = V1) -> str:
     return etag_of(stack.manage.get_version(ref).version.md5)
 
@@ -113,6 +126,41 @@ def test_the_name_of_an_existing_set_is_taken(stack: Stack) -> None:
     stack.manage.create(ANA, name="demo")
     with pytest.raises(ConflictError, match="Copy one of its versions"):
         stack.manage.create(BETO, name="demo")
+
+
+@pytest.mark.parametrize("other", ["Demo", "DEMO", "dEmO"])
+def test_a_name_that_differs_only_in_capitals_is_the_same_name(stack: Stack, other: str) -> None:
+    """On a case-insensitive disk (macOS, Windows) both would be one folder, and the new set would
+    write over the frozen file of the first. Nothing here depends on the disk."""
+    draft(stack, [item("T-1")])
+    freeze_now(stack, ANA, V1)
+    frozen = stack.path(V1).read_bytes()
+    row = stack.database.sets.get(V1)
+    with pytest.raises(ConflictError, match="same name"):
+        stack.manage.create(BETO, name=other)
+    with pytest.raises(NotFoundError):  # the lookup is by the spelling: no such set, no file read
+        stack.manage.create(BETO, name=other, copy_from="v1")
+    with pytest.raises(ConflictError, match="same name"):
+        stack.manage.import_set(BETO, qset_bytes(), name=other)
+    with pytest.raises(ConflictError, match="same name"):
+        stack.manage.import_set(BETO, qset_bytes([item("T-1")], f"{other}/v7"))  # the file's name
+    assert stack.path(V1).read_bytes() == frozen
+    assert stack.database.sets.get(V1) == row
+    assert [e.name for e in stack.manage.list_sets()] == ["demo"]
+    assert stack.manage.get_item(V1, "T-1").item["id"] == "T-1"  # still readable, not corrupt
+
+
+def test_a_different_name_that_is_only_a_prefix_or_a_neighbour_is_free(stack: Stack) -> None:
+    stack.manage.create(ANA, name="demo")
+    stack.manage.create(ANA, name="demo2")
+    stack.manage.create(ANA, name="de-mo")
+    assert [e.name for e in stack.manage.list_sets()] == ["de-mo", "demo", "demo2"]
+
+
+def test_the_same_spelling_still_adds_the_next_version(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    freeze_now(stack, ANA, V1)
+    assert stack.manage.create(BETO, name="demo", copy_from="v1").ref == V2
 
 
 @pytest.mark.parametrize("name", ["", "a/b", "..", "has space", "x" * 65])
@@ -228,6 +276,36 @@ def test_a_gzip_import_is_stored_as_text(stack: Stack) -> None:
     assert outcome.version.md5 == md5(example_bytes())
 
 
+def test_a_gzip_import_is_held_to_the_cap_once_it_is_unzipped(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = qset_bytes([item("T-1")])
+    padded = gzip.compress(data + b"\n" * (5 * 1024 * 1024))  # a few KiB zipped, 5 MiB unzipped
+    assert len(padded) < 10_000
+    monkeypatch.setattr(rules, "MAX_IMPORT_BYTES", 1024 * 1024)
+    with pytest.raises(TooLargeError):
+        stack.manage.import_set(ANA, padded, name="demo", version="v1")
+    assert stack.database.sets.all() == []
+    assert not stack.path(V1).exists()
+
+
+def test_gzip_inside_gzip_is_not_an_import(stack: Stack) -> None:
+    with pytest.raises(InvalidInputError, match="gzip inside gzip"):
+        stack.manage.import_set(ANA, gzip.compress(gzip.compress(example_bytes())))
+    assert stack.database.sets.all() == []
+
+
+def test_an_older_shape_in_gzip_is_held_to_the_same_cap(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(rules, "MAX_IMPORT_BYTES", 1000)
+    with pytest.raises(TooLargeError):
+        stack.manage.import_set(
+            ANA, gzip.compress(b"\0" * 100_000), name="conv", shape="mathcirc-v1"
+        )
+    assert stack.database.sets.all() == []
+
+
 def test_a_refused_file_leaves_nothing_behind(stack: Stack) -> None:
     bad = qset_bytes([item("T-1", form="nope")])
     with pytest.raises(InvalidInputError) as caught:
@@ -248,6 +326,25 @@ def test_an_upload_over_the_cap(stack: Stack, monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(TooLargeError):
         stack.manage.import_set(ANA, example_bytes())
     assert stack.database.sets.all() == []
+
+
+def test_an_item_id_the_routes_could_not_name_is_refused_at_import_and_when_added(
+    stack: Stack,
+) -> None:
+    longest = "a" * rules.MAX_ITEM_ID_LENGTH
+    too_long = "a" * (rules.MAX_ITEM_ID_LENGTH + 1)
+    stack.manage.import_set(ANA, qset_bytes([item(longest)]), name="ok", version="v1")
+    with pytest.raises(InvalidInputError) as caught:
+        stack.manage.import_set(
+            ANA, qset_bytes([item("T-1"), item(too_long)]), name="long", version="v1"
+        )
+    assert [e.path for e in caught.value.errors] == ["/lines/3/id"]
+    assert [row.ref.name for row in stack.database.sets.all()] == ["ok"]
+    draft(stack, [item("T-1")])
+    with pytest.raises(InvalidInputError) as added:
+        stack.manage.add_item(ANA, V1, item(too_long), etag(stack))
+    assert [e.path for e in added.value.errors] == ["/id"]
+    stack.manage.add_item(ANA, V1, item(longest), etag(stack))
 
 
 def test_a_header_that_is_not_name_slash_version_needs_a_name(stack: Stack) -> None:
@@ -361,9 +458,9 @@ def test_the_catalog_groups_versions_under_their_set(stack: Stack) -> None:
 
 def test_the_catalog_shows_review_progress(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2"), item("T-3")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="accept")
-    stack.review.add(BETO, V1, item_id="T-1", verdict="accept")
-    stack.review.add(ANA, V1, item_id="T-2", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-1", verdict="accept")
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-2", verdict="accept")
     progress = stack.manage.list_sets()[0].versions[0].progress
     assert progress is not None
     assert (progress.accepted, progress.needs_second, progress.none) == (1, 1, 1)
@@ -412,7 +509,7 @@ def test_paging_is_kept_inside_its_bounds(stack: Stack) -> None:
 
 def test_the_review_filter_uses_the_state_of_each_item(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2"), item("T-3")])
-    stack.review.add(ANA, V1, item_id="T-2", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-2", verdict="accept")
     needs = stack.manage.get_version(V1, ItemFilter(review="needs_second"))
     assert [i.id for i in needs.items] == ["T-2"]
     none = stack.manage.get_version(V1, ItemFilter(review="none"))
@@ -421,8 +518,8 @@ def test_the_review_filter_uses_the_state_of_each_item(stack: Stack) -> None:
 
 def test_an_item_view_carries_its_reviews_and_what_the_schema_says(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="accept")
-    stack.review.add(BETO, V1, item_id="T-2", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-1", verdict="accept")
+    stack.decide(BETO, V1, item_id="T-2", verdict="accept")
     view = stack.manage.get_item(V1, "T-1")
     assert [line["reviewer"] for line in view.reviews] == ["ana"]
     assert view.review.state == "needs_second"
@@ -563,7 +660,7 @@ def test_an_item_with_a_mirror_cannot_be_deleted_but_the_mirror_can(stack: Stack
 
 def test_deleting_an_item_keeps_its_reviews(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2")])
-    stack.review.add(BETO, V1, item_id="T-1", verdict="accept")
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
     stack.manage.delete_item(ANA, V1, "T-1", etag(stack))
     assert [line["item_id"] for line in stack.review.list(V1)] == ["T-1"]
 
@@ -593,11 +690,16 @@ def test_a_stale_if_match_is_a_conflict_and_changes_nothing(stack: Stack) -> Non
     assert stack.path(V1).read_bytes() == before
 
 
-def test_a_wildcard_if_match_matches_and_a_weak_one_does_not(stack: Stack) -> None:
+def test_a_wildcard_if_match_is_refused_and_a_weak_one_does_not_match(stack: Stack) -> None:
     draft(stack, [item("T-1")])
-    stack.manage.put_item(ANA, V1, "T-1", item("T-1", answer="a"), "*")
+    before = stack.path(V1).read_bytes()
+    with pytest.raises(PreconditionRequiredError, match="does not say which version"):
+        stack.manage.put_item(ANA, V1, "T-1", item("T-1", answer="a"), "*")
+    with pytest.raises(PreconditionRequiredError):
+        stack.manage.delete_item(ANA, V1, "T-1", f"{etag(stack)}, *")
     with pytest.raises(ConflictError):
         stack.manage.put_item(ANA, V1, "T-1", item("T-1", answer="b"), "W/" + etag(stack))
+    assert stack.path(V1).read_bytes() == before
 
 
 def test_the_owner_and_an_admin_may_edit_but_another_member_may_not(stack: Stack) -> None:
@@ -620,8 +722,8 @@ def test_permission_is_checked_before_the_precondition(stack: Stack) -> None:
 
 def test_a_frozen_version_takes_no_edit_from_anyone(stack: Stack) -> None:
     draft(stack, [item("T-1")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="accept")
-    stack.freeze.freeze(ANA, V1)
+    stack.decide(ANA, V1, item_id="T-1", verdict="accept")
+    freeze_now(stack, ANA, V1)
     tag = etag(stack)
     for who in (ANA, ROOT, BETO):
         with pytest.raises(ForbiddenError, match="frozen"):
@@ -635,10 +737,35 @@ def test_a_frozen_version_takes_no_edit_from_anyone(stack: Stack) -> None:
 # --- reviews ----------------------------------------------------------------------------------------
 
 
+def test_a_half_written_last_review_line_does_not_close_the_version_and_the_next_review_heals_it(
+    stack: Stack,
+) -> None:
+    draft(stack, [item("T-1"), item("T-2")])
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+    whole = stack.path(V1, ".reviews.jsonl").read_bytes()
+    stack.files.append_reviews(V1, b'{"item_id": "T-2", "target": "item", "revie')  # a crash
+    assert ids(stack) == ["T-1", "T-2"]  # the page, the item, the list and the plan still work
+    assert stack.manage.get_item(V1, "T-1").review.state == "needs_second"
+    assert [line["item_id"] for line in stack.review.list(V1)] == ["T-1"]
+    assert stack.freeze.plan(V1)[1].accepted == ("T-1",)
+    assert stack.manage.list_sets()[0].versions[0].progress is not None
+
+    stack.decide(DANI, V1, item_id="T-2", verdict="reject", note="no")
+    healed = stack.path(V1, ".reviews.jsonl").read_bytes()
+    assert healed.startswith(whole)
+    assert healed.endswith(b"\n") and b"revie{" not in healed
+    assert [(x["item_id"], x["reviewer"]) for x in stack.review.list(V1)] == [
+        ("T-1", "beto"),
+        ("T-2", "dani"),
+    ]
+    reviews = read_reviews(stack.path(V1, ".reviews.jsonl"))  # a file the format accepts
+    assert len(reviews.records) == 2
+
+
 def test_a_review_line_is_filled_in_by_the_server(stack: Stack) -> None:
     draft(stack, [item("T-1")])
     md5_now = stack.manage.get_version(V1).version.md5
-    line = stack.review.add(BETO, V1, item_id="T-1", verdict="reject", note="unclear")
+    line = stack.decide(BETO, V1, item_id="T-1", verdict="reject", note="unclear")
     assert line == {
         "item_id": "T-1",
         "target": "item",
@@ -653,9 +780,9 @@ def test_a_review_line_is_filled_in_by_the_server(stack: Stack) -> None:
 
 def test_the_reviews_file_is_a_valid_reviews_file_for_its_set(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-1", verdict="accept")
     stack.clock.advance(minutes=5)
-    stack.review.add(BETO, V1, item_id="T-2", verdict="edit", note="n", edit={"answer": "z"})
+    stack.decide(BETO, V1, item_id="T-2", verdict="edit", note="n", edit={"answer": "z"})
     reviews = read_reviews(stack.path(V1, ".reviews.jsonl"))
     assert reviews.header["set"] == "demo/v1"
     assert len(reviews.records) == 2
@@ -664,9 +791,9 @@ def test_the_reviews_file_is_a_valid_reviews_file_for_its_set(stack: Stack) -> N
 
 def test_reviews_are_listed_oldest_first_and_by_item(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="accept")
-    stack.review.add(BETO, V1, item_id="T-2", verdict="accept")
-    stack.review.add(BETO, V1, item_id="T-1", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-1", verdict="accept")
+    stack.decide(BETO, V1, item_id="T-2", verdict="accept")
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
     assert [(r["item_id"], r["reviewer"]) for r in stack.review.list(V1)] == [
         ("T-1", "ana"),
         ("T-2", "beto"),
@@ -683,7 +810,7 @@ def test_listing_the_reviews_of_a_version_with_none(stack: Stack) -> None:
 
 def test_an_empty_note_on_an_accept_is_left_out(stack: Stack) -> None:
     draft(stack)
-    assert "note" not in stack.review.add(ANA, V1, item_id="T-001", verdict="accept", note="")
+    assert "note" not in stack.decide(ANA, V1, item_id="T-001", verdict="accept", note="")
 
 
 @pytest.mark.parametrize(
@@ -707,7 +834,7 @@ def test_a_bad_review_is_refused_at_its_field_and_nothing_is_written(
 ) -> None:
     draft(stack, [item("T-1")])
     with pytest.raises(InvalidInputError) as caught:
-        stack.review.add(ANA, V1, item_id="T-1", verdict=verdict, note=note, edit=edit)
+        stack.decide(ANA, V1, item_id="T-1", verdict=verdict, note=note, edit=edit)
     assert path in {e.path for e in caught.value.errors}
     assert not stack.path(V1, ".reviews.jsonl").exists()
 
@@ -715,28 +842,95 @@ def test_a_bad_review_is_refused_at_its_field_and_nothing_is_written(
 def test_reviewing_an_item_that_is_not_there(stack: Stack) -> None:
     draft(stack)
     with pytest.raises(NotFoundError):
-        stack.review.add(ANA, V1, item_id="T-9", verdict="accept")
+        stack.decide(ANA, V1, item_id="T-9", verdict="accept")
 
 
 def test_any_member_may_review_a_draft_that_is_not_theirs(stack: Stack) -> None:
     draft(stack, [item("T-1")])
-    assert stack.review.add(BETO, V1, item_id="T-1", verdict="accept")["reviewer"] == "beto"
+    assert stack.decide(BETO, V1, item_id="T-1", verdict="accept")["reviewer"] == "beto"
 
 
 def test_a_frozen_version_takes_no_review(stack: Stack) -> None:
     draft(stack, [item("T-1")])
-    stack.freeze.freeze(ANA, V1)
+    freeze_now(stack, ANA, V1)
     with pytest.raises(ForbiddenError, match="frozen"):
-        stack.review.add(BETO, V1, item_id="T-1", verdict="accept")
+        stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+
+
+def test_a_review_names_the_draft_it_was_made_on_and_stores_its_md5(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    read = etag(stack)
+    line = stack.review.add(BETO, V1, if_match=read, item_id="T-1", verdict="accept")
+    assert line["set_md5"] == stack.manage.get_version(V1).version.md5
+    assert stack.review.list(V1)[0]["set_md5"] == read.strip('"')
+
+
+@pytest.mark.parametrize("sent", [None, "", "*", '"abc", *'])
+def test_a_review_without_the_etag_of_a_draft_is_refused_and_writes_nothing(
+    stack: Stack, sent: str | None
+) -> None:
+    draft(stack, [item("T-1")])
+    with pytest.raises(PreconditionRequiredError):
+        stack.review.add(BETO, V1, if_match=sent, item_id="T-1", verdict="accept")
+    assert not stack.path(V1, ".reviews.jsonl").exists()
+
+
+@pytest.mark.parametrize("sent", ['"0123456789abcdef0123456789abcdef"', "garbage", 'W/"x"'])
+def test_a_review_made_on_another_draft_than_the_current_one_is_a_conflict(
+    stack: Stack, sent: str
+) -> None:
+    draft(stack, [item("T-1")])
+    with pytest.raises(ConflictError, match="changed since you read it"):
+        stack.review.add(BETO, V1, if_match=sent, item_id="T-1", verdict="accept")
+    assert not stack.path(V1, ".reviews.jsonl").exists()
+
+
+def test_a_reviewer_who_read_the_old_text_cannot_accept_the_new_one(stack: Stack) -> None:
+    """Beto reads T-1, the owner replaces its answer, beto accepts: that accept is refused, so
+    dani's accept of the new text is not the second accept of anything beto read."""
+    draft(stack, [item("T-1", answer="Original answer.")])
+    read_by_beto = etag(stack)
+    stack.manage.put_item(ANA, V1, "T-1", item("T-1", answer="Replaced."), read_by_beto)
+    with pytest.raises(ConflictError):
+        stack.review.add(BETO, V1, if_match=read_by_beto, item_id="T-1", verdict="accept")
+    stack.decide(DANI, V1, item_id="T-1", verdict="accept")
+    view = stack.manage.get_item(V1, "T-1")
+    assert view.review.accepted_by == ("dani",)
+    assert view.review.state == "needs_second"
+    assert [r["reviewer"] for r in stack.review.list(V1)] == ["dani"]
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")  # read again: now it counts
+    assert stack.manage.get_item(V1, "T-1").review.state == "accepted"
+
+
+def test_a_decision_on_one_item_does_not_stop_a_reviewer_of_another(stack: Stack) -> None:
+    """Reviews are a separate file: they leave the draft's etag alone."""
+    draft(stack, [item("T-1"), item("T-2")])
+    read = etag(stack)
+    stack.review.add(ANA, V1, if_match=read, item_id="T-1", verdict="accept")
+    stack.review.add(BETO, V1, if_match=read, item_id="T-2", verdict="accept")
+    assert etag(stack) == read
+
+
+def test_the_etag_is_checked_before_the_item_is_looked_up(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    with pytest.raises(PreconditionRequiredError):
+        stack.review.add(BETO, V1, if_match=None, item_id="T-9", verdict="accept")
+
+
+def test_a_frozen_version_refuses_a_review_before_it_looks_at_the_etag(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    freeze_now(stack, ANA, V1)
+    with pytest.raises(ForbiddenError, match="frozen"):
+        stack.review.add(BETO, V1, if_match=None, item_id="T-1", verdict="accept")
 
 
 def test_an_edit_review_does_not_change_the_draft_until_it_is_frozen(stack: Stack) -> None:
     draft(stack, [item("T-1")])
     before = stack.path(V1).read_bytes()
-    stack.review.add(BETO, V1, item_id="T-1", verdict="edit", note="n", edit={"answer": "better"})
+    stack.decide(BETO, V1, item_id="T-1", verdict="edit", note="n", edit={"answer": "better"})
     assert stack.path(V1).read_bytes() == before
     assert stack.manage.get_item(V1, "T-1").item["answer"] == "Synthetic answer."
-    stack.freeze.freeze(ANA, V1)
+    freeze_now(stack, ANA, V1)
     assert stack.manage.get_item(V1, "T-1").item["answer"] == "better"
 
 
@@ -745,10 +939,10 @@ def test_an_edit_review_does_not_change_the_draft_until_it_is_frozen(stack: Stac
 
 def reviewed(stack: Stack) -> SetRef:
     draft(stack, [item("T-1"), item("T-2"), item("T-3"), item("T-4")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="accept")
-    stack.review.add(BETO, V1, item_id="T-1", verdict="accept")
-    stack.review.add(BETO, V1, item_id="T-2", verdict="reject", note="duplicate")
-    stack.review.add(BETO, V1, item_id="T-3", verdict="edit", note="fix", edit={"answer": "fixed"})
+    stack.decide(ANA, V1, item_id="T-1", verdict="accept")
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+    stack.decide(BETO, V1, item_id="T-2", verdict="reject", note="duplicate")
+    stack.decide(BETO, V1, item_id="T-3", verdict="edit", note="fix", edit={"answer": "fixed"})
     return V1
 
 
@@ -770,7 +964,7 @@ def test_freezing_applies_the_reviews_and_closes_the_version(stack: Stack) -> No
     reviewed(stack)
     draft_bytes = stack.path(V1).read_bytes()
     stack.clock.advance(days=1)
-    row, plan = stack.freeze.freeze(ANA, V1)
+    row, plan = freeze_now(stack, ANA, V1)
     assert row.status == "frozen"
     assert row.frozen_at == stack.clock.now()
     assert row.items == 3
@@ -787,15 +981,174 @@ def test_freezing_applies_the_reviews_and_closes_the_version(stack: Stack) -> No
     assert stack.database.sets.get(V1) == row
 
 
+def test_a_freeze_needs_the_plan_that_was_read(stack: Stack) -> None:
+    reviewed(stack)
+    before = stack.path(V1).read_bytes()
+    _, plan = stack.freeze.plan(V1)
+    tag = etag_of(plan.token)
+    assert len(plan.token) == 32
+    for sent in (None, "", "*"):
+        with pytest.raises(PreconditionRequiredError):
+            stack.freeze.freeze(ANA, V1, sent)
+    with pytest.raises(ConflictError, match="changed since you read the plan"):
+        stack.freeze.freeze(ANA, V1, etag_of("0" * 32))
+    with pytest.raises(ConflictError):
+        stack.freeze.freeze(ANA, V1, "W/" + tag)
+    assert stack.path(V1).read_bytes() == before
+    assert stack.database.sets.get(V1).status == "draft"  # type: ignore[union-attr]
+    assert stack.freeze.freeze(ANA, V1, tag)[0].status == "frozen"
+
+
+def test_a_decision_added_after_the_plan_was_read_is_not_applied_unseen(stack: Stack) -> None:
+    reviewed(stack)
+    _, plan = stack.freeze.plan(V1)
+    stack.decide(BETO, V1, item_id="T-4", verdict="reject", note="added after the plan")
+    with pytest.raises(ConflictError):
+        stack.freeze.freeze(ANA, V1, etag_of(plan.token))
+    assert ids(stack) == ["T-1", "T-2", "T-3", "T-4"]
+    _, again = stack.freeze.plan(V1)
+    assert again.token != plan.token
+    assert again.rejected == ("T-2", "T-4")
+    stack.freeze.freeze(ANA, V1, etag_of(again.token))
+    assert [r["id"] for r in read_qset(stack.path(V1)).records] == ["T-1", "T-3"]
+
+
+def test_an_item_changed_after_the_plan_was_read_changes_the_plan(stack: Stack) -> None:
+    reviewed(stack)
+    _, plan = stack.freeze.plan(V1)
+    stack.manage.put_item(ANA, V1, "T-4", item("T-4", answer="changed"), etag(stack))
+    with pytest.raises(ConflictError):
+        stack.freeze.freeze(ANA, V1, etag_of(plan.token))
+
+
+def test_the_plan_is_the_same_until_something_changes(stack: Stack) -> None:
+    reviewed(stack)
+    assert stack.freeze.plan(V1)[1].token == stack.freeze.plan(V1)[1].token
+
+
+def mirror_pair(stack: Stack) -> None:
+    mirror = item("T-1-es", lang="es", lang_origin="mirror", mirror_of="T-1")
+    draft(stack, [item("T-0"), item("T-1"), mirror])
+    stack.decide(ANA, V1, item_id="T-1", verdict="reject", note="not a good question")
+    stack.decide(ANA, V1, item_id="T-1-es", verdict="accept")
+
+
+def test_the_plan_refuses_what_the_freeze_would_refuse_and_names_the_item(stack: Stack) -> None:
+    mirror_pair(stack)  # the original of a kept mirror is rejected
+    for refused in (
+        lambda: stack.freeze.plan(V1),
+        lambda: stack.freeze.freeze(ANA, V1, None),
+        lambda: stack.freeze.freeze(ANA, V1, etag_of("0" * 32)),
+    ):
+        with pytest.raises(InvalidInputError) as caught:
+            refused()
+        assert [e.path for e in caught.value.errors] == ["/items/T-1-es/mirror_of"]
+    assert stack.database.sets.get(V1).status == "draft"  # type: ignore[union-attr]
+    assert stack.path(V1, ".prefreeze.qset.jsonl").exists() is False
+
+
+def test_a_pointer_is_rewritten_from_a_position_to_an_item_id_and_nothing_else() -> None:
+    ids = ["T-1", "T-2"]
+    assert _item_path("/items/1/mirror_of", ids) == "/items/T-2/mirror_of"
+    assert _item_path("/items/0", ids) == "/items/T-1"
+    assert _item_path("/items/2/mirror_of", ids) == "/items/2/mirror_of"  # no such position
+    assert _item_path("/header/created", ids) == "/header/created"
+    assert _item_path("/", ids) == "/"
+
+
+def test_the_plan_of_a_draft_with_nothing_left_is_refused_like_the_freeze(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    stack.decide(ANA, V1, item_id="T-1", verdict="reject", note="no")
+    with pytest.raises(InvalidInputError, match="Nothing would be left"):
+        stack.freeze.plan(V1)
+
+
+def test_a_freeze_whose_catalog_write_fails_leaves_the_draft_as_it_was(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reviewed(stack)
+    before = stack.path(V1).read_bytes()
+    row_before = stack.database.sets.get(V1)
+
+    def locked(version: object, *, expected_md5: str) -> None:
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(stack.database.sets, "save", locked)
+    with pytest.raises(OSError, match="database is locked"):
+        freeze_now(stack, ANA, V1)
+    monkeypatch.undo()
+    assert stack.path(V1).read_bytes() == before  # the reviewed file did not stay
+    assert stack.database.sets.get(V1) == row_before
+    assert ids(stack) == ["T-1", "T-2", "T-3", "T-4"]  # the rejected item is still there
+    stack.manage.put_item(ANA, V1, "T-4", item("T-4", answer="still a draft"), etag(stack))
+    # a retry sees the same reviews and freezes the right file
+    freeze_now(stack, ANA, V1)
+    frozen = read_qset(stack.path(V1))
+    assert [r["id"] for r in frozen.records] == ["T-1", "T-3", "T-4"]
+    assert f"md5 {md5(before)}" not in frozen.header["notes"]  # it names the edited draft
+
+
+def test_a_freeze_that_could_not_put_the_draft_back_is_undone_on_the_next_load(
+    stack: Stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reviewed(stack)
+    before = stack.path(V1).read_bytes()
+    real_write = stack.files.write
+    writes: list[bytes] = []
+
+    def write_once(ref: SetRef, data: bytes) -> None:
+        writes.append(data)
+        if len(writes) > 1:  # the frozen file went in; putting the draft back fails as well
+            raise OSError("disk full")
+        real_write(ref, data)
+
+    def locked(version: object, *, expected_md5: str) -> None:
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(stack.files, "write", write_once)
+    monkeypatch.setattr(stack.database.sets, "save", locked)
+    with pytest.raises(OSError, match="database is locked"):
+        freeze_now(stack, ANA, V1)
+    monkeypatch.undo()
+    frozen_bytes = stack.path(V1).read_bytes()
+    assert frozen_bytes != before  # what a process killed between the two writes leaves
+    assert stack.database.sets.get(V1).status == "draft"  # type: ignore[union-attr]
+
+    assert ids(stack) == ["T-1", "T-2", "T-3", "T-4"]  # a read already shows the draft
+    assert stack.path(V1).read_bytes() == frozen_bytes  # and writes nothing
+    stack.manage.put_item(ANA, V1, "T-4", item("T-4", answer="back"), etag_of(md5(before)))
+    assert [r["id"] for r in read_qset(stack.path(V1)).records] == ["T-1", "T-2", "T-3", "T-4"]
+    assert stack.database.sets.get(V1).status == "draft"  # type: ignore[union-attr]
+    assert [d["item_id"] for d in stack.review.list(V1)][:2] == ["T-1", "T-1"]  # reviews kept
+
+
+def test_a_prefreeze_copy_that_cannot_be_read_is_ignored(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    stack.path(V1, ".prefreeze.qset.jsonl").write_bytes(b"not a set\n")
+    other = QaBenchSetFormats().build(header(), [item("T-1"), item("T-2")])
+    stack.files.write(V1, other.data)  # the file moved under the catalog
+    assert stack.manage.get_version(V1).version.md5 == other.md5  # and still wins
+
+
+def test_an_old_prefreeze_copy_does_not_undo_later_edits(stack: Stack) -> None:
+    reviewed(stack)
+    stack.path(V1, ".prefreeze.qset.jsonl").write_bytes(stack.path(V1).read_bytes())
+    stack.manage.put_item(ANA, V1, "T-4", item("T-4", answer="later"), etag(stack))
+    other = QaBenchSetFormats().build(header(), [item("T-1")])
+    stack.files.write(V1, other.data)  # a plain crash between a file write and the catalog write
+    view = stack.manage.get_version(V1)
+    assert view.version.md5 == other.md5  # the file still wins: the copy is not this draft
+
+
 def test_freezing_keeps_the_conversion_source_in_the_header(stack: Stack) -> None:
     stack.manage.import_set(ANA, example_bytes(), name="demo", version="v1")
-    stack.freeze.freeze(ANA, V1)
+    freeze_now(stack, ANA, V1)
     assert read_qset(stack.path(V1)).header["source"]["file"] == "example-source.jsonl"
 
 
 def test_a_frozen_version_is_still_readable_and_exportable(stack: Stack) -> None:
     reviewed(stack)
-    row, _ = stack.freeze.freeze(ANA, V1)
+    row, _ = freeze_now(stack, ANA, V1)
     assert md5(stack.manage.export(V1)[1]) == row.md5
     assert stack.manage.get_version(V1).total == 3
     assert len(stack.review.list(V1)) == 4
@@ -803,9 +1156,9 @@ def test_a_frozen_version_is_still_readable_and_exportable(stack: Stack) -> None
 
 def test_a_version_freezes_once(stack: Stack) -> None:
     reviewed(stack)
-    stack.freeze.freeze(ANA, V1)
+    freeze_now(stack, ANA, V1)
     with pytest.raises(ForbiddenError, match="frozen"):
-        stack.freeze.freeze(ANA, V1)
+        freeze_now(stack, ANA, V1)
     with pytest.raises(ForbiddenError):
         stack.freeze.plan(V1)
 
@@ -813,43 +1166,129 @@ def test_a_version_freezes_once(stack: Stack) -> None:
 def test_only_the_owner_or_an_admin_freezes(stack: Stack) -> None:
     reviewed(stack)
     with pytest.raises(ForbiddenError, match="owner"):
-        stack.freeze.freeze(BETO, V1)
+        freeze_now(stack, BETO, V1)
     assert stack.database.sets.get(V1).status == "draft"  # type: ignore[union-attr]
-    stack.freeze.freeze(ROOT, V1)
+    freeze_now(stack, ROOT, V1)
 
 
 def test_nothing_left_to_freeze_is_refused(stack: Stack) -> None:
     draft(stack, [item("T-1")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="reject", note="no")
+    stack.decide(ANA, V1, item_id="T-1", verdict="reject", note="no")
     with pytest.raises(InvalidInputError, match="at least one item"):
-        stack.freeze.freeze(ANA, V1)
+        freeze_now(stack, ANA, V1)
     stack.manage.create(ANA, name="empty")
     with pytest.raises(InvalidInputError):
-        stack.freeze.freeze(ANA, SetRef("empty", "v1"))
+        freeze_now(stack, ANA, SetRef("empty", "v1"))
     assert stack.database.sets.get(V1).status == "draft"  # type: ignore[union-attr]
 
 
 def test_a_change_after_a_review_makes_the_review_stale_but_still_applies(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-1", verdict="accept")
     stack.manage.put_item(ANA, V1, "T-2", item("T-2", answer="later"), etag(stack))
     _, plan = stack.freeze.plan(V1)
     assert plan.stale == ("T-1",)
     assert plan.accepted == ("T-1",)
 
 
+def test_an_accept_never_counts_for_text_the_accepter_did_not_read(stack: Stack) -> None:
+    """Beto accepts T-1, the owner changes its answer, dani accepts: that is no gold."""
+    draft(stack, [item("T-1", answer="Original answer.")])
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+    before = stack.path(V1).read_bytes()
+    with pytest.raises(ItemHasDecisionsError, match="text is fixed"):
+        stack.manage.put_item(ANA, V1, "T-1", item("T-1", answer="Different."), etag(stack))
+    assert stack.path(V1).read_bytes() == before
+    stack.decide(DANI, V1, item_id="T-1", verdict="accept")
+    view = stack.manage.get_item(V1, "T-1")
+    assert view.item["answer"] == "Original answer."  # both read this text
+    assert view.review.accepted_by == ("beto", "dani")
+    _, plan = stack.freeze.plan(V1)
+    assert plan.accepted == ("T-1",)
+
+
+def test_the_error_is_a_conflict_with_a_name_of_its_own() -> None:
+    assert issubclass(ItemHasDecisionsError, ConflictError)
+    assert ItemHasDecisionsError.slug == "item-has-decisions"
+
+
+@pytest.mark.parametrize(
+    ("verdict", "extra"),
+    [
+        ("accept", {}),
+        ("reject", {"note": "no"}),
+        ("edit", {"note": "fix", "edit": {"answer": "proposed"}}),
+    ],
+)
+def test_any_decision_fixes_the_text_of_an_item(stack: Stack, verdict: str, extra: dict) -> None:
+    draft(stack, [item("T-1"), item("T-2")])
+    stack.decide(BETO, V1, item_id="T-1", verdict=verdict, **extra)
+    for who in (ANA, ROOT):
+        with pytest.raises(ItemHasDecisionsError):
+            stack.manage.put_item(who, V1, "T-1", item("T-1", answer="x"), etag(stack))
+    stack.manage.put_item(ANA, V1, "T-2", item("T-2", answer="free"), etag(stack))  # no decisions
+
+
+def test_replacing_an_item_with_its_own_text_is_allowed_and_writes_nothing(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+    before = stack.path(V1).read_bytes()
+    stack.clock.advance(days=1)
+    view = stack.manage.put_item(ANA, V1, "T-1", item("T-1"), etag(stack))
+    assert view.item == item("T-1")
+    assert stack.path(V1).read_bytes() == before
+    assert stack.database.sets.get(V1).updated_at != stack.clock.now()  # type: ignore[union-attr]
+
+
+def test_an_edit_decision_is_how_a_decided_item_changes(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-1", verdict="edit", note="fix", edit={"answer": "Corrected."})
+    freeze_now(stack, ANA, V1)
+    assert read_qset(stack.path(V1)).records[0]["answer"] == "Corrected."
+
+
+def test_an_accept_after_an_edit_decision_is_an_accept_of_the_text_in_the_draft(
+    stack: Stack,
+) -> None:
+    draft(stack, [item("T-1")])
+    stack.decide(ANA, V1, item_id="T-1", verdict="edit", note="fix", edit={"answer": "Corrected."})
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+    stack.decide(DANI, V1, item_id="T-1", verdict="accept")
+    freeze_now(stack, ANA, V1)
+    assert read_qset(stack.path(V1)).records[0]["answer"] == item("T-1")["answer"]
+
+
+def test_the_id_of_a_deleted_decided_item_is_not_reused(stack: Stack) -> None:
+    draft(stack, [item("T-1"), item("T-2")])
+    stack.decide(BETO, V1, item_id="T-2", verdict="accept")
+    stack.manage.delete_item(ANA, V1, "T-2", etag(stack))
+    with pytest.raises(ItemHasDecisionsError, match="Use a new id"):
+        stack.manage.add_item(ANA, V1, item("T-2", answer="new text"), etag(stack))
+    stack.manage.add_item(ANA, V1, item("T-3"), etag(stack))
+    assert ids(stack) == ["T-1", "T-3"]
+
+
+def test_a_new_version_starts_free_of_decisions(stack: Stack) -> None:
+    draft(stack, [item("T-1")])
+    stack.decide(BETO, V1, item_id="T-1", verdict="accept")
+    freeze_now(stack, ANA, V1)
+    stack.manage.create(ANA, name="demo", copy_from="v1")
+    stack.manage.put_item(ANA, V2, "T-1", item("T-1", answer="v2 text"), etag(stack, V2))
+
+
 def test_a_decision_about_a_deleted_item_is_listed_as_unknown(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2")])
-    stack.review.add(BETO, V1, item_id="T-2", verdict="accept")
+    stack.decide(BETO, V1, item_id="T-2", verdict="accept")
     stack.manage.delete_item(ANA, V1, "T-2", etag(stack))
     _, plan = stack.freeze.plan(V1)
     assert plan.unknown == ("T-2",)
-    assert stack.freeze.freeze(ANA, V1)[0].items == 1
+    assert freeze_now(stack, ANA, V1)[0].items == 1
 
 
 def test_needs_second_is_listed_but_the_item_is_kept(stack: Stack) -> None:
     draft(stack, [item("T-1"), item("T-2")])
-    stack.review.add(ANA, V1, item_id="T-1", verdict="accept")
+    stack.decide(ANA, V1, item_id="T-1", verdict="accept")
     _, plan = stack.freeze.plan(V1)
     assert plan.needs_second == ("T-1",)
     assert plan.items_after == 2
@@ -857,7 +1296,7 @@ def test_needs_second_is_listed_but_the_item_is_kept(stack: Stack) -> None:
 
 def test_a_frozen_set_can_be_the_start_of_the_next_version(stack: Stack) -> None:
     reviewed(stack)
-    stack.freeze.freeze(ANA, V1)
+    freeze_now(stack, ANA, V1)
     nxt = stack.manage.create(BETO, name="demo", copy_from="v1")
     assert nxt.ref == V2 and nxt.status == "draft"
     assert ids(stack, V2) == ["T-1", "T-3", "T-4"]
@@ -876,6 +1315,65 @@ def test_a_file_that_moved_under_the_catalog_wins(stack: Stack) -> None:
     assert view.version.items == 2
     stack.manage.add_item(ANA, V1, item("T-3"), etag_of(other.md5))  # the file's etag works
     assert stack.database.sets.get(V1).items == 3  # type: ignore[union-attr]
+
+
+def frozen(stack: Stack) -> tuple[SetRef, str]:
+    reviewed(stack)
+    row, _ = freeze_now(stack, ANA, V1)
+    return V1, row.md5
+
+
+def test_a_frozen_file_that_changed_is_a_server_problem_and_its_md5_stays(stack: Stack) -> None:
+    ref, frozen_md5 = frozen(stack)
+    changed = QaBenchSetFormats().build(header(), [item("T-1", answer="changed on disk")])
+    stack.files.write(ref, changed.data)
+    tag = etag_of(frozen_md5)
+    reads = (
+        lambda: stack.manage.get_version(ref),
+        lambda: stack.manage.get_item(ref, "T-1"),
+        lambda: stack.manage.export(ref),
+        lambda: stack.freeze.plan(ref),
+        lambda: stack.manage.create(BETO, name="demo", copy_from="v1"),
+    )
+    for read in reads:
+        with pytest.raises(CorruptStoreError, match="no longer has the md5"):
+            read()
+    writes = (
+        lambda: stack.manage.put_item(ANA, ref, "T-1", item("T-1"), tag),
+        lambda: stack.manage.add_item(ANA, ref, item("T-9"), tag),
+        lambda: stack.manage.delete_item(ANA, ref, "T-1", tag),
+        lambda: stack.decide(BETO, ref, item_id="T-1", verdict="accept"),
+        lambda: freeze_now(stack, ANA, ref),
+    )
+    for write in writes:
+        with pytest.raises((ForbiddenError, CorruptStoreError)):
+            write()
+    row = stack.database.sets.get(ref)
+    assert row is not None
+    assert (row.status, row.md5) == ("frozen", frozen_md5)  # nothing rewrote the identity
+    assert stack.database.sets.versions_of("demo") == [row]
+
+
+def test_the_catalog_listing_survives_a_frozen_file_that_changed(stack: Stack) -> None:
+    ref, _ = frozen(stack)
+    stack.files.write(ref, QaBenchSetFormats().build(header(), [item("T-1")]).data)
+    listing = stack.manage.list_sets()
+    assert listing[0].versions[0].progress is None
+
+
+def test_a_draft_whose_file_moved_is_still_repaired_by_a_write_of_its_owner_only(
+    stack: Stack,
+) -> None:
+    draft(stack, [item("T-1")])
+    other = QaBenchSetFormats().build(header(), [item("T-1"), item("T-2")])
+    stack.files.write(V1, other.data)
+    with pytest.raises(ForbiddenError):  # not the owner: refused before anything is repaired
+        stack.manage.put_item(BETO, V1, "T-1", item("T-1"), etag_of(other.md5))
+    row = stack.database.sets.get(V1)
+    assert row is not None and row.items == 1
+    stack.manage.put_item(ANA, V1, "T-1", item("T-1", answer="x"), etag_of(other.md5))
+    row = stack.database.sets.get(V1)
+    assert row is not None and row.items == 2
 
 
 def test_a_catalog_entry_without_a_file_is_a_server_problem(stack: Stack) -> None:
@@ -929,7 +1427,7 @@ def test_parallel_reviews_all_land_as_whole_lines(stack: Stack) -> None:
     draft(stack, [item("T-1")])
     people = [Actor(f"user{n}") for n in range(12)]
     with ThreadPoolExecutor(8) as pool:
-        list(pool.map(lambda p: stack.review.add(p, V1, item_id="T-1", verdict="accept"), people))
+        list(pool.map(lambda p: stack.decide(p, V1, item_id="T-1", verdict="accept"), people))
     lines = stack.review.list(V1)
     assert sorted(line["reviewer"] for line in lines) == sorted(p.username for p in people)
     assert len(read_reviews(stack.path(V1, ".reviews.jsonl")).records) == 12

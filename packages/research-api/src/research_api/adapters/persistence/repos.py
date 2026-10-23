@@ -303,6 +303,22 @@ class SqlSetCatalog:
         )
         try:
             with DbSession(self._engine) as db, db.begin():
+                other = db.scalar(
+                    select(ArtifactRow.name)
+                    .where(
+                        ArtifactRow.kind == QSET_KIND,
+                        func.lower(ArtifactRow.name) == version.ref.name.lower(),
+                        ArtifactRow.name != version.ref.name,
+                    )
+                    .limit(1)
+                )
+                if other is not None:
+                    # Names are case sensitive here, but a folder per name is not on a macOS or
+                    # Windows disk: "Demo" would write over the files of "demo".
+                    raise ConflictError(
+                        f"A set named {other} exists. Names that differ only in capitals "
+                        "are the same name."
+                    )
                 db.add(row)
         except IntegrityError:
             raise ConflictError(f"{version.ref.header_name} already exists.") from None
@@ -311,7 +327,11 @@ class SqlSetCatalog:
         with DbSession(self._engine) as db, db.begin():
             result = db.execute(
                 update(ArtifactRow)
-                .where(*self._where(version.ref), ArtifactRow.md5 == expected_md5)
+                .where(
+                    *self._where(version.ref),
+                    ArtifactRow.md5 == expected_md5,
+                    ArtifactRow.status == "draft",  # a frozen row is never rewritten
+                )
                 .values(
                     status=version.status,
                     owner=version.owner,
@@ -324,11 +344,11 @@ class SqlSetCatalog:
             )
             if _count(result) == 1:
                 return
-            exists = db.scalar(
-                select(func.count()).select_from(ArtifactRow).where(*self._where(version.ref))
-            )
-        if not exists:
+            current = db.scalar(select(ArtifactRow.status).where(*self._where(version.ref)))
+        if current is None:
             raise NotFoundError(f"No such version {version.ref.header_name}.")
+        if current == "frozen":
+            raise ConflictError(f"{version.ref.header_name} is frozen and is never saved over.")
         raise ConflictError("The version changed while this request ran.")
 
     def delete(self, ref: SetRef) -> None:

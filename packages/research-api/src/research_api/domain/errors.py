@@ -47,6 +47,12 @@ class ConflictError(ResearchApiError):
     slug = "conflict"
 
 
+class ItemHasDecisionsError(ConflictError):
+    """An item that people have decided on keeps its text: an accept is about that text."""
+
+    slug = "item-has-decisions"
+
+
 class PreconditionRequiredError(ResearchApiError):
     """A write that needs ``If-Match`` came without it."""
 

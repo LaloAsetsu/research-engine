@@ -8,14 +8,16 @@ dicts, so this module needs neither the format library nor a web framework.
 
 from __future__ import annotations
 
+import hashlib
 import re
+import zlib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
 from .auth import Role, User
-from .errors import ForbiddenError
+from .errors import ForbiddenError, InvalidInputError, TooLargeError
 
 QSET_FORMAT = "qset/1"
 REVIEWS_FORMAT = "reviews/1"
@@ -34,6 +36,8 @@ MAX_REVIEW_BYTES = 256 * 1024
 DEFAULT_PAGE = 50
 MAX_PAGE = 200
 MAX_REPORTED_PROBLEMS = 100
+MAX_ITEM_ID_LENGTH = 200
+"""The routes take an item id in the path, so a longer one could be stored and never reached."""
 QUESTION_PREVIEW = 240
 
 SetStatus = Literal["draft", "frozen"]
@@ -43,6 +47,59 @@ VERDICTS = ("accept", "edit", "reject")
 
 # Two different people must accept an item before it counts as gold (REQ-GS-5).
 ACCEPTS_FOR_GOLD = 2
+
+
+GZIP_MAGIC = b"\x1f\x8b"
+MAX_GZIP_MEMBERS = 1000
+"""More gzip members than any real file has. Each empty one is 20 bytes, so without a cap a 20 MiB
+upload would be a million members, and each one costs a little."""
+_FEED = 64 * 1024
+"""Input handed to the unzipper at a time. ``unused_data`` copies whatever follows the end of a
+member, so a member must never be offered the whole rest of the upload: that copy, repeated for
+every member, is quadratic."""
+
+
+def unzip_upload(data: bytes, limit: int) -> bytes:
+    """``data`` as plain bytes: unzipped if it is gzip, never more than ``limit`` bytes long.
+
+    A gzip file of zeros shrinks a thousand to one, so the size of the upload says nothing about
+    the size of what it holds. The unzipping stops one byte past ``limit`` (``TooLargeError``).
+    Several gzip members one after another are read as one, as ``gzip`` does, up to
+    ``MAX_GZIP_MEMBERS``. The work is linear in the size of the upload. What comes out must not be
+    gzip again: a reader further down would unzip it with no limit.
+    """
+    if data[:2] != GZIP_MAGIC:
+        return data
+    out = bytearray()
+    view = memoryview(data)
+    at = 0
+    members = 0
+    while at < len(view):
+        if bytes(view[at : at + 2]) != GZIP_MAGIC:
+            raise InvalidInputError("The file is not valid gzip: something follows the data.")
+        members += 1
+        if members > MAX_GZIP_MEMBERS:
+            raise InvalidInputError(
+                f"The file is not valid gzip: it has over {MAX_GZIP_MEMBERS} members."
+            )
+        member = zlib.decompressobj(wbits=zlib.MAX_WBITS | 16)
+        while True:
+            chunk = view[at : at + _FEED]
+            if not chunk:
+                raise InvalidInputError("The file is not valid gzip: it ends too soon.")
+            try:
+                out += member.decompress(chunk, limit + 1 - len(out))
+            except zlib.error:
+                raise InvalidInputError("The file is not valid gzip.") from None
+            if len(out) > limit:
+                raise TooLargeError(f"The file is over {limit} bytes once it is unzipped.")
+            if member.eof:
+                at += len(chunk) - len(member.unused_data)
+                break
+            at += len(chunk)
+    if bytes(out[:2]) == GZIP_MAGIC:
+        raise InvalidInputError("The file is gzip inside gzip. Send it zipped once.")
+    return bytes(out)
 
 
 def valid_name(text: str) -> bool:
@@ -166,16 +223,35 @@ def etag_of(md5: str) -> str:
 
 
 def if_match_allows(header: str, md5: str) -> bool:
-    """Whether an ``If-Match`` header names the current version (or is ``*``)."""
+    """Whether an ``If-Match`` header names the current version.
+
+    ``*`` never does: it would say "whatever is there", which is the lost update that the header
+    exists to stop (``has_wildcard`` lets the caller say so).
+    """
     for part in header.split(","):
         tag = part.strip()
-        if tag == "*":
-            return True
         if tag.startswith("W/"):  # a weak tag never matches a write (RFC 9110, section 13.1.1)
             continue
         if tag.strip('"') == md5 and tag.startswith('"') and tag.endswith('"'):
             return True
     return False
+
+
+def has_wildcard(header: str) -> bool:
+    return any(part.strip() == "*" for part in header.split(","))
+
+
+def plan_token(draft_md5: str, reviews: bytes | None) -> str:
+    """Names what a freeze would apply: this draft and exactly these decisions.
+
+    A decision added, or an item changed, after the plan was read gives another token, so a freeze
+    only applies a plan that somebody has seen.
+    """
+    digest = hashlib.sha256()
+    digest.update(draft_md5.encode("ascii"))
+    digest.update(b"\n")
+    digest.update(reviews or b"")
+    return digest.hexdigest()[:32]
 
 
 def require_editable(actor: Actor, version: SetVersion) -> None:
@@ -400,3 +476,5 @@ class FreezePlan:
     needs_second: tuple[str, ...]
     stale: tuple[str, ...]
     unknown: tuple[str, ...]
+    token: str
+    """Names this plan (``plan_token``); the freeze must send it back."""

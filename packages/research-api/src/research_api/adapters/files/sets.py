@@ -1,8 +1,8 @@
 """The files of the question sets: ``<root>/<name>/<version>.qset.jsonl`` and its reviews.
 
 Every file is private (mode 0600) in a private folder. A file is replaced all at once (written
-beside it, flushed, then renamed over it), so a reader never sees half of a set. Reviews are only
-ever appended.
+beside it, flushed, renamed over it, and the folder flushed), so a reader never sees half of a set.
+Reviews are only ever appended.
 """
 
 from __future__ import annotations
@@ -55,11 +55,17 @@ class SetFileStore:
         folder = self._make_folder(ref)
         self._replace(folder, self._path(ref, SET_SUFFIX), data)
 
-    def keep_copy(self, ref: SetRef, label: str, data: bytes) -> None:
+    def _copy_path(self, ref: SetRef, label: str) -> Path:
         if not label.isalnum():
             raise ValueError("a copy label is letters and digits only")
+        return self._folder(ref) / f"{ref.version}.{label}{SET_SUFFIX}"
+
+    def keep_copy(self, ref: SetRef, label: str, data: bytes) -> None:
         folder = self._make_folder(ref)
-        self._replace(folder, folder / f"{ref.version}.{label}{SET_SUFFIX}", data)
+        self._replace(folder, self._copy_path(ref, label), data)
+
+    def read_copy(self, ref: SetRef, label: str) -> bytes | None:
+        return self._read(self._copy_path(ref, label))
 
     def read_reviews(self, ref: SetRef) -> bytes | None:
         return self._read(self._path(ref, REVIEWS_SUFFIX))
@@ -79,6 +85,15 @@ class SetFileStore:
             os.fsync(stream.fileno())
 
     @staticmethod
+    def _sync_folder(folder: Path) -> None:
+        """Flush the folder's own entry, or a power cut can lose the rename."""
+        descriptor = os.open(folder, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    @staticmethod
     def _replace(folder: Path, target: Path, data: bytes) -> None:
         descriptor, temp_name = tempfile.mkstemp(dir=folder, prefix=".tmp-", suffix=".part")
         temp = Path(temp_name)
@@ -89,6 +104,7 @@ class SetFileStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             temp.replace(target)
+            SetFileStore._sync_folder(folder)
         except BaseException:
             with contextlib.suppress(FileNotFoundError):
                 temp.unlink()

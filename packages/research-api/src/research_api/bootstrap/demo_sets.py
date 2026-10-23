@@ -212,9 +212,15 @@ def _file(name: str, version: str, items: list[dict[str, Any]], notes: str) -> b
     ).encode()
 
 
+def _decide(sets: SetServices, who: Actor, ref: SetRef, **decision: Any) -> None:
+    """A decision made on the draft as it is now, the way a reviewer who just read it makes it."""
+    etag = etag_of(sets.manage.get_version(ref).version.md5)
+    sets.review.add(who, ref, if_match=etag, **decision)
+
+
 def seed_demo_sets(sets: SetServices) -> None:
     """Fill an empty catalog with the demo sets (fake mode only)."""
-    manage, review = sets.manage, sets.review
+    manage = sets.manage
     v1 = SetRef("demo-papers", "v1")
     manage.import_set(
         OWNER,
@@ -223,11 +229,12 @@ def seed_demo_sets(sets: SetServices) -> None:
         version=v1.version,
     )
     for who, item_id in [(OWNER, "DP-001"), (REVIEWER, "DP-001"), (OWNER, "DP-002")]:
-        review.add(who, v1, item_id=item_id, verdict="accept")
-    review.add(REVIEWER, v1, item_id="DP-002", verdict="accept")
-    review.add(OWNER, v1, item_id="DP-004", verdict="accept")
-    review.add(OWNER, v1, item_id="DP-006", verdict="reject", note="Adds nothing over DP-001.")
-    sets.freeze.freeze(OWNER, v1)
+        _decide(sets, who, v1, item_id=item_id, verdict="accept")
+    _decide(sets, REVIEWER, v1, item_id="DP-002", verdict="accept")
+    _decide(sets, OWNER, v1, item_id="DP-004", verdict="accept")
+    _decide(sets, OWNER, v1, item_id="DP-006", verdict="reject", note="Adds nothing over DP-001.")
+    _, plan = sets.freeze.plan(v1)
+    sets.freeze.freeze(OWNER, v1, etag_of(plan.token))
 
     v2 = manage.create(REVIEWER, name="demo-papers", copy_from="v1").ref
     extra = _item(
@@ -240,11 +247,12 @@ def seed_demo_sets(sets: SetServices) -> None:
     )
     row = manage.get_version(v2).version
     manage.add_item(REVIEWER, v2, extra, etag_of(row.md5))
-    review.add(OWNER, v2, item_id="DP-007", verdict="accept")
-    review.add(OWNER, v2, item_id="DP-001", verdict="accept")
-    review.add(REVIEWER, v2, item_id="DP-001", verdict="accept")
-    review.add(REVIEWER, v2, item_id="DP-004", verdict="reject", note="The method is ambiguous.")
-    review.add(
+    _decide(sets, OWNER, v2, item_id="DP-007", verdict="accept")
+    _decide(sets, OWNER, v2, item_id="DP-001", verdict="accept")
+    _decide(sets, REVIEWER, v2, item_id="DP-001", verdict="accept")
+    _decide(sets, REVIEWER, v2, item_id="DP-004", verdict="reject", note="The method is ambiguous.")
+    _decide(
+        sets,
         OWNER,
         v2,
         item_id="DP-002",

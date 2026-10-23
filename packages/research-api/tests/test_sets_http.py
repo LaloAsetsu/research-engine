@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from helpers import LOOPBACK, live_settings, prepare_live
 from qa_bench.convert import SHAPES, from_qset
 from qa_bench.formats import load_bytes
-from sets_helpers import SOURCES, example_bytes, example_item, item, qset_bytes
+from sets_helpers import SOURCES, broken, example_bytes, example_item, item, qset_bytes
 
 from research_api.bootstrap import Container, Settings, build_container
 from research_api.bootstrap.seed import SeedUser
@@ -49,6 +49,17 @@ class Api:
         return self.client.request(method, BASE + path, headers=headers, **kw)
 
     def post(self, path: str, **kw: Any):
+        if path.endswith("/reviews") and "if-match" not in {
+            h.lower() for h in kw.get("headers", {})
+        }:
+            # A reviewer decides on the draft they just read, and says so in If-Match.
+            read = self.get(path[: -len("/reviews")]).headers.get("etag")
+            if read is not None:
+                kw["headers"] = {"If-Match": read, **kw.get("headers", {})}
+        return self.send("POST", path, **kw)
+
+    def post_as_sent(self, path: str, **kw: Any):
+        """A post with exactly the headers given (no If-Match added for a review)."""
         return self.send("POST", path, **kw)
 
     def put(self, path: str, **kw: Any):
@@ -105,6 +116,14 @@ def etag_of_version(api: Api, name: str = "mine", version: str = "v1") -> str:
 
 def v(name: str = "mine", version: str = "v1") -> str:
     return f"/{name}/versions/{version}"
+
+
+def freeze(api: Api, path: str | None = None, **kw: Any):
+    """Read the plan, then freeze exactly that plan, as the web app does."""
+    path = path or v()
+    plan = api.get(path + "/freeze")
+    assert plan.status_code == 200, plan.text
+    return api.post(path + "/freeze", headers={"If-Match": plan.headers["etag"]}, **kw)
 
 
 # --- who may call ---------------------------------------------------------------------------------
@@ -232,6 +251,32 @@ def test_a_taken_name_is_a_conflict_and_a_copy_is_the_next_version(beto: Api) ->
     assert copy.json()["version"] == "v2"
 
 
+@pytest.mark.parametrize("other", ["Mine", "MINE"])
+def test_a_name_that_differs_only_in_capitals_is_a_409_and_the_first_set_is_untouched(
+    ana: Api, beto: Api, other: str
+) -> None:
+    """On a case-insensitive disk 'Mine' and 'mine' are one folder: the catalog must refuse the
+    second whatever the disk is, or it writes over the first (here a frozen version)."""
+    new_draft(ana, [item("T-1")])
+    frozen = freeze(ana)
+    assert frozen.status_code == 200
+    before = beto.get(v() + "/export").content
+    attempts = [
+        beto.post("", json={"name": other}),
+        beto.post(f"/import?name={other}", content=qset_bytes([item("T-9")])),
+        beto.post("/import", content=qset_bytes([item("T-9")], f"{other}/v4")),
+        beto.post(f"/import?name={other}&version=v2", content=qset_bytes([item("T-9")])),
+    ]
+    for response in attempts:
+        assert response.status_code == 409, response.text
+        assert response.headers["content-type"] == PROBLEM
+        assert "same name" in response.json()["detail"]
+    assert beto.get(v() + "/export").content == before
+    assert hashlib.md5(before).hexdigest() == frozen.json()["version"]["md5"]
+    assert beto.get(v(other)).status_code == 404
+    assert [x["name"] for x in beto.get("").json() if x["name"].lower() == "mine"] == ["mine"]
+
+
 def test_a_copy_of_a_set_that_does_not_exist(beto: Api) -> None:
     assert beto.post("", json={"name": "ghost", "copy_from": "v1"}).status_code == 404
 
@@ -342,6 +387,38 @@ def test_a_gzip_upload(beto: Api) -> None:
     )
 
 
+def test_a_small_gzip_that_unzips_far_past_the_cap_is_a_413_and_stores_nothing(beto: Api) -> None:
+    bomb = gzip.compress(qset_bytes([item("T-1")]) + b"\n" * (rules.MAX_IMPORT_BYTES + 1))
+    assert len(bomb) < 100_000  # far under the 20 MiB the upload cap counts
+    response = beto.post("/import?name=bomb", content=bomb)
+    assert response.status_code == 413
+    assert response.headers["content-type"] == PROBLEM
+    assert "unzipped" in response.json()["detail"]
+    assert beto.get(v("bomb")).status_code == 404
+
+
+def test_an_upload_of_empty_gzip_members_is_refused_and_stores_nothing(beto: Api) -> None:
+    """160 000 members took 3.5 s and a full 20 MiB upload minutes, in a thread of the single
+    process: one member could stall the team. The speed is checked by counting work in the
+    domain test, not by a clock."""
+    member = gzip.compress(b"")
+    upload = member * 160_000
+    response = beto.post("/import?name=hollow", content=upload)
+    assert response.status_code == 422
+    assert response.headers["content-type"] == PROBLEM
+    assert "members" in response.json()["detail"]
+    assert beto.get(v("hollow")).status_code == 404
+
+
+def test_gzip_inside_gzip_and_broken_gzip_are_a_422(beto: Api) -> None:
+    twice = gzip.compress(gzip.compress(example_bytes()))
+    for body in (twice, gzip.compress(example_bytes())[:-6], b"\x1f\x8b not gzip"):
+        response = beto.post("/import?name=odd", content=body)
+        assert response.status_code == 422, response.text
+        assert response.headers["content-type"] == PROBLEM
+    assert beto.get(v("odd")).status_code == 404
+
+
 def test_a_refused_file_says_where_and_stores_nothing(beto: Api) -> None:
     bad = qset_bytes([item("T-1"), item("T-2", form="multi_chain")])
     response = beto.post("/import?name=mine", content=bad)
@@ -350,6 +427,19 @@ def test_a_refused_file_says_where_and_stores_nothing(beto: Api) -> None:
     paths = {e["path"] for e in response.json()["errors"]}
     assert {"/lines/3/synthesis", "/lines/3/necessity"} <= paths
     assert beto.get(v("mine")).status_code == 404
+
+
+def test_an_item_id_over_the_length_the_routes_accept_is_refused_at_import(beto: Api) -> None:
+    longest = item("a" * rules.MAX_ITEM_ID_LENGTH)
+    assert beto.post("/import?name=fits", content=qset_bytes([longest])).status_code == 201
+    assert beto.get(v("fits") + f"/items/{longest['id']}").status_code == 200  # and it is reachable
+    response = beto.post(
+        "/import?name=toolong",
+        content=qset_bytes([item("T-1"), item("a" * (rules.MAX_ITEM_ID_LENGTH + 1))]),
+    )
+    assert response.status_code == 422
+    assert [e["path"] for e in response.json()["errors"]] == ["/lines/3/id"]
+    assert beto.get(v("toolong")).status_code == 404
 
 
 def test_an_empty_upload_is_a_422(beto: Api) -> None:
@@ -375,6 +465,57 @@ def test_a_body_without_a_length_is_capped_too(beto: Api, monkeypatch: pytest.Mo
 
     response = beto.post("/import?name=big", content=chunks())
     assert response.status_code == 413
+
+
+def test_a_caller_with_no_session_is_a_401_whatever_the_size_of_the_body(
+    client: TestClient,
+) -> None:
+    huge = b"x" * (rules.MAX_IMPORT_BYTES + 1024 * 1024)  # over every cap: read, it would be a 413
+    for path, body in (
+        ("/import", huge),
+        ("/validate", huge),
+        ("/mine/versions/v1/items", huge),
+        ("/mine/versions/v1/reviews", huge),
+        ("/import", b"small"),
+        ("/validate", b"{}"),
+    ):
+        response = client.post(BASE + path, content=body)
+        assert response.status_code == 401, (path, len(body))
+        assert response.headers["content-type"] == PROBLEM
+
+
+def test_a_session_without_the_csrf_header_is_refused_before_the_body_is_read(ana: Api) -> None:
+    huge = b"x" * (rules.MAX_IMPORT_BYTES + 1024 * 1024)
+    assert ana.client.post(BASE + "/import", content=huge).status_code == 403
+
+
+@pytest.mark.parametrize("name", ["import", "validate", "reviews", "freeze", "items"])
+def test_the_cap_follows_the_route_not_the_end_of_the_path(
+    beto: Api, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    new_draft(beto, [item(name)])
+    monkeypatch.setattr(rules, "MAX_ITEM_BYTES", 300)
+    response = beto.put(
+        v() + f"/items/{name}",
+        json=item(name, notes="n" * 1000),
+        headers={"If-Match": etag_of_version(beto)},
+    )
+    assert response.status_code == 413, response.text  # the item cap, not 20 MiB or 256 KiB
+
+
+def test_the_import_and_review_routes_keep_their_own_caps(
+    beto: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    new_draft(beto, [item("T-1")])
+    monkeypatch.setattr(rules, "MAX_REVIEW_BYTES", 300)
+    monkeypatch.setattr(rules, "MAX_ITEM_BYTES", 100_000)
+    note = {"item_id": "T-1", "verdict": "reject", "note": "n" * 1000}
+    assert beto.post(v() + "/reviews", json=note).status_code == 413
+    big_item = item("T-9", notes="n" * 1000)
+    done = beto.post(v() + "/items", json=big_item, headers={"If-Match": etag_of_version(beto)})
+    assert done.status_code == 201  # an item may be bigger than a review
+    monkeypatch.setattr(rules, "MAX_IMPORT_BYTES", 5000)
+    assert beto.post("/validate", json={"text": "n" * 4000}).status_code == 200
 
 
 def test_an_item_body_has_a_smaller_cap(beto: Api, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -647,6 +788,54 @@ def test_only_the_owner_or_an_admin_edits_a_draft(ana: Api, beto: Api, dani: Api
     )
 
 
+def test_an_item_with_decisions_keeps_its_text_so_two_accepts_are_of_the_same_text(
+    ana: Api, beto: Api, dani: Api
+) -> None:
+    new_draft(beto, [item("T-1", answer="Original."), item("T-2")])
+    assert (
+        dani.post(v() + "/reviews", json={"item_id": "T-1", "verdict": "accept"}).status_code == 201
+    )
+    before = beto.get(v() + "/export").content
+    refused = beto.put(
+        v() + "/items/T-1",
+        json=item("T-1", answer="Different."),
+        headers={"If-Match": etag_of_version(beto)},
+    )
+    assert refused.status_code == 409
+    assert refused.headers["content-type"] == PROBLEM
+    assert refused.json()["type"] == "urn:research-api:problem:item-has-decisions"
+    assert "edit decision" in refused.json()["detail"]
+    assert beto.get(v() + "/export").content == before
+    assert (
+        ana.post(v() + "/reviews", json={"item_id": "T-1", "verdict": "accept"}).status_code == 201
+    )
+    detail = beto.get(v() + "/items/T-1").json()
+    assert detail["item"]["answer"] == "Original."
+    assert detail["review"]["state"] == "accepted"
+    assert detail["review"]["accepted_by"] == ["ana", "dani"]
+    # an item nobody decided on is still the owner's to change
+    free = beto.put(
+        v() + "/items/T-2",
+        json=item("T-2", answer="Free."),
+        headers={"If-Match": etag_of_version(beto)},
+    )
+    assert free.status_code == 200
+
+
+def test_a_deleted_item_with_decisions_cannot_have_its_id_reused(beto: Api, dani: Api) -> None:
+    new_draft(beto, [item("T-1"), item("T-2")])
+    dani.post(v() + "/reviews", json={"item_id": "T-2", "verdict": "accept"})
+    assert (
+        beto.delete(v() + "/items/T-2", headers={"If-Match": etag_of_version(beto)}).status_code
+        == 200
+    )
+    again = beto.post(
+        v() + "/items", json=item("T-2", answer="new"), headers={"If-Match": etag_of_version(beto)}
+    )
+    assert again.status_code == 409
+    assert again.json()["type"] == "urn:research-api:problem:item-has-decisions"
+
+
 def test_a_frozen_version_takes_no_write_even_from_an_admin(ana: Api) -> None:
     tag = {"If-Match": ana.get(v("demo-papers", "v1")).headers["etag"]}
     base = v("demo-papers", "v1")
@@ -661,6 +850,183 @@ def test_a_frozen_version_takes_no_write_even_from_an_admin(ana: Api) -> None:
     )
     assert ana.post(base + "/freeze").status_code == 403
     assert ana.get(base + "/freeze").status_code == 403
+
+
+# --- the qset/1 negatives of B1, through every route that takes an item ------------------------------
+
+NEGATIVES = [pytest.param(bad, where, id=name) for name, bad, where in broken()]
+
+
+def reachable_id(bad: dict[str, Any]) -> str:
+    """The id to put in a path: the item's own, unless that is the very thing that is wrong."""
+    return bad["id"] if rules.valid_item_id(str(bad["id"])) else "T-1"
+
+
+@pytest.mark.parametrize(("bad", "where"), NEGATIVES)
+def test_validate_reports_each_qset_negative_at_its_field(
+    beto: Api, bad: dict[str, Any], where: str
+) -> None:
+    response = beto.post("/validate", json={"item": bad})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert where in {e["path"] for e in body["errors"]}, body
+
+
+@pytest.mark.parametrize(("bad", "where"), NEGATIVES)
+def test_replacing_an_item_with_a_qset_negative_is_a_422_at_its_field(
+    beto: Api, bad: dict[str, Any], where: str
+) -> None:
+    target = reachable_id(bad)
+    new_draft(beto, [item(target)])
+    before = beto.get(v() + "/export").content
+    response = beto.put(
+        v() + f"/items/{target}",
+        json=bad,  # for "a bad id" the path cannot carry it: the id in the body disagrees
+        headers={"If-Match": etag_of_version(beto)},
+    )
+    assert response.status_code == 422, response.text
+    assert response.headers["content-type"] == PROBLEM
+    assert where in {e["path"] for e in response.json()["errors"]}, response.json()
+    assert beto.get(v() + "/export").content == before
+
+
+@pytest.mark.parametrize(("bad", "where"), NEGATIVES)
+def test_adding_an_item_with_a_qset_negative_is_a_422_at_its_field(
+    beto: Api, bad: dict[str, Any], where: str
+) -> None:
+    new_draft(beto, [item("T-1")])
+    before = beto.get(v() + "/export").content
+    response = beto.post(v() + "/items", json=bad, headers={"If-Match": etag_of_version(beto)})
+    assert response.status_code == 422, response.text
+    assert where in {e["path"] for e in response.json()["errors"]}, response.json()
+    assert beto.get(v() + "/export").content == before
+
+
+@pytest.mark.parametrize(("bad", "where"), NEGATIVES)
+def test_importing_a_file_with_a_qset_negative_is_a_422_at_its_line_and_field(
+    beto: Api, bad: dict[str, Any], where: str
+) -> None:
+    response = beto.post("/import?name=neg", content=qset_bytes([bad]))
+    assert response.status_code == 422, response.text
+    assert f"/lines/2{where}" in {e["path"] for e in response.json()["errors"]}, response.json()
+    assert beto.get(v("neg")).status_code == 404
+
+
+VALID_START = '{"id": "T-1", "lang": "en", "question": "q", "form": "single", "corpus": "c", "gold_papers": []'
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "[" * 20000 + "]" * 20000,
+        VALID_START + ', "x": ' + "[" * 5000 + "]" * 5000 + "}",
+        VALID_START + ', "key_facts": [{"type": "num", "value": NaN, "rel": 1}]}',
+        VALID_START + ', "key_facts": [{"type": "num", "value": 1e999, "rel": 1}]}',
+        VALID_START + ', "notes": "bad \\ud800 surrogate"}',
+        '"just a string"',
+        "[]",
+        "null",
+        "not json",
+        "",
+        "{",
+    ],
+    ids=[
+        "deep list", "deep field", "NaN", "huge number", "lone surrogate",
+        "a string", "a list", "null", "not json", "empty", "cut off",
+    ],
+)  # fmt: skip
+def test_a_hostile_item_body_is_refused_not_a_crash(beto: Api, body: str) -> None:
+    new_draft(beto, [item("T-1")])
+    before = beto.get(v() + "/export").content
+    tag = {"If-Match": etag_of_version(beto), "Content-Type": "application/json"}
+    for response in (
+        beto.put(v() + "/items/T-1", content=body, headers=tag),
+        beto.post(v() + "/items", content=body.replace("T-1", "T-9"), headers=tag),
+    ):
+        assert response.status_code in {400, 422}, response.text
+        assert response.headers["content-type"] == PROBLEM
+    assert beto.get(v() + "/export").content == before
+
+
+def test_a_key_given_twice_is_refused_as_qa_bench_refuses_it_in_a_file(beto: Api) -> None:
+    new_draft(beto, [item("T-1")])
+    before = beto.get(v() + "/export").content
+    json_type = {"Content-Type": "application/json"}
+    tag = {"If-Match": etag_of_version(beto), **json_type}
+    item_body = VALID_START + ', "answer": "first", "answer": "second"}'
+    for response in (
+        beto.put(v() + "/items/T-1", content=item_body, headers=tag),
+        beto.post(v() + "/items", content=item_body.replace("T-1", "T-9"), headers=tag),
+        beto.post("/validate", content='{"item": ' + item_body + "}", headers=json_type),
+        beto.post(
+            v() + "/reviews",
+            content='{"item_id": "T-1", "verdict": "accept", "verdict": "reject"}',
+            headers=json_type,
+        ),
+        beto.post("", content='{"name": "a", "name": "b"}', headers=json_type),
+    ):
+        assert response.status_code == 400, response.text
+        assert response.headers["content-type"] == PROBLEM
+        assert "twice" in response.json()["detail"]
+        assert "first" not in response.text and "second" not in response.text
+    assert beto.get(v() + "/export").content == before
+    assert beto.get(v() + "/reviews").json() == []
+
+
+def test_accents_math_and_symbols_survive_every_step(beto: Api) -> None:
+    text = "¿Qué símbolo usa \u03c8 para \u2202/\u2202t en \u91cf\u5b50? \U0001f9ea $\\hat{H}|\\psi\\rangle$"
+    new_draft(beto, [item("T-1")])
+    done = beto.put(
+        v() + "/items/T-1",
+        json=item("T-1", question=text, lang="es"),
+        headers={"If-Match": etag_of_version(beto)},
+    )
+    assert done.status_code == 200
+    assert done.json()["item"]["question"] == text
+    exported = beto.get(v() + "/export")
+    raw = exported.content.decode("utf-8")
+    assert "símbolo" in raw and "量子" in raw  # written as UTF-8, not as \\u escapes
+    assert json.loads(raw.splitlines()[1])["question"] == text
+    assert md5(exported.content) == beto.get(v()).json()["version"]["md5"]
+    assert beto.get(v() + "?q=s%C3%ADmbolo").json()["total"] == 1
+    kept = beto.post(
+        "/import?name=again",
+        content=exported.content,
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert kept.status_code == 201
+    assert beto.get(v("again") + "/items/T-1").json()["item"]["question"] == text
+
+
+def test_an_item_sent_as_plain_text_is_refused(beto: Api) -> None:
+    new_draft(beto, [item("T-1")])
+    response = beto.put(
+        v() + "/items/T-1",
+        content=json.dumps(item("T-1")),
+        headers={"If-Match": etag_of_version(beto), "Content-Type": "text/plain"},
+    )
+    assert response.status_code in {400, 422}
+
+
+def test_hostile_review_and_validate_bodies_are_refused(beto: Api) -> None:
+    new_draft(beto, [item("T-1")])
+    json_type = {"Content-Type": "application/json"}
+    for path, body in (
+        ("/reviews", '{"item_id": "T-1", "verdict": "accept", "note": "bad \\ud800"}'),
+        ("/reviews", '{"item_id": "T-1", "verdict": "accept", "verdict": "reject"}'),
+        ("/reviews", '{"item_id": "T-1", "verdict": "edit", "note": "n", "edit": {"a": NaN}}'),
+        ("/reviews", "[]"),
+    ):
+        response = beto.post(v() + path, content=body, headers=json_type)
+        assert response.status_code in {201, 400, 422}, (body, response.text)
+        assert response.status_code != 500
+    # the file of decisions is still a file the format accepts
+    lines = beto.get(v() + "/reviews").json()
+    assert all(line["item_id"] == "T-1" for line in lines)
+    for body in ('{"text": "bad \\ud800"}', '{"item": {"id": 1e999}}', '{"item": []}', "{"):
+        response = beto.post("/validate", content=body, headers=json_type)
+        assert response.status_code in {200, 400, 422}, (body, response.text)
 
 
 # --- reviews (S3) ------------------------------------------------------------------------------------
@@ -793,6 +1159,83 @@ def test_reviewing_an_item_that_is_not_there_is_a_404(beto: Api) -> None:
     )
 
 
+def test_a_review_without_if_match_is_a_428_and_stores_nothing(beto: Api, dani: Api) -> None:
+    new_draft(beto, [item("T-1")])
+    body = {"item_id": "T-1", "verdict": "accept"}
+    for headers in ({}, {"If-Match": "*"}, {"If-Match": ""}):
+        response = dani.post_as_sent(v() + "/reviews", json=body, headers=headers)
+        assert response.status_code == 428, headers
+        assert response.headers["content-type"] == PROBLEM
+    assert dani.get(v() + "/reviews").json() == []
+
+
+def test_a_review_made_on_an_old_draft_is_a_409_and_stores_nothing(beto: Api, dani: Api) -> None:
+    new_draft(beto, [item("T-1"), item("T-2")])
+    read = etag_of_version(dani)
+    changed = beto.put(
+        v() + "/items/T-2", json=item("T-2", answer="Changed."), headers={"If-Match": read}
+    )
+    assert changed.status_code == 200
+    body = {"item_id": "T-1", "verdict": "accept"}
+    for sent in (read, 'W/"x"', '"0123456789abcdef0123456789abcdef"', "junk"):
+        response = dani.post_as_sent(v() + "/reviews", json=body, headers={"If-Match": sent})
+        assert response.status_code == 409, sent
+        assert response.headers["content-type"] == PROBLEM
+    assert dani.get(v() + "/reviews").json() == []
+
+
+def test_a_reviewer_who_read_the_old_text_cannot_accept_the_one_that_replaced_it(
+    ana: Api, beto: Api, dani: Api
+) -> None:
+    """The race of the review: beto opens T-1, ana replaces its answer, beto accepts. That accept
+    is refused, so 'accepted by beto and dani' can never be about a text beto did not read."""
+    new_draft(ana, [item("T-1", answer="Original answer.")])
+    read_by_beto = beto.get(v() + "/items/T-1").headers["etag"]
+    assert read_by_beto == etag_of_version(ana)
+    replaced = ana.put(
+        v() + "/items/T-1",
+        json=item("T-1", answer="Replaced answer."),
+        headers={"If-Match": read_by_beto},
+    )
+    assert replaced.status_code == 200
+    body = {"item_id": "T-1", "verdict": "accept"}
+    late = beto.post_as_sent(v() + "/reviews", json=body, headers={"If-Match": read_by_beto})
+    assert late.status_code == 409
+    fresh = dani.get(v() + "/items/T-1")
+    assert fresh.json()["item"]["answer"] == "Replaced answer."
+    accepted = dani.post(v() + "/reviews", json=body, headers={"If-Match": fresh.headers["etag"]})
+    assert accepted.status_code == 201
+    assert accepted.json()["set_md5"] == fresh.headers["etag"].strip('"')
+    state = ana.get(v() + "/items/T-1").json()["review"]
+    assert (state["state"], state["accepted_by"], state["gold"]) == (
+        "needs_second",
+        ["dani"],
+        False,
+    )
+    # beto reads the new text and accepts it: now two people read it
+    assert beto.post(v() + "/reviews", json=body).status_code == 201
+    state = ana.get(v() + "/items/T-1").json()["review"]
+    assert (state["state"], state["accepted_by"], state["gold"]) == (
+        "accepted",
+        ["beto", "dani"],
+        True,
+    )
+
+
+def test_every_review_line_carries_the_md5_of_the_draft_that_was_read(beto: Api, dani: Api) -> None:
+    new_draft(beto, [item("T-1")])
+    read = etag_of_version(dani)
+    dani.post(v() + "/reviews", json={"item_id": "T-1", "verdict": "accept"})
+    assert [line["set_md5"] for line in dani.get(v() + "/reviews").json()] == [read.strip('"')]
+
+
+def test_a_frozen_version_is_a_403_whatever_the_review_sends(beto: Api, dani: Api) -> None:
+    new_draft(beto, [item("T-1")])
+    assert freeze(beto).status_code == 200
+    body = {"item_id": "T-1", "verdict": "accept"}
+    assert dani.post_as_sent(v() + "/reviews", json=body).status_code == 403
+
+
 # --- freezing (S5) -----------------------------------------------------------------------------------
 
 
@@ -826,9 +1269,62 @@ def test_the_preview_shows_the_reviews_it_would_apply_and_changes_nothing(
     assert beto.get(v()).headers["etag"] == before
 
 
+def test_the_preview_names_its_plan_and_the_freeze_applies_only_that_plan(
+    ana: Api, beto: Api
+) -> None:
+    reviewed_draft(beto, ana)
+    preview = beto.get(v() + "/freeze")
+    tag = preview.headers["etag"]
+    assert preview.json()["plan"]["etag"] == tag
+    before = beto.get(v() + "/export").content
+    no_header = beto.post(v() + "/freeze")
+    assert no_header.status_code == 428
+    assert no_header.headers["content-type"] == PROBLEM
+    assert beto.post(v() + "/freeze", headers={"If-Match": "*"}).status_code == 428
+    wrong = beto.post(v() + "/freeze", headers={"If-Match": '"' + "0" * 32 + '"'})
+    assert wrong.status_code == 409
+    # a decision added after the plan was read is not applied unseen
+    ana.post(v() + "/reviews", json={"item_id": "T-4", "verdict": "reject", "note": "late"})
+    late = beto.post(v() + "/freeze", headers={"If-Match": tag})
+    assert late.status_code == 409
+    assert "changed since you read the plan" in late.json()["detail"]
+    assert beto.get(v() + "/export").content == before
+    assert beto.get(v()).json()["version"]["status"] == "draft"
+    fresh = beto.get(v() + "/freeze")
+    assert fresh.headers["etag"] != tag
+    assert (
+        beto.post(v() + "/freeze", headers={"If-Match": fresh.headers["etag"]}).status_code == 200
+    )
+
+
+def test_the_preview_refuses_what_the_freeze_would_and_names_the_item(beto: Api) -> None:
+    mirror = item("T-1-es", lang="es", lang_origin="mirror", mirror_of="T-1")
+    new_draft(beto, [item("T-0"), item("T-1"), mirror])
+    beto.post(v() + "/reviews", json={"item_id": "T-1", "verdict": "reject", "note": "no"})
+    beto.post(v() + "/reviews", json={"item_id": "T-1-es", "verdict": "accept"})
+    for response in (beto.get(v() + "/freeze"), beto.post(v() + "/freeze")):
+        assert response.status_code == 422, response.text
+        assert [e["path"] for e in response.json()["errors"]] == ["/items/T-1-es/mirror_of"]
+    assert beto.get(v()).json()["version"]["status"] == "draft"
+
+
+def test_a_wildcard_if_match_is_not_a_version(beto: Api) -> None:
+    new_draft(beto, [item("T-1")])
+    for send in (
+        lambda: beto.put(
+            v() + "/items/T-1", json=item("T-1", answer="a"), headers={"If-Match": "*"}
+        ),
+        lambda: beto.post(v() + "/items", json=item("T-9"), headers={"If-Match": "*"}),
+        lambda: beto.delete(v() + "/items/T-1", headers={"If-Match": "*"}),
+    ):
+        response = send()
+        assert response.status_code == 428
+        assert "does not say which version" in response.json()["detail"]
+
+
 def test_freezing_applies_the_reviews_and_the_md5_never_changes_again(ana: Api, beto: Api) -> None:
     reviewed_draft(beto, ana)
-    done = beto.post(v() + "/freeze")
+    done = freeze(beto)
     assert done.status_code == 200
     version = done.json()["version"]
     assert version["status"] == "frozen"
@@ -851,7 +1347,7 @@ def test_a_frozen_set_shows_in_the_catalog_and_can_seed_a_new_version(
     ana: Api, beto: Api, dani: Api
 ) -> None:
     reviewed_draft(beto, ana)
-    beto.post(v() + "/freeze")
+    freeze(beto)
     catalog = {s["name"]: s for s in dani.get("").json()}
     assert catalog["mine"]["versions"][0]["status"] == "frozen"
     copy = dani.post("", json={"name": "mine", "copy_from": "v1"})
@@ -864,14 +1360,15 @@ def test_only_the_owner_or_an_admin_freezes(ana: Api, beto: Api, dani: Api) -> N
     reviewed_draft(beto, ana)
     assert dani.post(v() + "/freeze").status_code == 403
     assert beto.get(v()).json()["version"]["status"] == "draft"
-    assert ana.post(v() + "/freeze").status_code == 200  # an admin
+    assert freeze(ana).status_code == 200  # an admin
 
 
 def test_freezing_to_nothing_is_a_422(beto: Api) -> None:
     new_draft(beto, [item("T-1")])
     beto.post(v() + "/reviews", json={"item_id": "T-1", "verdict": "reject", "note": "no"})
-    response = beto.post(v() + "/freeze")
-    assert response.status_code == 422
+    for response in (beto.get(v() + "/freeze"), beto.post(v() + "/freeze")):
+        assert response.status_code == 422
+        assert "Nothing would be left" in response.json()["detail"]
     assert beto.get(v()).json()["version"]["status"] == "draft"
 
 
@@ -930,6 +1427,9 @@ def test_the_openapi_document_describes_every_set_operation(container: Container
     put = document["paths"]["/api/v1/sets/{name}/versions/{version}/items/{item_id}"]["put"]
     assert {p["name"] for p in put["parameters"]} >= {"name", "version", "item_id", "if-match"}
     assert "428" in put["responses"] and "409" in put["responses"]
+    review = document["paths"]["/api/v1/sets/{name}/versions/{version}/reviews"]["post"]
+    assert "if-match" in {p["name"] for p in review["parameters"]}
+    assert {"409", "428"} <= set(review["responses"])
     imported = document["paths"]["/api/v1/sets/import"]["post"]
     assert "application/octet-stream" in imported["requestBody"]["content"]
     assert document["paths"]["/api/v1/sets/{name}/versions/{version}/export"]["get"]["responses"][
@@ -989,6 +1489,65 @@ def test_a_live_service_starts_with_no_sets_and_keeps_its_files_private(
     assert [f.name for f in files] == ["v1.qset.jsonl", "v1.reviews.jsonl"]
     assert all(stat.S_IMODE(p.stat().st_mode) == 0o700 for p in folders)
     assert all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in files)
+
+
+def test_a_name_in_other_capitals_does_not_reach_the_disk_where_the_first_set_lives(
+    live: tuple[Api, Path, Path],
+) -> None:
+    """The case that corrupted a frozen version on a macOS disk, run on whatever disk this is."""
+    api, data_dir, _ = live
+    api.post("/import?name=mine", content=qset_bytes([item("T-1")]))
+    frozen = freeze(api)
+    assert frozen.status_code == 200
+    path = data_dir / "sets" / "mine" / "v1.qset.jsonl"
+    on_disk = path.read_bytes()
+    assert api.post("", json={"name": "Mine"}).status_code == 409
+    assert api.post("/import?name=MINE", content=qset_bytes([item("T-2")])).status_code == 409
+    assert path.read_bytes() == on_disk
+    assert sorted(p.name for p in (data_dir / "sets").iterdir()) == ["mine"]
+    assert api.get(v()).status_code == 200
+    assert api.get(v() + "/items/T-1").status_code == 200
+
+
+def test_a_frozen_file_changed_on_disk_is_a_500_and_its_md5_is_not_rewritten(
+    live: tuple[Api, Path, Path],
+) -> None:
+    api, data_dir, _ = live
+    api.post("/import?name=mine", content=qset_bytes([item("T-1"), item("T-2")]))
+    frozen = freeze(api)
+    assert frozen.status_code == 200
+    frozen_md5 = frozen.json()["version"]["md5"]
+    path = data_dir / "sets" / "mine" / "v1.qset.jsonl"
+    path.write_bytes(qset_bytes([item("T-1", answer="changed on disk")], name="mine/v1"))
+    tag = {"If-Match": f'"{frozen_md5}"'}
+    put = api.put(v() + "/items/T-1", json=item("T-1", answer="x"), headers=tag)
+    assert put.status_code == 403
+    for response in (api.get(v()), api.get(v() + "/export"), api.get(v() + "/items/T-1")):
+        assert response.status_code == 500
+        assert response.headers["content-type"] == PROBLEM
+        assert "error_id" in response.json()
+        assert "changed on disk" not in response.text
+    catalog = {x["name"]: x for x in api.get("").json()}["mine"]["versions"][0]
+    assert (catalog["status"], catalog["md5"]) == ("frozen", frozen_md5)
+
+
+def test_a_half_written_review_line_on_disk_does_not_close_the_version(
+    live: tuple[Api, Path, Path],
+) -> None:
+    api, data_dir, _ = live
+    api.post("/import?name=mine", content=qset_bytes([item("T-1"), item("T-2")]))
+    api.post(v() + "/reviews", json={"item_id": "T-1", "verdict": "accept"})
+    reviews = data_dir / "sets" / "mine" / "v1.reviews.jsonl"
+    with reviews.open("ab") as stream:
+        stream.write(b'{"item_id": "T-2", "target": "ite')  # a crash in the middle of an append
+    for path in ("", "/items/T-1", "/reviews", "/freeze"):
+        assert api.get(v() + path).status_code == 200, path
+    assert api.get("").status_code == 200
+    done = api.post(v() + "/reviews", json={"item_id": "T-2", "verdict": "reject", "note": "no"})
+    assert done.status_code == 201
+    assert [x["item_id"] for x in api.get(v() + "/reviews").json()] == ["T-1", "T-2"]
+    assert reviews.read_bytes().endswith(b"\n")
+    assert b'"ite{' not in reviews.read_bytes()
 
 
 def test_no_item_text_or_note_reaches_the_log(live: tuple[Api, Path, Path]) -> None:

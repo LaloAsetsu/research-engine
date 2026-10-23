@@ -1,4 +1,10 @@
-"""``SetFormats`` over qa-bench: ``qset/1`` and ``reviews/1`` files, checked as qa-bench checks."""
+"""``SetFormats`` over qa-bench: ``qset/1`` and ``reviews/1`` files, checked as qa-bench checks.
+
+``dumps_line`` and ``parse_lines`` come from ``qa_bench.formats.jsonl``: the package does not list
+them in ``qa_bench.formats.__all__``, so this is the one place that reaches into the submodule.
+qa-bench unzips gzip with no limit, so this adapter takes plain bytes only; the use case unzips
+an upload under a cap first (``domain.sets.unzip_upload``).
+"""
 
 from __future__ import annotations
 
@@ -17,11 +23,12 @@ from qa_bench.formats import (
     load_bytes,
     parse,
 )
-from qa_bench.formats.jsonl import decode, dumps_line, md5_hex, parse_lines
+from qa_bench.formats.jsonl import dumps_line, md5_hex, parse_lines
 from qa_bench.reviews import ReviewError, apply_reviews
 
 from ...domain.errors import CorruptStoreError, FieldError, InvalidInputError
 from ...domain.sets import (
+    GZIP_MAGIC,
     MAX_REPORTED_PROBLEMS,
     REVIEWS_FORMAT,
     AppliedReviews,
@@ -57,6 +64,13 @@ def _points(problem: Problem) -> list[FieldError]:
         names = re.findall(r"'([^']*)'", found["names"])
         return [FieldError(f"{problem.path}/{_escape(n)}", message) for n in names]
     return [FieldError(problem.path or "/", message)]
+
+
+def _plain(data: bytes) -> bytes:
+    """``data`` itself, refused if it is gzip: qa-bench would unzip it with no limit."""
+    if data[:2] == GZIP_MAGIC:
+        raise InvalidInputError("Compressed data must be unzipped, under a cap, before it is read.")
+    return data
 
 
 def _under(prefix: str, pointer: str) -> str:
@@ -110,11 +124,11 @@ class QaBenchSetFormats:
         return SetFile(values[0][1], records, data, md5_hex(data))
 
     def read(self, data: bytes) -> SetFile:
-        loaded = load_bytes(data, QSET)
+        loaded = load_bytes(_plain(data), QSET)
         if loaded.file is None:
             raise InvalidInputError(_FILE_REFUSED, _errors(loaded.problems))
         file = loaded.file
-        return SetFile(file.header, file.records, decode(data), file.md5)
+        return SetFile(file.header, file.records, data, file.md5)
 
     def check_text(self, text: str) -> tuple[FieldError, ...]:
         return _errors(parse(text, QSET).problems)
@@ -149,7 +163,7 @@ class QaBenchSetFormats:
         try:
             file = to_qset(
                 shape,
-                data,
+                _plain(data),
                 set_name=set_name,
                 created=created,
                 corpus=corpus,
@@ -160,6 +174,11 @@ class QaBenchSetFormats:
         return BuiltSet(file.header, file.records, file.to_bytes(), file.md5)
 
     def peek_reviews(self, data: bytes) -> list[dict[str, Any]]:
+        # Every line ends in a line feed. A last line without one is an append that stopped
+        # half way (its request never got an answer), so it is not a decision.
+        whole = data.rfind(b"\n") + 1
+        if 0 < whole < len(data):
+            data = data[:whole]
         try:
             values, problems = parse_lines(data.decode("utf-8"))
         except UnicodeDecodeError as e:

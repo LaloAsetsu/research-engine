@@ -21,7 +21,9 @@ class SetCatalog(Protocol):
     def versions_of(self, name: str) -> list[SetVersion]: ...
 
     def add(self, version: SetVersion) -> None:
-        """Store a new version. ``ConflictError`` when the name and version exist."""
+        """Store a new version. ``ConflictError`` when the name and version exist, or when another
+        set has the same name apart from capitals (their folders are one on a case-insensitive
+        disk)."""
         ...
 
     def delete(self, ref: SetRef) -> None:
@@ -29,9 +31,10 @@ class SetCatalog(Protocol):
         ...
 
     def save(self, version: SetVersion, *, expected_md5: str) -> None:
-        """Replace the entry of ``version.ref`` if it still has ``expected_md5``.
+        """Replace the entry of ``version.ref`` if it is a draft that still has ``expected_md5``.
 
-        ``ConflictError`` when it changed meanwhile, ``NotFoundError`` when it is gone.
+        ``ConflictError`` when it changed meanwhile or is frozen (a frozen entry never changes),
+        ``NotFoundError`` when it is gone.
         """
         ...
 
@@ -47,6 +50,10 @@ class SetFiles(Protocol):
 
     def keep_copy(self, ref: SetRef, label: str, data: bytes) -> None:
         """Keep ``data`` beside the version under ``label`` (the draft before it was frozen)."""
+        ...
+
+    def read_copy(self, ref: SetRef, label: str) -> bytes | None:
+        """The bytes kept under ``label`` by ``keep_copy``, or None."""
         ...
 
     def read_reviews(self, ref: SetRef) -> bytes | None: ...

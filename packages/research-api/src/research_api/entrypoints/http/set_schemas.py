@@ -321,6 +321,10 @@ class FreezePlanOut(BaseModel):
     needs_second: list[str] = Field(description="Accepted by one person only; still kept.")
     stale: list[str] = Field(description="Decided on an earlier state of the draft.")
     unknown: list[str] = Field(description="Decisions about items the draft no longer has.")
+    etag: str = Field(
+        description="Names this plan (the `ETag` header, quoted). The freeze must send it in "
+        "`If-Match`; a decision added or an item changed since gives another one (`409`)."
+    )
 
     @classmethod
     def from_domain(cls, p: FreezePlan) -> FreezePlanOut:
@@ -334,6 +338,7 @@ class FreezePlanOut(BaseModel):
             needs_second=list(p.needs_second),
             stale=list(p.stale),
             unknown=list(p.unknown),
+            etag=etag_of(p.token),
         )
 
 

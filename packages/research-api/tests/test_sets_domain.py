@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import gzip
+import os
+import zlib
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from research_api.domain.auth import Role, User
-from research_api.domain.errors import ForbiddenError
+from research_api.domain.errors import ForbiddenError, InvalidInputError, TooLargeError
 from research_api.domain.sets import (
+    MAX_GZIP_MEMBERS,
     Actor,
     ItemFilter,
     ItemReview,
@@ -18,15 +22,18 @@ from research_api.domain.sets import (
     apply_edit,
     dominant_corpus,
     etag_of,
+    has_wildcard,
     if_match_allows,
     item_matches,
     next_version,
     parse_header_name,
+    plan_token,
     require_draft,
     require_editable,
     review_progress,
     review_states,
     summarize,
+    unzip_upload,
     valid_item_id,
     valid_name,
     valid_version,
@@ -137,7 +144,7 @@ def test_the_etag_is_the_quoted_md5() -> None:
     ("header", "allowed"),
     [
         (f'"{MD5}"', True),
-        ("*", True),
+        ("*", False),  # it does not say which version was read
         (f'"other", "{MD5}"', True),
         (f'  "{MD5}"  ', True),
         (MD5, False),  # an entity tag is quoted
@@ -149,6 +156,23 @@ def test_the_etag_is_the_quoted_md5() -> None:
 )
 def test_if_match(header: str, allowed: bool) -> None:
     assert if_match_allows(header, MD5) is allowed
+
+
+@pytest.mark.parametrize(
+    ("header", "wildcard"), [("*", True), (f'"{MD5}", *', True), (" * ", True), (f'"{MD5}"', False)]
+)
+def test_the_wildcard_is_recognised(header: str, wildcard: bool) -> None:
+    assert has_wildcard(header) is wildcard
+
+
+def test_a_plan_token_changes_with_the_draft_and_with_every_decision() -> None:
+    base = plan_token(MD5, b"header\none\n")
+    assert plan_token(MD5, b"header\none\n") == base
+    assert plan_token(MD5, b"header\none\ntwo\n") != base
+    assert plan_token("f" * 32, b"header\none\n") != base
+    assert plan_token(MD5, None) != base
+    assert plan_token(MD5, None) == plan_token(MD5, b"")
+    assert len(base) == 32 and base.isalnum()
 
 
 # --- who may change what ----------------------------------------------------------------------
@@ -388,3 +412,131 @@ def test_an_edit_replaces_the_named_fields_and_leaves_the_original() -> None:
     changed = apply_edit(original, {"answer": "b"})
     assert changed == {"id": "x", "answer": "b", "notes": "n"}
     assert original["answer"] == "a"
+
+
+# --- unzipping an upload -----------------------------------------------------------------------
+
+
+def test_plain_bytes_pass_through_untouched() -> None:
+    assert unzip_upload(b'{"a": 1}\n', 10) == b'{"a": 1}\n'
+    assert unzip_upload(b"", 10) == b""
+
+
+def test_gzip_is_unzipped_up_to_the_limit_and_not_a_byte_more() -> None:
+    assert unzip_upload(gzip.compress(b"x" * 100), 100) == b"x" * 100
+    with pytest.raises(TooLargeError, match="once it is unzipped"):
+        unzip_upload(gzip.compress(b"x" * 101), 100)
+
+
+def test_a_small_gzip_that_holds_a_great_deal_is_refused_without_unzipping_it_all() -> None:
+    bomb = gzip.compress(b"\0" * (64 * 1024 * 1024))
+    assert len(bomb) < 100_000  # the upload cap alone would let this in
+    with pytest.raises(TooLargeError):
+        unzip_upload(bomb, 1024 * 1024)
+
+
+def test_gzip_members_one_after_another_count_together() -> None:
+    two = gzip.compress(b"a" * 60) + gzip.compress(b"b" * 60)
+    assert unzip_upload(two, 120) == b"a" * 60 + b"b" * 60
+    with pytest.raises(TooLargeError):
+        unzip_upload(two, 119)
+
+
+class _Fed:
+    """Counts what ``unzip_upload`` hands to zlib, so the cost is checked in bytes, not seconds."""
+
+    def __init__(self) -> None:
+        self.objects = 0
+        self.fed = 0
+        self.largest = 0
+
+
+@pytest.fixture
+def fed(monkeypatch: pytest.MonkeyPatch) -> _Fed:
+    seen = _Fed()
+    real = zlib.decompressobj
+
+    class Spy:
+        def __init__(self, wbits: int) -> None:
+            seen.objects += 1
+            self._inner = real(wbits=wbits)
+
+        def decompress(self, data: bytes, max_length: int = 0) -> bytes:
+            seen.fed += len(data)
+            seen.largest = max(seen.largest, len(data))
+            return self._inner.decompress(data, max_length)
+
+        @property
+        def eof(self) -> bool:
+            return self._inner.eof
+
+        @property
+        def unused_data(self) -> bytes:
+            return self._inner.unused_data
+
+    monkeypatch.setattr(zlib, "decompressobj", Spy)
+    return seen
+
+
+def test_a_million_empty_gzip_members_are_refused_at_once_not_after_minutes(fed: _Fed) -> None:
+    """A 20 MiB upload of 20-byte members. Handing each member the rest of the upload made this
+    quadratic (3.5 s at 160 000 members, minutes at a million), a stall for everyone. The check
+    counts the work (members opened, bytes handed to zlib) so a loaded runner cannot fail it."""
+    member = gzip.compress(b"")
+    assert len(member) == 20
+    upload = member * (20 * 1024 * 1024 // len(member))
+    with pytest.raises(InvalidInputError, match="members"):
+        unzip_upload(upload, 20 * 1024 * 1024)
+    assert fed.objects == MAX_GZIP_MEMBERS
+    assert fed.largest <= 64 * 1024
+    assert (
+        fed.fed <= MAX_GZIP_MEMBERS * 64 * 1024
+    )  # one step per member, not the rest of the upload
+
+
+def test_the_member_cap_is_a_count_and_the_last_member_under_it_is_read() -> None:
+    member = gzip.compress(b"")
+    assert unzip_upload(member * (MAX_GZIP_MEMBERS - 1) + gzip.compress(b"end"), 10) == b"end"
+    assert unzip_upload(member * MAX_GZIP_MEMBERS, 10) == b""
+    with pytest.raises(InvalidInputError, match="members"):
+        unzip_upload(member * (MAX_GZIP_MEMBERS + 1), 10)
+
+
+def test_members_that_cross_the_feed_boundaries_are_joined_exactly() -> None:
+    """Members of every size, so a member starts, ends or spans a 64 KiB step of the reader."""
+    pieces = [os.urandom(size) for size in (1, 70_000, 5, 200_000, 0, 65_535, 65_536, 3, 150_000)]
+    upload = b"".join(gzip.compress(piece) for piece in pieces)
+    assert len(upload) > 3 * 64 * 1024
+    assert unzip_upload(upload, 10**7) == b"".join(pieces)
+    assert unzip_upload(gzip.compress(pieces[3]), 10**7) == pieces[3]
+
+
+def test_many_small_members_with_data_stay_linear(fed: _Fed) -> None:
+    pieces = [b"%d\n" % n for n in range(MAX_GZIP_MEMBERS)]
+    upload = b"".join(gzip.compress(piece) for piece in pieces)
+    assert unzip_upload(upload, 10**6) == b"".join(pieces)
+    assert fed.objects == MAX_GZIP_MEMBERS
+    assert fed.largest <= 64 * 1024
+    # Not a pass over the rest of the upload per member: at most one 64 KiB step each.
+    assert fed.fed <= MAX_GZIP_MEMBERS * 64 * 1024
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        gzip.compress(b"hello")[:-6],  # cut off
+        gzip.compress(b"hello") + b"junk",  # something after the data
+        gzip.compress(b"hello") + b"\x1f",  # one stray byte after the data
+        b"\x1f\x8b" + b"not a real stream" * 3,  # a header that leads nowhere
+    ],
+    ids=["cut off", "junk after", "one byte after", "broken"],
+)
+def test_gzip_that_is_not_valid_is_refused(data: bytes) -> None:
+    with pytest.raises(InvalidInputError):
+        unzip_upload(data, 1000)
+
+
+def test_gzip_inside_gzip_is_refused_so_nothing_further_down_unzips_it_unbounded() -> None:
+    inner = gzip.compress(b"\0" * (32 * 1024 * 1024))
+    with pytest.raises(InvalidInputError, match="gzip inside gzip"):
+        unzip_upload(gzip.compress(inner), 1024 * 1024)

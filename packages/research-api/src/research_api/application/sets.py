@@ -7,8 +7,10 @@ their read-modify-write of a file. The service runs one process, as the scope fi
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import logging
+import re
 import threading
 from dataclasses import dataclass, replace
 from typing import Any
@@ -19,6 +21,7 @@ from ..domain.errors import (
     CorruptStoreError,
     FieldError,
     InvalidInputError,
+    ItemHasDecisionsError,
     NotFoundError,
     PreconditionRequiredError,
     TooLargeError,
@@ -42,10 +45,12 @@ from ..domain.sets import (
     SetVersion,
     apply_edit,
     dominant_corpus,
+    has_wildcard,
     if_match_allows,
     item_matches,
     next_version,
     parse_header_name,
+    plan_token,
     require_draft,
     require_editable,
     review_progress,
@@ -62,7 +67,19 @@ log = logging.getLogger("research_api")
 NO_SUCH_VERSION = "No such set version."
 NO_SUCH_ITEM = "No such item in this version."
 NEEDS_IF_MATCH = "Send the version you read in an If-Match header."
+NO_WILDCARD = "Send the etag you read in If-Match; * does not say which version you read."
 CHANGED = "The draft changed since you read it. Read it again."
+NEEDS_PLAN = "Read the freeze plan first and send its etag in an If-Match header."
+PLAN_CHANGED = "The draft or its decisions changed since you read the plan. Read it again."
+PREFREEZE = "prefreeze"
+TEXT_IS_FIXED = (
+    "{id} has review decisions, so its text is fixed: they are about the text people read. "
+    "Propose the change with an edit decision, or reject it and add a new item."
+)
+ID_IS_TAKEN = (
+    "{id} has review decisions that are kept in this version, so the id cannot be used for "
+    "another item. Use a new id."
+)
 
 
 @dataclass(frozen=True)
@@ -129,15 +146,29 @@ class _Storage:
         return row
 
     def load(self, ref: SetRef, *, repair: bool = False) -> tuple[SetVersion, SetFile]:
-        """The catalog entry and the file. The file is the truth: if the md5 differs (a crash
-        between the two writes) the entry is corrected, and with ``repair`` (under the lock, for
-        a request that is about to write) the correction is saved."""
+        """The catalog entry and the file.
+
+        For a draft the file is the truth: if the md5 differs (a crash between the two writes) the
+        entry is corrected, and with ``repair`` (under the lock, for a request that is about to
+        write) the correction is saved. A frozen version is the opposite: its md5 is its identity,
+        runs name it, so a file that no longer has it is a server problem, never a correction.
+        """
         row = self.row(ref)
         data = self.files.read(ref)
         if data is None:
             raise CorruptStoreError(f"the file of {ref.header_name} is missing")
         file = self.formats.peek(data)
         if file.md5 != row.md5 or len(file.items) != row.items:
+            if row.frozen:
+                log.error("the frozen file of %s no longer has its md5", ref.header_name)
+                raise CorruptStoreError(
+                    f"the frozen file of {ref.header_name} no longer has the md5 it was frozen with"
+                )
+            if (started := self._interrupted_freeze(row)) is not None:
+                log.warning("a freeze of %s did not finish; its draft is back", ref.header_name)
+                if repair:
+                    self.files.write(ref, started.data)
+                return row, started
             log.warning("catalog and file of %s disagree; the file wins", ref.header_name)
             fixed = replace(row, md5=file.md5, items=len(file.items))
             if repair:
@@ -145,9 +176,26 @@ class _Storage:
             row = fixed
         return row, file
 
+    def _interrupted_freeze(self, row: SetVersion) -> SetFile | None:
+        """The draft a freeze started from, when the process stopped after the frozen file was
+        written and before the catalog said so. The row still describes the draft, and the copy
+        kept for the freeze is that draft."""
+        data = self.files.read_copy(row.ref, PREFREEZE)
+        if data is None:
+            return None
+        try:
+            kept = self.formats.peek(data)
+        except CorruptStoreError:
+            return None
+        return kept if kept.md5 == row.md5 and len(kept.items) == row.items else None
+
     def reviews(self, ref: SetRef) -> list[dict[str, Any]]:
+        return self.reviews_and_bytes(ref)[0]
+
+    def reviews_and_bytes(self, ref: SetRef) -> tuple[list[dict[str, Any]], bytes | None]:
+        """The decisions and the bytes they were read from (one read, so they agree)."""
         data = self.files.read_reviews(ref)
-        return [] if data is None else self.formats.peek_reviews(data)
+        return ([] if data is None else self.formats.peek_reviews(data)), data
 
     def commit(self, row: SetVersion, built: BuiltSet, *, expected_md5: str) -> SetVersion:
         """Store a changed draft: the file first, then the catalog."""
@@ -162,11 +210,39 @@ class _Storage:
         self.catalog.save(saved, expected_md5=expected_md5)
         return saved
 
-    def check_if_match(self, if_match: str | None, row: SetVersion) -> None:
+    def check_if_match(
+        self,
+        if_match: str | None,
+        current: str,
+        *,
+        needs: str = NEEDS_IF_MATCH,
+        changed: str = CHANGED,
+    ) -> None:
+        """``current`` is the md5 of the draft, or the token of the plan, that the caller read."""
         if not if_match:
-            raise PreconditionRequiredError(NEEDS_IF_MATCH)
-        if not if_match_allows(if_match, row.md5):
-            raise ConflictError(CHANGED)
+            raise PreconditionRequiredError(needs)
+        if has_wildcard(if_match):
+            raise PreconditionRequiredError(NO_WILDCARD)
+        if not if_match_allows(if_match, current):
+            raise ConflictError(changed)
+
+
+def _long_id(path: str) -> FieldError:
+    return FieldError(path, f"The id is over {rules.MAX_ITEM_ID_LENGTH} characters.")
+
+
+def _refuse_long_ids(items: tuple[dict[str, Any], ...]) -> None:
+    """An id the routes could not name would be stored and never reachable. The file's line is
+    the item's position plus two (the header is line one)."""
+    long = [
+        _long_id(f"/lines/{n + 2}/id")
+        for n, item in enumerate(items)
+        if len(item["id"]) > rules.MAX_ITEM_ID_LENGTH
+    ]
+    if long:
+        raise InvalidInputError(
+            "The file is not a valid qset/1 file.", tuple(long[: rules.MAX_REPORTED_PROBLEMS])
+        )
 
 
 def _find(items: tuple[dict[str, Any], ...], item_id: str) -> int:
@@ -353,6 +429,7 @@ class ManageSets:
         """
         if len(data) > rules.MAX_IMPORT_BYTES:
             raise TooLargeError(f"The file is over {rules.MAX_IMPORT_BYTES} bytes.")
+        data = rules.unzip_upload(data, rules.MAX_IMPORT_BYTES)
         if not data.strip():
             raise InvalidInputError("The file is empty.")
         if name is not None and not valid_name(name):
@@ -386,6 +463,7 @@ class ManageSets:
                     corpus=corpus,
                     source_file=source_file[:200] if source_file else None,
                 )
+            _refuse_long_ids(built.items)
             row = self._store_new(actor, ref, built, corpus or dominant_corpus(built.items))
         return ImportOutcome(row, len(built.items), shape)
 
@@ -423,6 +501,9 @@ class ManageSets:
             if position < 0:
                 raise NotFoundError(NO_SUCH_ITEM)
             item = self._checked(item, expect_id=item_id)
+            if item == file.items[position]:
+                return self._item_view(row, file, file.items[position])  # nothing to change
+            self._refuse_if_decided(ref, item_id, TEXT_IS_FIXED)
             items = list(file.items)
             items[position] = item
             return self._save(row, file, items, item)
@@ -438,6 +519,7 @@ class ManageSets:
             item = self._checked(item, expect_id=None)
             if _find(file.items, item["id"]) >= 0:
                 raise ConflictError(f"The item {item['id']} exists. Replace it instead.")
+            self._refuse_if_decided(ref, item["id"], ID_IS_TAKEN)
             return self._save(row, file, [*file.items, item], item)
 
     def delete_item(
@@ -456,15 +538,29 @@ class ManageSets:
             built = self._s.formats.build(file.header, items)
             return self._s.commit(row, built, expected_md5=row.md5)
 
+    def _refuse_if_decided(self, ref: SetRef, item_id: str, message: str) -> None:
+        """People accept, edit or reject the text they read. If that text could be replaced, an
+        accept given before the change would count towards the two people that make an item gold,
+        and nobody would have read what is now there. So the text of an item with decisions is
+        fixed (a change goes through an ``edit`` decision, applied at the freeze), and so is the
+        id of an item that was deleted after it was decided on."""
+        if any(
+            line.get("target") == "item" and line.get("item_id") == item_id
+            for line in self._s.reviews(ref)
+        ):
+            raise ItemHasDecisionsError(message.format(id=item_id))
+
     def _editable(
         self, actor: Actor, ref: SetRef, if_match: str | None
     ) -> tuple[SetVersion, SetFile]:
+        require_editable(actor, self._s.row(ref))  # before anything is read or repaired
         row, file = self._s.load(ref, repair=True)
-        require_editable(actor, row)
-        self._s.check_if_match(if_match, row)
+        self._s.check_if_match(if_match, row.md5)
         return row, file
 
     def _checked(self, item: dict[str, Any], *, expect_id: str | None) -> dict[str, Any]:
+        if isinstance(item.get("id"), str) and len(item["id"]) > rules.MAX_ITEM_ID_LENGTH:
+            raise InvalidInputError("The item is not a valid qset/1 item.", (_long_id("/id"),))
         if expect_id is not None:
             if "id" not in item:
                 item = {"id": expect_id, **item}
@@ -499,20 +595,27 @@ class ReviewItems:
         actor: Actor,
         ref: SetRef,
         *,
+        if_match: str | None,
         item_id: str,
         verdict: str,
         note: str | None = None,
         edit: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Record one decision. The reviewer, role, date and set md5 are filled in here."""
+        """Record one decision. The reviewer, role and date are filled in here.
+
+        ``if_match`` is the etag of the draft the reviewer read, and ``set_md5`` is that md5: a
+        decision is about the text that was read, so it is refused (409) when the draft has
+        changed since, and a decision never lands on a text its author did not see.
+        """
         if verdict not in VERDICTS:
             raise InvalidInputError(
                 "The verdict is not valid.",
                 (FieldError("/verdict", f"must be one of {', '.join(VERDICTS)}"),),
             )
         with self._s.lock:
-            row, file = self._s.load(ref, repair=True)
-            require_draft(row)
+            require_draft(self._s.row(ref))
+            _, file = self._s.load(ref, repair=True)
+            self._s.check_if_match(if_match, file.md5)
             position = _find(file.items, item_id)
             if position < 0:
                 raise NotFoundError(NO_SUCH_ITEM)
@@ -547,11 +650,18 @@ class ReviewItems:
 
     def _append(self, ref: SetRef, line: dict[str, Any]) -> None:
         text = self._s.formats.review_line(line)
-        if self._s.files.read_reviews(ref) is None:
+        stored = self._s.files.read_reviews(ref)
+        if stored is None:
             header = self._s.formats.review_header(ref.header_name, self._s.now())
             self._s.files.write_reviews(ref, header + text)
-        else:
+        elif stored.endswith(b"\n"):
             self._s.files.append_reviews(ref, text)
+        else:
+            # An earlier append stopped half way (its request got no answer). Appending would glue
+            # this line to the torn one, so the file is rewritten without the torn end.
+            whole = stored[: stored.rfind(b"\n") + 1]
+            log.warning("a half-written review line of %s was dropped", ref.header_name)
+            self._s.files.write_reviews(ref, whole + text)
 
     def list(self, ref: SetRef, item_id: str | None = None) -> list[dict[str, Any]]:
         self._s.row(ref)
@@ -569,7 +679,7 @@ class FreezeSets:
         self._s = storage
 
     def _plan(self, row: SetVersion, file: SetFile) -> tuple[FreezePlan, AppliedReviews]:
-        lines = self._s.reviews(row.ref)
+        lines, raw = self._s.reviews_and_bytes(row.ref)
         applied = self._s.formats.apply_reviews(file.items, lines, file.md5)
         states = review_states((i["id"] for i in file.items), lines)
         plan = FreezePlan(
@@ -584,40 +694,67 @@ class FreezeSets:
             ),
             stale=applied.stale,
             unknown=applied.unknown,
+            token=plan_token(file.md5, raw),
         )
         return plan, applied
 
+    def _frozen(
+        self, row: SetVersion, file: SetFile, plan: FreezePlan, applied: AppliedReviews
+    ) -> BuiltSet:
+        """The file a freeze would write. The plan and the freeze both build it, so the plan
+        refuses what the freeze would refuse, and names the item by id."""
+        if not applied.items:
+            raise InvalidInputError(
+                "Nothing would be left: a frozen version needs at least one item."
+            )
+        ref = row.ref
+        header: dict[str, Any] = {
+            "format": QSET_FORMAT,
+            "set": ref.header_name,
+            "created": self._s.now(),
+        }
+        if "source" in file.header:
+            header["source"] = file.header["source"]
+        header["notes"] = (
+            f"{ref.header_name} (md5 {file.md5}) with the human reviews applied: "
+            f"{len(plan.accepted)} accepted, {len(plan.edited)} edited, "
+            f"{len(plan.rejected)} rejected, {len(plan.unreviewed)} not reviewed."
+        )
+        try:
+            return self._s.formats.build(header, applied.items)
+        except InvalidInputError as e:
+            ids = [i["id"] for i in applied.items]
+            raise InvalidInputError(
+                "The reviews would leave a set that is not valid.",
+                tuple(FieldError(_item_path(err.path, ids), err.message) for err in e.errors),
+            ) from None
+
     def plan(self, ref: SetRef) -> tuple[SetVersion, FreezePlan]:
-        """What freezing would do; nothing changes."""
+        """What freezing would do; nothing changes. It refuses what the freeze would refuse."""
         row, file = self._s.load(ref)
         require_draft(row)
-        return row, self._plan(row, file)[0]
+        plan, applied = self._plan(row, file)
+        self._frozen(row, file, plan, applied)
+        return row, plan
 
-    def freeze(self, actor: Actor, ref: SetRef) -> tuple[SetVersion, FreezePlan]:
+    def freeze(
+        self, actor: Actor, ref: SetRef, if_match: str | None
+    ) -> tuple[SetVersion, FreezePlan]:
         """Apply the latest human decision of each item and close the version.
+
+        ``if_match`` is the token of the plan that was read (``plan``): a decision added or an
+        item changed since then is a 409, so nothing is applied that nobody saw.
 
         The draft as it was is kept beside the version (``<version>.prefreeze.qset.jsonl``), so
         a rejected item is never lost for good. The frozen file has a new md5.
         """
         with self._s.lock:
+            require_editable(actor, self._s.row(ref))
             row, file = self._s.load(ref, repair=True)
-            require_editable(actor, row)
             plan, applied = self._plan(row, file)
-            if not applied.items:
-                raise InvalidInputError(
-                    "Nothing would be left: a frozen version needs at least one item."
-                )
-            now = self._s.now()
-            header: dict[str, Any] = {"format": QSET_FORMAT, "set": ref.header_name, "created": now}
-            if "source" in file.header:
-                header["source"] = file.header["source"]
-            header["notes"] = (
-                f"{ref.header_name} (md5 {file.md5}) with the human reviews applied: "
-                f"{len(plan.accepted)} accepted, {len(plan.edited)} edited, "
-                f"{len(plan.rejected)} rejected, {len(plan.unreviewed)} not reviewed."
-            )
-            built = self._s.formats.build(header, applied.items)
-            self._s.files.keep_copy(ref, "prefreeze", file.data)
+            built = self._frozen(row, file, plan, applied)  # what the plan refuses, refused first
+            self._s.check_if_match(if_match, plan.token, needs=NEEDS_PLAN, changed=PLAN_CHANGED)
+            self._s.files.keep_copy(ref, PREFREEZE, file.data)
             self._s.files.write(ref, built.data)
             frozen = replace(
                 row,
@@ -627,8 +764,27 @@ class FreezeSets:
                 updated_at=self._s.clock.now(),
                 frozen_at=self._s.clock.now(),
             )
-            self._s.catalog.save(frozen, expected_md5=row.md5)
+            try:
+                self._s.catalog.save(frozen, expected_md5=row.md5)
+            except BaseException:
+                # The pair of writes is not atomic: put the reviewed draft back so the version is
+                # still the draft it was (if this write fails too, the next load restores it).
+                with contextlib.suppress(OSError):
+                    self._s.files.write(ref, file.data)
+                raise
             return frozen, plan
+
+
+_ITEM_POINTER = re.compile(r"^/items/(\d+)(.*)$", re.S)
+
+
+def _item_path(path: str, ids: list[str]) -> str:
+    """``/items/<position>/...`` as ``/items/<id>/...``: the person sees ids, not positions in a
+    list that the reviews rearranged."""
+    found = _ITEM_POINTER.match(path)
+    if found and int(found[1]) < len(ids):
+        return f"/items/{ids[int(found[1])]}{found[2]}"
+    return path
 
 
 NAME_RULE = "Use letters, digits, '.', '_' and '-', starting with a letter or digit (64 at most)."

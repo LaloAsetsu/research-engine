@@ -60,6 +60,24 @@ def test_the_same_name_and_version_cannot_be_added_twice(db: Database) -> None:
     assert db.sets.get(SetRef("demo", "v1")) == make()
 
 
+@pytest.mark.parametrize("other", ["Demo", "DEMO", "dEMo"])
+def test_a_name_that_differs_only_in_capitals_cannot_be_added(db: Database, other: str) -> None:
+    db.sets.add(make("demo", "v1"))
+    with pytest.raises(ConflictError, match="same name"):
+        db.sets.add(make(other, "v1"))
+    with pytest.raises(ConflictError, match="same name"):
+        db.sets.add(make(other, "v2"))  # another version of it is no way in either
+    assert [x.ref.header_name for x in db.sets.all()] == ["demo/v1"]
+    db.sets.add(make("demo", "v2"))  # the spelling that exists still grows
+
+
+def test_names_apart_from_capitals_that_exist_are_not_touched_by_the_check(db: Database) -> None:
+    db.sets.add(make("demo", "v1"))
+    db.sets.add(make("demo-b", "v1"))
+    db.sets.add(make("Other", "v1"))
+    assert [x.ref.header_name for x in db.sets.all()] == ["Other/v1", "demo/v1", "demo-b/v1"]
+
+
 def test_versions_come_in_numeric_order_not_text_order(db: Database) -> None:
     for v in ("v10", "v2", "v1"):
         db.sets.add(make(version=v))
@@ -169,3 +187,12 @@ def test_parallel_saves_from_the_same_md5_let_exactly_one_through(db: Database) 
     with ThreadPoolExecutor(8) as pool:
         results = list(pool.map(attempt, range(1, 9)))
     assert results.count(True) == 1
+
+
+def test_a_frozen_entry_is_never_saved_over(db: Database) -> None:
+    db.sets.add(make())
+    db.sets.save(make(status="frozen", md5=MD5_B, frozen_at=T0), expected_md5=MD5_A)
+    for changed in (make(md5=MD5_A), make(status="frozen", md5="c" * 32, frozen_at=T0)):
+        with pytest.raises(ConflictError, match="is frozen"):
+            db.sets.save(changed, expected_md5=MD5_B)
+    assert db.sets.get(SetRef("demo", "v1")) == make(status="frozen", md5=MD5_B, frozen_at=T0)

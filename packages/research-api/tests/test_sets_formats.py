@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from sets_helpers import (
     SOURCES,
+    broken,
     example_bytes,
-    example_item,
     example_items,
     example_lines,
     header,
@@ -52,11 +52,15 @@ def test_a_valid_file_is_read_with_its_own_md5() -> None:
     assert len(file.items) == 9
 
 
-def test_a_gzip_upload_is_stored_as_text_with_the_md5_of_the_text() -> None:
-    data = example_bytes()
-    file = formats.read(gzip.compress(data))
-    assert file.data == data
-    assert file.md5 == md5(data)
+def test_the_adapter_takes_plain_bytes_only_because_qa_bench_unzips_without_a_limit() -> None:
+    zipped = gzip.compress(example_bytes())
+    assert "unzipped" in refused(lambda: formats.read(zipped)).detail
+    assert "unzipped" in refused(
+        lambda: formats.convert(
+            "mathcirc-v1", zipped, set_name="x/v1", created="2026-01-01T00:00:00Z",
+            corpus="c", source_file=None,
+        )
+    ).detail  # fmt: skip
 
 
 def test_a_file_that_is_not_in_canonical_form_keeps_its_own_bytes() -> None:
@@ -142,59 +146,6 @@ def test_the_dry_run_of_text_that_is_not_json() -> None:
 @pytest.mark.parametrize("fixture_item", example_items(), ids=lambda i: i["id"])
 def test_every_example_item_is_valid(fixture_item: dict[str, Any]) -> None:
     assert formats.check_item(fixture_item) == ()
-
-
-def broken() -> list[tuple[str, dict[str, Any], str]]:
-    chain = example_item("EX-002")
-    single = example_item("EX-001")
-    without = lambda base, key: {k: v for k, v in base.items() if k != key}  # noqa: E731
-    return [
-        ("an unknown field", {**single, "colour": "red"}, "/colour"),
-        ("multi_chain without necessity", without(chain, "necessity"), "/necessity"),
-        ("multi_chain without synthesis", without(chain, "synthesis"), "/synthesis"),
-        (
-            "multi-paper item with one paper",
-            {**chain, "gold_papers": chain["gold_papers"][:1]},
-            "/gold_papers",
-        ),
-        ("verify answer maybe", {**example_item("EX-006"), "answer": "maybe"}, "/answer"),
-        ("mirror without mirror_of", without(example_item("EX-002-es"), "mirror_of"), "/mirror_of"),
-        (
-            "unanswerable with a gold paper",
-            {**example_item("EX-003"), "gold_papers": chain["gold_papers"]},
-            "/gold_papers",
-        ),
-        (
-            "unanswerable without search_record",
-            without(example_item("EX-003"), "search_record"),
-            "/search_record",
-        ),
-        (
-            "num key with a string",
-            {**single, "key_facts": [{"type": "num", "value": "1.2", "rel": 0.02}]},
-            "/key_facts/0/value",
-        ),
-        (
-            "text key with a unit",
-            {**single, "key_facts": [{"type": "text", "value": "J", "unit": "GHz"}]},
-            "/key_facts/0",
-        ),
-        ("circuit item without circuit", without(example_item("EX-006"), "circuit"), "/circuit"),
-        (
-            "circuit item not content circuit",
-            {**example_item("EX-006"), "content": "math"},
-            "/content",
-        ),
-        (
-            "a bad doc id",
-            {**single, "gold_papers": [{"doc_id": "xyz", "passages": []}]},
-            "/gold_papers/0/doc_id",
-        ),
-        ("question missing", without(single, "question"), "/question"),
-        ("a bad id", {**single, "id": "has space"}, "/id"),
-        ("a bad language", {**single, "lang": "fr"}, "/lang"),
-        ("a bad date", {**single, "written": "2026-02-30"}, "/written"),
-    ]
 
 
 @pytest.mark.parametrize(("bad", "where"), [pytest.param(b, w, id=name) for name, b, w in broken()])
@@ -294,7 +245,20 @@ def test_stored_reviews_skip_the_header() -> None:
     assert formats.peek_reviews(header_line) == []
 
 
-@pytest.mark.parametrize("data", [b"not json\n", b"\xff"])
+def test_a_last_review_line_without_its_line_feed_is_an_append_that_stopped() -> None:
+    header_line = formats.review_header("demo/v1", "2026-01-01T00:00:00+00:00")
+    one = formats.review_line({"item_id": "a", "verdict": "accept"})
+    assert formats.peek_reviews(header_line + one + b'{"item_id": "b", "verd') == [
+        {"item_id": "a", "verdict": "accept"}
+    ]
+    assert formats.peek_reviews(header_line + b'{"item_id"') == []
+    # a whole line that only lacks its line feed is not acknowledged either
+    assert formats.peek_reviews(header_line + one + b'{"item_id": "b", "verdict": "accept"}') == [
+        {"item_id": "a", "verdict": "accept"}
+    ]
+
+
+@pytest.mark.parametrize("data", [b"not json\n", b"\xff", b"{broken}\n" + b'{"a": 1}\n'])
 def test_stored_reviews_that_cannot_be_read_are_a_server_problem(data: bytes) -> None:
     with pytest.raises(CorruptStoreError):
         formats.peek_reviews(data)
