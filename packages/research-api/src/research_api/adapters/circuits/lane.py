@@ -63,5 +63,6 @@ class ComputeLane:
             return await asyncio.wait_for(outcome, self._timeout_s)
         except TimeoutError:
             raise InvalidInputError(
-                f"The work took longer than {self._timeout_s:g} s and was stopped. {USE_THE_CLI}"
+                f"The work took longer than {self._timeout_s:g} s, so this request was released. "
+                f"{USE_THE_CLI}"
             ) from None
