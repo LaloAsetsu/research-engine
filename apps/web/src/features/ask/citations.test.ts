@@ -44,6 +44,30 @@ describe("linking the citations of an answer", () => {
     );
   });
 
+  it("links each citation of a parenthesis that joins several", () => {
+    const text =
+      "Both (aaaaaaaaaaaaaaaa pages 3-4, bbbbbbbbbbbbbbbb pages 1-1) agree; see also (bbbbbbbbbbbbbbbb pages 1-1; aaaaaaaaaaaaaaaa pages 3-4).";
+    expect(linkCitations(text, CITATIONS)).toBe(
+      "Both ([aaaaaaaaaaaaaaaa pages 3-4](#cite-0), [bbbbbbbbbbbbbbbb pages 1-1](#cite-1)) agree; see also ([bbbbbbbbbbbbbbbb pages 1-1](#cite-1); [aaaaaaaaaaaaaaaa pages 3-4](#cite-0)).",
+    );
+  });
+
+  it("links only the known keys of a mixed parenthesis", () => {
+    expect(linkCitations("(aaaaaaaaaaaaaaaa pages 3-4, Smith 2020)", CITATIONS)).toBe(
+      "([aaaaaaaaaaaaaaaa pages 3-4](#cite-0), Smith 2020)",
+    );
+  });
+
+  it("leaves a parenthesis of unknown keys, an empty one and a nested one alone", () => {
+    for (const text of [
+      "(cccccccccccccccc pages 1-2, dddddddddddddddd pages 1-2)",
+      "()",
+      "(a (aaaaaaaaaaaaaaaa pages 3-4x) b)",
+    ]) {
+      expect(linkCitations(text, CITATIONS)).toBe(text);
+    }
+  });
+
   it("changes nothing when there are no citations", () => {
     expect(linkCitations("No sources here.", [])).toBe("No sources here.");
   });

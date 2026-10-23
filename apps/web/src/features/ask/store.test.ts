@@ -88,6 +88,20 @@ describe("the entries of the ask store", () => {
     expect(questions.at(-1)).toBe("Question 4");
   });
 
+  it("never puts a question back in the line behind the ones it has passed", () => {
+    const key = store.getState().begin("Where am I?", DEFAULT_SETTINGS);
+    store.getState().accepted(key, "a1", 3);
+    store.getState().advance(key, "queued", 1);
+    // A stream that reopens replays from its first event, with the position it had then.
+    store.getState().advance(key, "queued", 3);
+    expect(store.getState().entries[0]).toMatchObject({ status: "queued", position: 1 });
+    store.getState().advance(key, "queued", 0);
+    expect(store.getState().entries[0]).toMatchObject({ position: 0 });
+    store.getState().advance(key, "retrieving");
+    store.getState().advance(key, "queued", 2);
+    expect(store.getState().entries[0]).toMatchObject({ status: "retrieving", position: null });
+  });
+
   it("ignores an event for a question that is gone", () => {
     store.getState().advance("nothing", "answering");
     store.getState().succeed("nothing", answerOf("transmon"));

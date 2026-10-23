@@ -24,11 +24,17 @@ export function engineView(
 }
 
 /**
- * Only a starting engine blocks the form: it refuses questions for a few seconds. An engine that
- * reports `unavailable` still takes them, because the cause (a missing index) may have been fixed
- * since, and the next answer clears the report.
+ * A starting engine refuses questions for a few seconds, and one that reports `unavailable` has
+ * its models or its index down: in both the button is disabled (A5). Only the first clears by
+ * itself. `unavailable` clears when a question works, and `/status` does not probe the model
+ * servers yet, so the form offers "Ask anyway" for that state, or nobody could ever ask again.
  */
 export function blocksAsking(view: EngineView): boolean {
+  return view.kind === "warming" || view.kind === "unavailable";
+}
+
+/** Only an engine that is starting must also stop a retry: it would be refused. */
+export function isStarting(view: EngineView): boolean {
   return view.kind === "warming";
 }
 

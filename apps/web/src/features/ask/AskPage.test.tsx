@@ -155,6 +155,9 @@ describe("sending a question (A1)", () => {
     expect(
       screen.getByText("A question is being answered. Wait for it or cancel it to send another."),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("Your question")).toHaveAccessibleDescription(
+      /A question is being answered\. Wait for it/,
+    );
     await user.keyboard("{Control>}{Enter}{/Control}");
     expect(seen.bodies).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Options for this question" })).toBeDisabled();
@@ -232,6 +235,32 @@ describe("sending a question (A1)", () => {
     expect(screen.getByText("[pic]")).toBeInTheDocument();
   });
 
+  it("makes a button of each citation inside a parenthesis that joins several", async () => {
+    const user = await openAsk();
+    takeAsks();
+    await ask(user, "Q");
+    const [first, second] = [
+      { ...TRANSMON.citations[0]!, key: "aaaaaaaaaaaaaaaa pages 3-4", first_page: 3, last_page: 4 },
+      { ...TRANSMON.citations[0]!, key: "bbbbbbbbbbbbbbbb pages 1-1", first_page: 1, last_page: 1 },
+    ];
+    const joined: AskResponse = {
+      ...TRANSMON,
+      contexts: [],
+      citations: [first, second],
+      answer: `Both agree (${first.key}, ${second.key}).`,
+    };
+    serve((source) => source.emit("answer", joined));
+    await screen.findByRole("heading", { name: "Answer" });
+    const inline = [...document.querySelectorAll<HTMLElement>(".markdown button")];
+    expect(inline.map((button) => button.textContent?.slice(0, 26))).toEqual([
+      first.key,
+      second.key,
+    ]);
+    expect(document.querySelector(".markdown")).toHaveTextContent(
+      `Both agree (${first.key}, ${second.key}).`,
+    );
+  });
+
   it("announces each step to a screen reader", async () => {
     const user = await openAsk();
     const live = screen.getAllByRole("status").find((node) => node.className.includes("sr-only"))!;
@@ -286,6 +315,93 @@ describe("reading a cited paper (A2)", () => {
     expect(inline).not.toBeNull();
     await user.click(inline!);
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("names the paper in the accessible name of a citation inside the answer", async () => {
+    const user = await openAsk();
+    await answered(user, "transmon");
+    await screen.findByRole("heading", { name: "Answer" });
+    const title = "Coherence limits of fixed-frequency transmon qubits (synthetic)";
+    await waitFor(() => {
+      const inline = document.querySelector<HTMLElement>(".markdown button[data-opener]");
+      expect(inline).toHaveAccessibleName(new RegExp(title.replace(/[()]/g, "\\$&")));
+    });
+  });
+
+  describe("when the citation names the paper by its 16 printed characters", () => {
+    /** The API completes the id: its page and paper carry the manifest's full one. */
+    async function openByShortId(user: User, page = TRANSMON.citations[0]!.first_page) {
+      takeAsks();
+      await ask(user, "Q");
+      const full = TRANSMON.citations[0]!;
+      const short = full.doc_id.slice(0, 16);
+      const seenIds: string[] = [];
+      server.use(
+        http.get("*/api/v1/documents/:docId/pages/:page", ({ params }) => {
+          seenIds.push(String(params.docId));
+          const found = CAPTURE.pages[`${full.doc_id}:${String(params.page)}`];
+          return found ? HttpResponse.json(found) : problem(404, "No such page.");
+        }),
+        http.get("*/api/v1/documents/:docId", () =>
+          HttpResponse.json(CAPTURE.documents[full.doc_id] as object),
+        ),
+      );
+      const response: AskResponse = {
+        ...TRANSMON,
+        citations: [{ ...full, doc_id: short, first_page: page, last_page: page }],
+      };
+      serve((source) => source.emit("answer", response));
+      const sources = await screen.findByRole("region", { name: "Sources" });
+      await user.click(within(sources).getAllByRole("button")[0]!);
+      const dialog = await screen.findByRole("dialog");
+      return { dialog, short, seenIds };
+    }
+
+    it("shows the text of the page, not a skeleton for ever", async () => {
+      const user = await openAsk();
+      const { dialog, short, seenIds } = await openByShortId(user);
+      const text = within(dialog).getByRole("region", { name: "Text of the page" });
+      await waitFor(() => expect(text.querySelector(".markdown")).not.toBeNull());
+      expect(text.querySelector("[data-slot=skeleton]")).toBeNull();
+      expect(seenIds).toContain(short);
+      expect(within(dialog).getByRole("status")).toHaveTextContent(/Page \d+ of \d+/);
+    });
+
+    it("moves through the pages of the paper", async () => {
+      const user = await openAsk();
+      const { dialog } = await openByShortId(user);
+      const first = TRANSMON.citations[0]!.first_page;
+      const text = within(dialog).getByRole("region", { name: "Text of the page" });
+      await waitFor(() => expect(text.querySelector(".markdown")).not.toBeNull());
+      await user.click(within(dialog).getByRole("button", { name: "Next page" }));
+      await within(dialog).findByText(new RegExp(`Page ${first + 1} of`));
+      await waitFor(() => expect(text.querySelector(".markdown")).not.toBeNull());
+      expect(text.querySelector("[data-slot=skeleton]")).toBeNull();
+    });
+  });
+
+  it("keeps the page number of the text on screen while the next page loads", async () => {
+    const user = await openAsk();
+    await answered(user, "transmon");
+    const first = TRANSMON.citations[0]!.first_page;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    server.use(
+      http.get("*/api/v1/documents/:docId/pages/:page", async ({ params }) => {
+        if (Number(params.page) === first + 1) await gate;
+        return HttpResponse.json(CAPTURE.pages[`${String(params.docId)}:${String(params.page)}`]);
+      }),
+    );
+    const sources = await screen.findByRole("region", { name: "Sources" });
+    await user.click(within(sources).getAllByRole("button")[0]!);
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(new RegExp(`Page ${first} of`));
+    await user.click(within(dialog).getByRole("button", { name: "Next page" }));
+    const text = within(dialog).getByRole("region", { name: "Text of the page" });
+    await waitFor(() => expect(text).toHaveAttribute("aria-busy", "true"));
+    expect(within(dialog).getByRole("status")).toHaveTextContent(new RegExp(`Page ${first} of`));
+    release();
+    await within(dialog).findByText(new RegExp(`Page ${first + 1} of`));
   });
 
   it("moves to the next and the previous page", async () => {
@@ -600,6 +716,10 @@ describe("when the service cannot answer (A5)", () => {
     expect(await screen.findByText("The engine is starting")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Your question"), "A question");
     expect(screen.getByRole("button", { name: "Ask" })).toBeDisabled();
+    // Ctrl+Enter is refused too, and the box says why to a screen reader.
+    expect(screen.getByLabelText("Your question")).toHaveAccessibleDescription(
+      /The engine is starting, so Ask is off/,
+    );
     await user.keyboard("{Control>}{Enter}{/Control}");
     expect(FakeEventSource.instances).toHaveLength(0);
   });
@@ -621,21 +741,81 @@ describe("when the service cannot answer (A5)", () => {
     expect(screen.queryByText("The engine is starting")).not.toBeInTheDocument();
   }, 10_000);
 
-  it("shows the reason an engine reports but still takes questions", async () => {
+  it("disables the button when the engine reports a problem, and says why", async () => {
     withStatus({ state: "unavailable", reason: "The index could not be opened." });
     const user = await openAsk();
     expect(
-      await screen.findByText(/The index could not be opened\. You can still send a question/),
+      await screen.findByText(/The index could not be opened\. Ask is off while this lasts/),
     ).toBeInTheDocument();
     await user.type(screen.getByLabelText("Your question"), "A question");
+    expect(screen.getByRole("button", { name: "Ask" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Ask anyway" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Ask" })).toHaveAccessibleDescription(
+      /The engine reports a problem, so Ask is off/,
+    );
+    expect(screen.getByLabelText("Your question")).toHaveAccessibleDescription(
+      /The engine reports a problem, so Ask is off/,
+    );
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it("sends the question with Ask anyway, so a fixed engine is never locked out", async () => {
+    withStatus({ state: "unavailable", reason: "The index could not be opened." });
+    const seen = takeAsks();
+    const user = await openAsk();
+    await screen.findByText("The engine reports a problem");
+    expect(screen.getByRole("button", { name: "Ask anyway" })).toBeDisabled();
+    await user.type(screen.getByLabelText("Your question"), "A question");
+    await user.click(screen.getByRole("button", { name: "Ask anyway" }));
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+    expect(seen.bodies).toHaveLength(1);
+    expect(seen.bodies[0]).toMatchObject({ question: "A question" });
+    serve((source) => replay(source, capturedAsk("transmon").events));
+    expect(await screen.findByRole("heading", { name: "Answer" })).toBeInTheDocument();
+  });
+
+  it("looks at the status again when an answer arrives, so Ask opens at once", async () => {
+    let state = "unavailable";
+    server.use(
+      http.get("*/api/v1/status", () =>
+        HttpResponse.json({
+          ...STATUS_BODY,
+          ask: { ...STATUS_BODY.ask, state, reason: state === "ready" ? null : "Models down." },
+        }),
+      ),
+    );
+    takeAsks();
+    const user = await openAsk();
+    await screen.findByText("The engine reports a problem");
+    await user.type(screen.getByLabelText("Your question"), "A question");
+    await user.click(screen.getByRole("button", { name: "Ask anyway" }));
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+    // The engine is fine by the time the answer comes; the next poll is 30 s away.
+    state = "ready";
+    serve((source) => replay(source, capturedAsk("transmon").events));
+    await screen.findByRole("heading", { name: "Answer" });
+    await waitFor(() =>
+      expect(screen.queryByText("The engine reports a problem")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Ask anyway" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Your question"), " again");
     expect(screen.getByRole("button", { name: "Ask" })).toBeEnabled();
+  });
+
+  it("offers Ask anyway only to an engine that reports a problem", async () => {
+    await openAsk();
+    await screen.findByRole("status", { name: /Service status: Ready/ });
+    expect(screen.queryByRole("button", { name: "Ask anyway" })).not.toBeInTheDocument();
   });
 
   it("copes with an engine that reports a problem without a reason", async () => {
     withStatus({ state: "unavailable", reason: null });
     await openAsk();
     expect(
-      await screen.findByText("You can still send a question: the cause may already be fixed."),
+      await screen.findByText(
+        "Ask is off while this lasts. If the cause may be fixed, use Ask anyway.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -866,5 +1046,17 @@ describe("in Spanish", () => {
     expect(await screen.findByRole("heading", { name: "Respuesta" })).toBeInTheDocument();
     const sources = screen.getByRole("region", { name: "Fuentes" });
     expect(within(sources).getAllByRole("button")[0]).toHaveTextContent(/página/);
+  });
+
+  it("says one option changed in the singular", async () => {
+    const user = await openAsk();
+    await user.click(screen.getByRole("button", { name: /Language/ }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Español" }));
+    await user.click(await screen.findByRole("button", { name: "Opciones de esta pregunta" }));
+    await user.click(screen.getByRole("radio", { name: "Nunca" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: /Opciones de esta pregunta/ })).toHaveTextContent(
+      "1 cambiada",
+    );
   });
 });

@@ -158,6 +158,17 @@ export const useAskStore = create<AskState & AskActions>()((set) => ({
     set((state) => {
       const entry = stillActive(state.entries, key);
       if (!entry || !isActive(entry.status) || RANK[progress] < RANK[entry.status]) return {};
+      // A place in the line only moves up. A stream that reopens replays from the first event,
+      // and its old `queued` must not put the question back behind the ones it has passed.
+      if (
+        progress === "queued" &&
+        entry.status === "queued" &&
+        position !== undefined &&
+        entry.position !== null &&
+        position > entry.position
+      ) {
+        return {};
+      }
       return {
         entries: update(state.entries, key, {
           status: progress,

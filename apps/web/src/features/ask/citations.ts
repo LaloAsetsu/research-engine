@@ -7,18 +7,29 @@ export function shortId(docId: string): string {
 
 /**
  * Turns each citation the answer prints, `(<16 hex> pages 3-4)`, into a link to `#cite-<n>` (the
- * position in `citations`), so the text and the list of sources open the same page. Only the
- * exact printed form is touched; any other parenthesis stays as written.
+ * position in `citations`), so the text and the list of sources open the same page. A parenthesis
+ * that joins several, `(<key>, <key>)`, links each one inside it. Only printed keys are touched;
+ * any other parenthesis stays as written.
  */
 export function linkCitations(answer: string, citations: readonly Citation[]): string {
-  let text = answer;
-  const done = new Set<string>();
+  const positions = new Map<string, number>();
   citations.forEach((citation, index) => {
-    if (done.has(citation.key)) return;
-    done.add(citation.key);
-    text = text.split(`(${citation.key})`).join(`[(${citation.key})](#cite-${index})`);
+    if (!positions.has(citation.key)) positions.set(citation.key, index);
   });
-  return text;
+  if (positions.size === 0) return answer;
+  return answer.replace(/\(([^()]+)\)/g, (whole, inner: string) => {
+    const single = positions.get(inner);
+    if (single !== undefined) return `[(${inner})](#cite-${single})`;
+    const parts = inner.split(/(\s*[,;]\s*)/);
+    if (parts.length < 3 || !parts.some((part, i) => i % 2 === 0 && positions.has(part))) {
+      return whole;
+    }
+    const linked = parts.map((part, i) => {
+      const position = i % 2 === 0 ? positions.get(part) : undefined;
+      return position === undefined ? part : `[${part}](#cite-${position})`;
+    });
+    return `(${linked.join("")})`;
+  });
 }
 
 const CITE_HREF = /^#cite-(\d+)$/;

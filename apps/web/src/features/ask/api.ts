@@ -5,6 +5,7 @@ import { createAskFlow, type AskFlow } from "./flow";
 import type { EventSourceFactory } from "./stream";
 import type { AskRequest } from "./types";
 
+const STATUS = "/api/v1/status";
 const ASKS = "/api/v1/asks";
 const ASK = "/api/v1/asks/{ask_id}";
 
@@ -19,7 +20,7 @@ const WARMING_REFRESH_MS = 3_000;
 export function useEngineStatus() {
   return $api.useQuery(
     "get",
-    "/api/v1/status",
+    STATUS,
     {},
     {
       retry: false,
@@ -94,6 +95,11 @@ export function useAskFlow(eventSource?: EventSourceFactory): AskFlow {
             },
           }),
         cancel: cancelAsk,
+        // A question that works shows the engine is up: look at the status now, not at the next poll.
+        answered: () =>
+          void queryClient.invalidateQueries({
+            queryKey: $api.queryOptions("get", STATUS, {}).queryKey,
+          }),
         ...(eventSource ? { eventSource } : {}),
       }),
     [createAsk, cancelAsk, queryClient, eventSource],

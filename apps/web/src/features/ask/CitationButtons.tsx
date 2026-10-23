@@ -75,6 +75,7 @@ export function InlineCitation({
 }: CitationProps & { children: ReactNode }) {
   const { t } = useTranslation(undefined, { keyPrefix: "ask" });
   const open = useOpenCitation();
+  const title = useDocument(citation.doc_id).data?.summary.title;
   return (
     <button
       type="button"
@@ -84,6 +85,7 @@ export function InlineCitation({
       className="rounded-sm font-mono text-xs text-primary underline underline-offset-3 hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
     >
       {children}
+      {title ? <span className="sr-only">, {title}</span> : null}
     </button>
   );
 }

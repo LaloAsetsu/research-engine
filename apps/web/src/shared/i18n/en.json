@@ -99,11 +99,15 @@
       "sending": "Asking",
       "cancel": "Cancel question",
       "blank": "Write a question to send it.",
-      "busy": "A question is being answered. Wait for it or cancel it to send another."
+      "busy": "A question is being answered. Wait for it or cancel it to send another.",
+      "askAnyway": "Ask anyway",
+      "engineDown": "The engine reports a problem, so Ask is off. Use Ask anyway if the cause may be fixed.",
+      "starting": "The engine is starting, so Ask is off for a few seconds."
     },
     "options": {
       "trigger": "Options for this question",
-      "changed": "{{count}} changed",
+      "changed_one": "{{count}} changed",
+      "changed_other": "{{count}} changed",
       "title": "Options",
       "description": "They apply to the questions you send until you reset them. Each option can also stay on the server's own setting.",
       "useIndex": {
@@ -134,8 +138,8 @@
       },
       "unavailable": {
         "title": "The engine reports a problem",
-        "body": "{{reason}} You can still send a question: the cause may already be fixed.",
-        "noReason": "You can still send a question: the cause may already be fixed."
+        "body": "{{reason}} Ask is off while this lasts. If the cause may be fixed, use Ask anyway.",
+        "noReason": "Ask is off while this lasts. If the cause may be fixed, use Ask anyway."
       },
       "unreachable": {
         "title": "The service cannot be reached",

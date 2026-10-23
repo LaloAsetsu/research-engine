@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { blocksAsking, EngineNotice, engineView } from "./EngineNotice";
+import { blocksAsking, EngineNotice, engineView, isStarting } from "./EngineNotice";
 import type { AskStatus } from "./types";
 
 const READY: AskStatus = {
@@ -36,16 +36,18 @@ describe("reading the engine state", () => {
     expect(engineView(newer, false)).toEqual({ kind: "ready" });
   });
 
-  it("closes the form only while the engine starts", () => {
+  it("closes the form while the engine starts or reports a problem (A5)", () => {
     expect(blocksAsking({ kind: "warming" })).toBe(true);
-    for (const view of [
-      { kind: "unknown" },
-      { kind: "unreachable" },
-      { kind: "ready" },
-      { kind: "unavailable", reason: "x" },
-    ] as const) {
+    expect(blocksAsking({ kind: "unavailable", reason: "x" })).toBe(true);
+    for (const view of [{ kind: "unknown" }, { kind: "unreachable" }, { kind: "ready" }] as const) {
       expect(blocksAsking(view), view.kind).toBe(false);
     }
+  });
+
+  it("stops a retry only while the engine starts", () => {
+    expect(isStarting({ kind: "warming" })).toBe(true);
+    expect(isStarting({ kind: "unavailable", reason: null })).toBe(false);
+    expect(isStarting({ kind: "ready" })).toBe(false);
   });
 });
 

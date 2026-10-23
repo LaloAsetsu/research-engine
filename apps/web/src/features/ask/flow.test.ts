@@ -27,6 +27,7 @@ function setup(overrides: Partial<FlowDeps> = {}) {
     create: vi.fn(overrides.create ?? (() => Promise.resolve({ ask_id: "a1", position: 0 }))),
     get: vi.fn(overrides.get ?? (() => Promise.reject(new Error("get was not expected")))),
     cancel: vi.fn(overrides.cancel ?? (() => Promise.resolve(undefined))),
+    ...(overrides.answered ? { answered: overrides.answered } : {}),
     eventSource: (url) => new FakeEventSource(url),
   };
   return { deps, flow: createAskFlow(deps) };
@@ -92,6 +93,26 @@ describe("asking", () => {
     FakeEventSource.last.emit("answer", ANSWER);
     expect(entry()).toMatchObject({ status: "done", response: ANSWER });
     expect(FakeEventSource.last.readyState).toBe(FakeEventSource.CLOSED);
+  });
+
+  it("tells the screen when an answer has arrived, and only then", async () => {
+    const answered = vi.fn();
+    const { flow } = setup({ answered });
+    await flow.submit("Q", DEFAULT_SETTINGS);
+    FakeEventSource.last.emit("retrieving", QUEUED);
+    expect(answered).not.toHaveBeenCalled();
+    FakeEventSource.last.emit("answer", ANSWER);
+    expect(answered).toHaveBeenCalledTimes(1);
+
+    for (const kind of ["cancelled", "error"] as const) {
+      store.getState().reset();
+      const other = vi.fn();
+      const { flow: next } = setup({ answered: other });
+      await next.submit("Q", DEFAULT_SETTINGS);
+      if (kind === "cancelled") FakeEventSource.last.emit("cancelled", QUEUED);
+      else replay(FakeEventSource.last, capturedAsk("unavailable").events);
+      expect(other, kind).not.toHaveBeenCalled();
+    }
   });
 
   it("plays back the events of every recorded answer", async () => {
@@ -274,6 +295,18 @@ describe("a connection that breaks", () => {
     expect(entry().status).toBe("retrieving");
   });
 
+  it("tells the screen when the answer was read from the API", async () => {
+    const answered = vi.fn();
+    const { flow } = setup({
+      answered,
+      get: () => Promise.resolve(view({ state: "done", response: ANSWER })),
+    });
+    await flow.submit("Q", DEFAULT_SETTINGS);
+    FakeEventSource.last.drop(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answered).toHaveBeenCalledTimes(1);
+  });
+
   it("reads a failure from the API", async () => {
     const failure = {
       ask_id: "a1",
@@ -327,6 +360,7 @@ describe("a connection that breaks", () => {
 
   it("follows a queued question's position through the API", async () => {
     const { flow } = setup({
+      create: () => Promise.resolve({ ask_id: "a1", position: 5 }),
       get: () => Promise.resolve(view({ state: "queued", position: 3 })),
     });
     await flow.submit("Q", DEFAULT_SETTINGS);

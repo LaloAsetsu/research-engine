@@ -23,6 +23,8 @@ export interface FlowDeps {
   create: (body: AskRequest) => Promise<AskAccepted>;
   get: (askId: string) => Promise<AskView>;
   cancel: (askId: string) => Promise<unknown>;
+  /** Called when an answer has arrived, whichever way it was learned. */
+  answered?: () => void;
   eventSource?: EventSourceFactory;
 }
 
@@ -98,7 +100,10 @@ export function createAskFlow(deps: FlowDeps): AskFlow {
         case "answering":
           return store.getState().advance(key, event.kind);
         case "answer":
-          return end(() => store.getState().succeed(key, event.response));
+          return end(() => {
+            store.getState().succeed(key, event.response);
+            deps.answered?.();
+          });
         case "error":
           return fail({ kind: "server", failure: event.failure });
         case "cancelled":
@@ -146,7 +151,10 @@ export function createAskFlow(deps: FlowDeps): AskFlow {
       switch (view.state) {
         case "done":
           return response
-            ? end(() => store.getState().succeed(key, response))
+            ? end(() => {
+                store.getState().succeed(key, response);
+                deps.answered?.();
+              })
             : fail({ kind: "lost" });
         case "failed":
           return fail(error ? { kind: "server", failure: error } : { kind: "lost" });

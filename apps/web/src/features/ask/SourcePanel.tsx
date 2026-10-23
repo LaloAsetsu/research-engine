@@ -41,7 +41,7 @@ export function SourcePanel() {
           if (shown) returnFocus(shown.opener);
         }}
       >
-        {shown ? <SourceView target={shown} /> : null}
+        {shown ? <SourceView key={shown.docId} target={shown} /> : null}
       </SheetContent>
     </Sheet>
   );
@@ -52,9 +52,11 @@ function SourceView({ target }: { target: SourceTarget }) {
   const pagesLabel = usePagesLabel();
   const moveSource = useAskStore((state) => state.moveSource);
   const paper = useDocument(target.docId);
-  const found = useDocumentPage(target.docId, target.page);
-  // While another page loads the previous one stays (no flash), but never another paper's page.
-  const page = { ...found, data: found.data?.doc_id === target.docId ? found.data : undefined };
+  // While another page of the same paper loads, the previous one stays (no flash). The view is
+  // keyed by the cited id, so a page of another paper is never carried over. The id is not
+  // compared with the one the API answers with: a citation may carry the 16 printed characters,
+  // and the API completes them.
+  const page = useDocumentPage(target.docId, target.page);
   const body = useRef<HTMLDivElement>(null);
 
   const summary = paper.data?.summary;
@@ -66,14 +68,16 @@ function SourceView({ target }: { target: SourceTarget }) {
     body.current?.scrollTo?.({ top: 0 });
   }, [target.docId, target.page]);
 
+  // The position names the page whose text is on screen, which trails the request while it loads.
+  const shownPage = page.data?.page ?? target.page;
   const position =
     total === null
       ? null
-      : t(unit === "section" ? "source.sectionOf" : "source.pageOf", { page: target.page, total });
+      : t(unit === "section" ? "source.sectionOf" : "source.pageOf", { page: shownPage, total });
   const authors = paper.data?.authors.join(", ");
   const year = paper.data?.year;
-  const error = found.error;
-  const pageFailed = found.isError;
+  const error = page.error;
+  const pageFailed = page.isError;
   const message = isApiError(error, 404)
     ? t("source.notFound")
     : isApiError(error, 409)
@@ -88,7 +92,7 @@ function SourceView({ target }: { target: SourceTarget }) {
           {[authors, year ? String(year) : null].filter(Boolean).join(" · ")}
         </SheetDescription>
         <p role="status" className="text-sm font-medium">
-          {position}
+          {position ?? (page.data ? null : t("source.loading"))}
           {page.data?.title ? ` · ${page.data.title}` : ""}
         </p>
         <p className="text-xs text-muted-foreground">
@@ -103,7 +107,7 @@ function SourceView({ target }: { target: SourceTarget }) {
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         aria-label={t("source.text")}
-        aria-busy={found.isFetching}
+        aria-busy={page.isFetching}
         className="min-h-0 flex-1 overflow-y-auto px-4 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
       >
         {pageFailed ? (
@@ -116,7 +120,7 @@ function SourceView({ target }: { target: SourceTarget }) {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => void found.refetch()}
+                    onClick={() => void page.refetch()}
                   >
                     {t("source.retry")}
                   </Button>
@@ -127,7 +131,7 @@ function SourceView({ target }: { target: SourceTarget }) {
         ) : page.data ? (
           <MarkdownMath>{page.data.markdown}</MarkdownMath>
         ) : (
-          <div className="grid gap-3" aria-label={t("source.loading")}>
+          <div className="grid gap-3" aria-hidden="true">
             <Skeleton className="h-5 w-2/3" />
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-full" />

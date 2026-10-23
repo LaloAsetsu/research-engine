@@ -104,11 +104,13 @@ test.describe("A2: read the cited paper at its page", () => {
     await openAsk(page);
     await askAndWait(page, "What limits T1 in transmons?");
     const chip = sources(page).getByRole("button").first();
+    const cited = Number(/\bpages?\s+(\d+)/.exec(await chip.innerText())?.[1]);
+    expect(cited).toBeGreaterThan(0);
     await chip.click();
 
     const panel = page.getByRole("dialog", { name: TRANSMON_TITLE });
     await expect(panel).toBeVisible();
-    await expect(panel.getByRole("status")).toContainText(/Page \d+ of \d+/);
+    await expect(panel.getByRole("status")).toContainText(new RegExp(`Page ${cited} of \\d+`));
     await expect(panel.locator(".katex").first()).toBeVisible();
     const before = await panel.getByRole("status").innerText();
 
@@ -277,15 +279,31 @@ test.describe("A5: when the server cannot answer", () => {
     await expectNoAxeViolations(page);
   });
 
-  test("an engine that reports a problem shows why and still takes the question", async ({
-    page,
-  }) => {
+  test("an engine that reports a problem shows why and turns the button off", async ({ page }) => {
     await engineState(page, { state: "unavailable", reason: "The index could not be opened." });
     await openAsk(page);
     await expect(page.getByText(/The index could not be opened\./)).toBeVisible();
     await page.getByLabel("Your question").fill("surface code threshold");
-    await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Ask anyway" })).toBeEnabled();
+    await expect(page.getByLabel("Your question")).toHaveAccessibleDescription(
+      /The engine reports a problem, so Ask is off/,
+    );
     await expectNoAxeViolations(page);
+  });
+
+  test("Ask anyway sends the question to an engine that may be fixed", async ({ page }) => {
+    await engineState(page, { state: "unavailable", reason: "The index could not be opened." });
+    await openAsk(page);
+    await page.getByLabel("Your question").fill("What limits T1 in transmons?");
+    // The cause is fixed by now; the page learns it from the answer, not from the poll 30 s away.
+    await engineState(page, { state: "ready" });
+    await page.getByRole("button", { name: "Ask anyway" }).click();
+    await expect(page.getByRole("heading", { name: "Answer" })).toBeVisible();
+    await expect(sources(page).getByRole("button").first()).toBeVisible();
+    await expect(page.getByText("The engine reports a problem")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Ask anyway" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeEnabled();
   });
 
   test("a model server that fails during the ask is shown with a way to try again", async ({
@@ -450,6 +468,47 @@ test.describe("a narrow screen", () => {
     const panel = page.getByRole("dialog");
     await expect(panel).toBeVisible();
     const box = await panel.boundingBox();
+    expect(box?.width ?? 0).toBeLessThanOrEqual(375);
+    await expectNoAxeViolations(page);
+  });
+
+  test("keeps a long formula inside the line of text, in its own box", async ({ page }) => {
+    // A paper may print a formula wider than the screen; the fake corpus has none, so the page
+    // text is replaced on its way through with one.
+    const terms = Array.from({ length: 40 }, (_, n) => `\\alpha_{${n}}\\hat{x}_{${n}}`).join("");
+    await page.route("**/api/v1/documents/*/pages/*", async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as { markdown: string };
+      await route.fulfill({
+        response,
+        json: { ...body, markdown: `Short $x^2$, long $${terms}$, short $y$.\n\n${body.markdown}` },
+      });
+    });
+    await openAsk(page);
+    await askAndWait(page, "surface code threshold");
+    await sources(page).getByRole("button").first().click();
+    const text = page.getByRole("dialog").getByRole("region", { name: "Text of the page" });
+    await expect(text.locator(".katex").first()).toBeVisible();
+    const sideways = () =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+    expect(await sideways()).toBeLessThanOrEqual(0);
+    const box = await text.boundingBox();
+    const near = text.locator(".katex").nth(0);
+    const formula = text.locator(".katex").nth(1);
+    const far = text.locator(".katex").nth(2);
+    const inside = await formula.boundingBox();
+    // The formula keeps to the width of its line and scrolls in its own box, which can be focused.
+    expect(inside?.width ?? 0).toBeLessThanOrEqual(box?.width ?? 0);
+    expect(await formula.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+    await formula.focus();
+    await expect(formula).toBeFocused();
+    // The short formulas beside it stay plain text: no extra tab stop for each of them.
+    for (const short of [near, far]) {
+      await expect(short).not.toHaveClass(/math-scroll/);
+      await expect(short).not.toHaveAttribute("tabindex", /.*/);
+    }
     expect(box?.width ?? 0).toBeLessThanOrEqual(375);
     await expectNoAxeViolations(page);
   });

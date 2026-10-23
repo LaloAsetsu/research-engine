@@ -99,11 +99,15 @@
       "sending": "Preguntando",
       "cancel": "Cancelar pregunta",
       "blank": "Escribe una pregunta para enviarla.",
-      "busy": "Se está respondiendo una pregunta. Espera o cancélala para enviar otra."
+      "busy": "Se está respondiendo una pregunta. Espera o cancélala para enviar otra.",
+      "askAnyway": "Preguntar de todos modos",
+      "engineDown": "El motor informa de un problema, así que Preguntar está desactivado. Usa Preguntar de todos modos si la causa puede estar resuelta.",
+      "starting": "El motor está arrancando, así que Preguntar está desactivado unos segundos."
     },
     "options": {
       "trigger": "Opciones de esta pregunta",
-      "changed": "{{count}} cambiadas",
+      "changed_one": "{{count}} cambiada",
+      "changed_other": "{{count}} cambiadas",
       "title": "Opciones",
       "description": "Valen para las preguntas que envíes hasta que las restablezcas. Cada opción también puede quedarse en el valor del propio servidor.",
       "useIndex": {
@@ -134,8 +138,8 @@
       },
       "unavailable": {
         "title": "El motor informa de un problema",
-        "body": "{{reason}} Aun así puedes enviar una pregunta: la causa puede estar ya resuelta.",
-        "noReason": "Aun así puedes enviar una pregunta: la causa puede estar ya resuelta."
+        "body": "{{reason}} Preguntar está desactivado mientras dure. Si la causa puede estar resuelta, usa Preguntar de todos modos.",
+        "noReason": "Preguntar está desactivado mientras dure. Si la causa puede estar resuelta, usa Preguntar de todos modos."
       },
       "unreachable": {
         "title": "No se puede contactar con el servicio",

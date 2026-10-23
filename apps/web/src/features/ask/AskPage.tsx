@@ -3,7 +3,7 @@ import { PageHeader } from "@/shared/layout/PageHeader";
 import { Button } from "@/shared/ui/button";
 import { useAskFlow, useEngineStatus } from "./api";
 import { AnswerView } from "./AnswerView";
-import { blocksAsking, EngineNotice, engineView } from "./EngineNotice";
+import { blocksAsking, EngineNotice, engineView, isStarting } from "./EngineNotice";
 import { FailureView } from "./FailureView";
 import { HistoryList } from "./HistoryList";
 import { ProgressView, useProgressText } from "./ProgressView";
@@ -22,6 +22,9 @@ export function AskPage() {
   const active = activeEntry(entries);
   const selected = entries.find((entry) => entry.key === selectedKey);
   const blocked = blocksAsking(view) || active !== undefined;
+  // A retry is an explicit second try, so only a starting engine (or a question in flight) stops it.
+  const retryBlocked = isStarting(view) || active !== undefined;
+  const submit = (question: string) => void flow.submit(question, useAskStore.getState().settings);
 
   return (
     <>
@@ -34,13 +37,14 @@ export function AskPage() {
           <QuestionForm
             blocked={blocked}
             busy={active !== undefined}
-            onSubmit={(question) => void flow.submit(question, useAskStore.getState().settings)}
+            askAnyway={view.kind === "unavailable"}
+            onSubmit={submit}
           />
           <Announcer entry={entries[0]} />
           {selected ? (
             <EntryView
               entry={selected}
-              retryDisabled={blocked}
+              retryDisabled={retryBlocked}
               onCancel={() => void flow.cancel()}
               onRetry={(entry) => void flow.submit(entry.question, entry.settings)}
             />

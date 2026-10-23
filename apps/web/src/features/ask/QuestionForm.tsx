@@ -10,21 +10,25 @@ import { useAskStore } from "./store";
 export const MAX_QUESTION_CHARS = 4000; // the API's limit
 
 interface QuestionFormProps {
-  /** The engine is starting or a question is being answered: nothing can be sent now. */
+  /** The engine is starting or down, or a question is being answered: Ask is off. */
   blocked: boolean;
   /** A question is being answered; the button says so. */
   busy: boolean;
+  /** The engine reports a problem that may be fixed already: a second button sends regardless. */
+  askAnyway: boolean;
   onSubmit: (question: string) => void;
 }
 
 /** The question box. Ctrl+Enter (or Cmd+Enter) sends; a blank question cannot be sent. */
-export function QuestionForm({ blocked, busy, onSubmit }: QuestionFormProps) {
+export function QuestionForm({ blocked, busy, askAnyway, onSubmit }: QuestionFormProps) {
   const { t, i18n } = useTranslation(undefined, { keyPrefix: "ask" });
   const question = useAskStore((state) => state.question);
   const setQuestion = useAskStore((state) => state.setQuestion);
   const id = useId();
   const blank = isBlank(question);
   const canSend = !blank && !blocked;
+
+  const canForce = askAnyway && !blank && !busy;
 
   const send = () => {
     if (canSend) onSubmit(question);
@@ -53,7 +57,7 @@ export function QuestionForm({ blocked, busy, onSubmit }: QuestionFormProps) {
           maxLength={MAX_QUESTION_CHARS}
           value={question}
           placeholder={t("form.placeholder")}
-          aria-describedby={`${id}-hint ${id}-counter`}
+          aria-describedby={`${id}-hint ${id}-counter ${id}-why`}
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={onKeyDown}
         />
@@ -71,9 +75,27 @@ export function QuestionForm({ blocked, busy, onSubmit }: QuestionFormProps) {
         <Button type="submit" disabled={!canSend} aria-describedby={`${id}-why`}>
           {busy ? t("form.sending") : t("form.submit")}
         </Button>
+        {askAnyway ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!canForce}
+            onClick={() => onSubmit(question)}
+          >
+            {t("form.askAnyway")}
+          </Button>
+        ) : null}
         <SettingsPopover disabled={busy} />
         <p id={`${id}-why`} className="text-xs text-muted-foreground">
-          {busy ? t("form.busy") : blank ? t("form.blank") : null}
+          {busy
+            ? t("form.busy")
+            : blank
+              ? t("form.blank")
+              : askAnyway
+                ? t("form.engineDown")
+                : blocked
+                  ? t("form.starting")
+                  : null}
         </p>
       </div>
     </form>
