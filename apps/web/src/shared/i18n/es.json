@@ -1,0 +1,104 @@
+{
+  "app": {
+    "name": "Motor de investigación",
+    "skipToContent": "Saltar al contenido",
+    "loading": "Cargando",
+    "tryAgain": "Intentar de nuevo"
+  },
+  "nav": {
+    "label": "Principal",
+    "ask": "Preguntar",
+    "benchmarks": "Benchmarks",
+    "sets": "Conjuntos de preguntas",
+    "circuits": "Circuitos"
+  },
+  "pages": {
+    "ask": {
+      "title": "Preguntar",
+      "placeholder": "Aquí se hará una pregunta y se leerá la respuesta con sus fuentes citadas. Llega en una versión próxima."
+    },
+    "benchmarks": {
+      "title": "Benchmarks",
+      "placeholder": "Aquí se lanzarán y compararán las corridas de evaluación. Llega en una versión próxima."
+    },
+    "sets": {
+      "title": "Conjuntos de preguntas",
+      "placeholder": "Aquí se revisarán, editarán e importarán los conjuntos de preguntas. Llega en una versión próxima."
+    },
+    "circuits": {
+      "title": "Circuitos",
+      "placeholder": "Aquí se leerá y se comprobará un circuito cuántico. Llega en una versión próxima."
+    },
+    "comingSoon": "Próximamente",
+    "notFound": {
+      "title": "Página no encontrada",
+      "body": "Esta dirección no existe en la aplicación.",
+      "back": "Ir a Preguntar"
+    },
+    "error": {
+      "title": "Algo salió mal",
+      "body": "No se pudo mostrar esta pantalla."
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Iniciar sesión",
+      "description": "Entra con la cuenta que te dio quien administra el motor.",
+      "username": "Usuario",
+      "password": "Contraseña",
+      "submit": "Entrar",
+      "submitting": "Entrando",
+      "invalid": "Usuario o contraseña incorrectos.",
+      "rateLimited": "Demasiados intentos. Espera {{seconds}} s e inténtalo de nuevo.",
+      "rateLimitedNoWait": "Demasiados intentos. Espera un momento e inténtalo de nuevo.",
+      "unavailable": "El servidor no responde. Inténtalo de nuevo en un momento."
+    },
+    "change": {
+      "title": "Cambia tu contraseña",
+      "description": "Tu contraseña es temporal. Elige una nueva para continuar.",
+      "current": "Contraseña actual",
+      "new": "Contraseña nueva",
+      "confirm": "Repite la contraseña nueva",
+      "hint": "Al menos {{min}} caracteres y distinta de tu usuario.",
+      "submit": "Guardar contraseña",
+      "submitting": "Guardando",
+      "wrongCurrent": "La contraseña actual no es correcta.",
+      "failed": "No se pudo cambiar la contraseña. Inténtalo de nuevo."
+    },
+    "errors": {
+      "required": "Este campo es obligatorio.",
+      "tooShort": "Usa al menos {{min}} caracteres.",
+      "sameAsUsername": "No puede ser igual a tu usuario.",
+      "sameAsCurrent": "Debe ser distinta de la actual.",
+      "mismatch": "Las contraseñas no coinciden."
+    },
+    "menu": {
+      "label": "Cuenta de {{name}}",
+      "role": {
+        "admin": "Administrador",
+        "member": "Integrante"
+      },
+      "logout": "Cerrar sesión",
+      "logoutFailed": "No se pudo cerrar la sesión. Inténtalo de nuevo."
+    }
+  },
+  "status": {
+    "label": "Estado del servicio",
+    "ready": "Listo",
+    "readyFake": "Listo (datos de prueba)",
+    "starting": "Iniciando",
+    "unreachable": "Sin conexión",
+    "loading": "Comprobando"
+  },
+  "theme": {
+    "label": "Tema",
+    "system": "Sistema",
+    "light": "Claro",
+    "dark": "Oscuro"
+  },
+  "language": {
+    "label": "Idioma",
+    "es": "Español",
+    "en": "English"
+  }
+}

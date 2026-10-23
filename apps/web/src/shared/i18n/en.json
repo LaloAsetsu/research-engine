@@ -1,0 +1,104 @@
+{
+  "app": {
+    "name": "Research engine",
+    "skipToContent": "Skip to content",
+    "loading": "Loading",
+    "tryAgain": "Try again"
+  },
+  "nav": {
+    "label": "Main",
+    "ask": "Ask",
+    "benchmarks": "Benchmarks",
+    "sets": "Question sets",
+    "circuits": "Circuits"
+  },
+  "pages": {
+    "ask": {
+      "title": "Ask",
+      "placeholder": "Here you will ask a question and read the answer with its cited sources. It arrives in a later release."
+    },
+    "benchmarks": {
+      "title": "Benchmarks",
+      "placeholder": "Here you will start and compare evaluation runs. It arrives in a later release."
+    },
+    "sets": {
+      "title": "Question sets",
+      "placeholder": "Here you will review, edit and import question sets. It arrives in a later release."
+    },
+    "circuits": {
+      "title": "Circuits",
+      "placeholder": "Here you will read and check a quantum circuit. It arrives in a later release."
+    },
+    "comingSoon": "Coming soon",
+    "notFound": {
+      "title": "Page not found",
+      "body": "This address does not exist in the app.",
+      "back": "Go to Ask"
+    },
+    "error": {
+      "title": "Something went wrong",
+      "body": "This screen could not be shown."
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "description": "Use the account that the engine's administrator gave you.",
+      "username": "Username",
+      "password": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in",
+      "invalid": "Wrong username or password.",
+      "rateLimited": "Too many attempts. Wait {{seconds}} s and try again.",
+      "rateLimitedNoWait": "Too many attempts. Wait a moment and try again.",
+      "unavailable": "The server is not answering. Try again in a moment."
+    },
+    "change": {
+      "title": "Change your password",
+      "description": "Your password is temporary. Choose a new one to continue.",
+      "current": "Current password",
+      "new": "New password",
+      "confirm": "Repeat the new password",
+      "hint": "At least {{min}} characters and different from your username.",
+      "submit": "Save password",
+      "submitting": "Saving",
+      "wrongCurrent": "The current password is not correct.",
+      "failed": "The password could not be changed. Try again."
+    },
+    "errors": {
+      "required": "This field is required.",
+      "tooShort": "Use at least {{min}} characters.",
+      "sameAsUsername": "It cannot be the same as your username.",
+      "sameAsCurrent": "It must be different from the current one.",
+      "mismatch": "The passwords do not match."
+    },
+    "menu": {
+      "label": "{{name}}'s account",
+      "role": {
+        "admin": "Administrator",
+        "member": "Member"
+      },
+      "logout": "Sign out",
+      "logoutFailed": "Could not sign out. Try again."
+    }
+  },
+  "status": {
+    "label": "Service status",
+    "ready": "Ready",
+    "readyFake": "Ready (test data)",
+    "starting": "Starting",
+    "unreachable": "Unreachable",
+    "loading": "Checking"
+  },
+  "theme": {
+    "label": "Theme",
+    "system": "System",
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "language": {
+    "label": "Language",
+    "es": "Español",
+    "en": "English"
+  }
+}
