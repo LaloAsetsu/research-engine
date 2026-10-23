@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
-from helpers import live_settings, prepare_live
+from helpers import live_settings, prepare_live, write_config
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
@@ -287,10 +287,10 @@ def test_the_factory_writes_the_live_log_to_the_log_folder(
 ) -> None:
     settings = prepare_live(live_settings(tmp_path, log_dir=tmp_path / "logs"))
     config = tmp_path / "live.toml"
-    config.write_text(
+    write_config(
+        config,
         f'data_dir = "{settings.data_dir}"\ndb_path = "{settings.db_path}"\n'
         f'log_dir = "{settings.log_dir}"\n',
-        encoding="utf-8",
     )
     monkeypatch.setattr(logging.getLogger("uvicorn.access"), "disabled", False)
     monkeypatch.delenv("RESEARCH_API_FAKE", raising=False)

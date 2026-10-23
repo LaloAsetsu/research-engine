@@ -31,7 +31,7 @@ from ..bootstrap import (
     Settings,
     SettingsError,
     build_container,
-    load_settings,
+    load_private_settings,
     open_database,
     open_user_admin,
 )
@@ -119,7 +119,7 @@ def _settings_from(config: Path | None) -> Settings:
     path = config or (Path(os.environ[CONFIG_ENV]) if os.environ.get(CONFIG_ENV) else None)
     if path is None:
         raise SettingsError(f"give --config FILE or set {CONFIG_ENV}")
-    return load_settings(path)
+    return load_private_settings(path)
 
 
 def _container_for(
@@ -225,10 +225,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _run_users(args)
             case _:
                 container = _container_for(args.config, args.fake, args.port, args.seed)
+                try:
+                    configure_logging(
+                        None if container.mode == "fake" else container.settings.log_dir
+                    )
+                except SettingsError:
+                    container.close()
+                    raise
     except (SettingsError, ResearchApiError) as e:
         print(f"research-api: {_describe(e)}", file=sys.stderr)
         return 1
-    configure_logging(None if container.mode == "fake" else container.settings.log_dir)
     uvicorn.run(
         build_app(container),
         host=container.settings.bind_host,

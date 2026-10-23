@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import prepare_live
+from helpers import prepare_live, write_config
 
 from research_api.bootstrap import load_settings
 from research_api.entrypoints import cli
@@ -78,10 +78,7 @@ def live_config(tmp_path: Path, extra: str = "") -> Path:
     """A settings file for a live run, with its database already made."""
     path = tmp_path / "s.toml"
     folder = tmp_path / "home"
-    path.write_text(
-        f'data_dir = "{folder}/data"\ndb_path = "{folder}/db/api.sqlite3"\n{extra}',
-        encoding="utf-8",
-    )
+    write_config(path, f'data_dir = "{folder}/data"\ndb_path = "{folder}/db/api.sqlite3"\n{extra}')
     prepare_live(load_settings(path))
     return path
 
@@ -113,7 +110,7 @@ def test_serve_with_a_refused_setting_exits_1(
     served: list[dict[str, Any]], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "s.toml"
-    path.write_text('bind_host = "0.0.0.0"\n', encoding="utf-8")
+    write_config(path, 'bind_host = "0.0.0.0"\n')
     assert cli.main(["serve", "--config", str(path)]) == 1
     assert "bind_host" in capsys.readouterr().err
     assert served == []
@@ -197,7 +194,7 @@ def test_serve_live_refuses_a_database_that_is_not_up_to_date(
 ) -> None:
     path = tmp_path / "s.toml"
     home = tmp_path / "home"
-    path.write_text(f'data_dir = "{home}/d"\ndb_path = "{home}/db/a.sqlite3"\n', encoding="utf-8")
+    write_config(path, f'data_dir = "{home}/d"\ndb_path = "{home}/db/a.sqlite3"\n')
     assert cli.main(["serve", "--config", str(path)]) == 1
     assert "db upgrade" in capsys.readouterr().err
     assert served == []

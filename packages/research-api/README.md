@@ -170,7 +170,8 @@ The `Host` header must name this service: `localhost`, a loopback address, the h
 |---|---|
 | `data_dir`, the folder of `db_path`, `log_dir` | made with mode `0700` if missing. If one exists and any group or other permission is set, or it belongs to another account, the service (and every `users` and `db` command) refuses with a message that names the `chmod` to run. It never changes an existing folder by itself. |
 | The database file and its `-wal` and `-shm` files | made with mode `0600` by `db upgrade`; refused when open to others. |
-| The settings file | not checked: it holds no secret. Keep it `0600` anyway. |
+| The settings file | refused by `serve`, `db`, `users` and the factory when any group or other permission is set or it belongs to another account, with the `chmod 600` to run. It holds no secret, but whoever can edit it can move `public_origin`, and with it the `Origin` check. |
+| `api.log` | made `0600`; a log kept from an earlier run is checked like the database and refused when open to others. |
 
 The folders matter because the disk of the server is shared and its parent folder is open to everyone.
 

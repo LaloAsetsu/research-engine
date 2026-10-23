@@ -8,7 +8,7 @@ from .container import (
     open_user_admin,
 )
 from .settings import Settings, SettingsError, load_settings
-from .storage import open_database
+from .storage import load_private_settings, open_database
 
 __all__ = [
     "Container",
@@ -17,6 +17,7 @@ __all__ = [
     "UserAdmin",
     "build_container",
     "container_from_env",
+    "load_private_settings",
     "load_settings",
     "open_database",
     "open_user_admin",

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from helpers import live_settings, prepare_live
+from helpers import live_settings, prepare_live, write_config
 
 from research_api.adapters.clock import SystemClock
 from research_api.adapters.fake import FAKE_EPOCH, FixedClock
@@ -46,13 +46,19 @@ def test_the_environment_can_ask_for_fake_mode() -> None:
 def test_the_environment_can_name_a_settings_file(tmp_path: Path) -> None:
     path = tmp_path / "s.toml"
     folder = tmp_path / "home"
-    path.write_text(
-        f'port = 9123\ndata_dir = "{folder}/data"\ndb_path = "{folder}/db/a.sqlite3"\n',
-        encoding="utf-8",
+    write_config(
+        path, f'port = 9123\ndata_dir = "{folder}/data"\ndb_path = "{folder}/db/a.sqlite3"\n'
     )
     prepare_live(load_settings(path))
     container = container_from_env({CONFIG_ENV: str(path)})
     assert (container.mode, container.settings.port) == ("live", 9123)
+
+
+def test_the_environment_cannot_name_a_settings_file_others_can_change(tmp_path: Path) -> None:
+    path = write_config(tmp_path / "s.toml", "port = 9124\n")
+    path.chmod(0o664)
+    with pytest.raises(SettingsError, match=f"chmod 600 {path}"):
+        container_from_env({CONFIG_ENV: str(path)})
 
 
 def test_the_environment_must_name_one_of_them() -> None:

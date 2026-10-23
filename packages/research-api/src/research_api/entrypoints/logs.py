@@ -16,7 +16,8 @@ from io import TextIOWrapper
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from ..adapters.files import create_private_file
+from ..adapters.files import PrivacyError, create_private_file, ensure_private_file
+from ..bootstrap import SettingsError
 
 FIELDS = (
     "event",
@@ -63,7 +64,10 @@ class PrivateRotatingFileHandler(RotatingFileHandler):
 
 
 def configure_logging(log_dir: Path | None) -> None:
-    """Send the service's own loggers (``research_api.*``) to the file or to stderr."""
+    """Send the service's own loggers (``research_api.*``) to the file or to stderr.
+
+    ``SettingsError`` when the log file exists and is open to other accounts.
+    """
     logger = logging.getLogger("research_api")
     for old in list(logger.handlers):
         logger.removeHandler(old)
@@ -74,6 +78,10 @@ def configure_logging(log_dir: Path | None) -> None:
     else:
         path = log_dir / LOG_NAME
         create_private_file(path)
+        try:
+            ensure_private_file(path)  # a log kept from before is checked like the database
+        except PrivacyError as e:
+            raise SettingsError(str(e)) from e
         handler = PrivateRotatingFileHandler(
             path, maxBytes=MAX_BYTES, backupCount=BACKUPS, encoding="utf-8"
         )

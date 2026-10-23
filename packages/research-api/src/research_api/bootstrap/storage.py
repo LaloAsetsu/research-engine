@@ -11,9 +11,24 @@ from ..adapters.files import (
     ensure_private_file,
 )
 from ..adapters.persistence import Database
-from .settings import Settings, SettingsError
+from .settings import Settings, SettingsError, load_settings
 
 UPGRADE_HINT = "run: research-api db upgrade"
+
+
+def load_private_settings(path: Path) -> Settings:
+    """``load_settings`` for a file the service is about to run from.
+
+    The file decides where the service lives and which origin it trusts, so one that another
+    account can read or change is refused, like the folders and the database. It names the
+    ``chmod`` to run. A missing file is left to ``load_settings`` to report.
+    """
+    if path.exists():
+        try:
+            ensure_private_file(path)
+        except PrivacyError as e:
+            raise SettingsError(str(e)) from e
+    return load_settings(path)
 
 
 def storage_paths(settings: Settings) -> tuple[Path, Path]:

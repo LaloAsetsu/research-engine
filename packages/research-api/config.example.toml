@@ -1,6 +1,7 @@
 # Settings of the research API. Copy it outside the repository and edit it; start the service
 # with `research-api serve --config <file>` or set RESEARCH_API_CONFIG. Every key is optional.
-# A mistyped key is an error. No secret belongs here.
+# A mistyped key is an error. No secret belongs here. Keep the file mode 0600 (chmod 600): the
+# service refuses to start from a file that other accounts can read or change.
 
 # The address to listen on: a loopback address, or the host's Tailscale address. Anything else
 # (0.0.0.0, a LAN address, a host name) is refused.

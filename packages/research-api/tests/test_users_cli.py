@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from helpers import write_config
 
 from research_api.bootstrap import build_container, load_settings
 from research_api.domain.auth import ONE_TIME_ALPHABET, ONE_TIME_LENGTH
@@ -23,9 +24,9 @@ def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv("RESEARCH_API_CONFIG", raising=False)
     home = tmp_path / "home"
     path = tmp_path / "api.toml"
-    path.write_text(
+    write_config(
+        path,
         f'data_dir = "{home}/data"\ndb_path = "{home}/db/api.sqlite3"\nlog_dir = "{home}/logs"\n',
-        encoding="utf-8",
     )
     assert cli.main(["db", "upgrade", "--config", str(path)]) == 0
     return path
@@ -39,6 +40,47 @@ def make_admin(config: Path) -> None:
     assert run(config, "users", "add", "ana", "--name", "Ana", "--role", "admin") == 0
 
 
+# --- the settings file and the log file are private too ------------------------------------
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o660, 0o606, 0o666])
+@pytest.mark.parametrize("command", [["db", "status"], ["users", "list"], ["serve"]])
+def test_commands_refuse_a_settings_file_open_to_other_accounts(
+    config: Path, capsys: Capture, command: list[str], mode: int
+) -> None:
+    config.chmod(mode)
+    assert run(config, *command) == 1
+    err = capsys.readouterr().err
+    assert f"chmod 600 {config}" in err
+    assert f"{mode:04o}" in err
+
+
+def test_a_settings_file_of_mode_0400_is_fine(config: Path, capsys: Capture) -> None:
+    config.chmod(0o400)
+    assert run(config, "users", "list") == 0
+
+
+def test_a_missing_settings_file_is_still_reported_as_missing(
+    tmp_path: Path, capsys: Capture
+) -> None:
+    assert cli.main(["db", "status", "--config", str(tmp_path / "nope.toml")]) == 1
+    assert "cannot read settings file" in capsys.readouterr().err
+
+
+def test_a_log_file_open_to_other_accounts_is_refused_not_reused(
+    config: Path, capsys: Capture
+) -> None:
+    logs = load_settings(config).log_dir
+    assert logs is not None
+    log = logs / "api.log"
+    log.write_text("kept from before\n", encoding="utf-8")
+    log.chmod(0o644)
+    assert run(config, "users", "list") == 1
+    assert f"chmod 600 {log}" in capsys.readouterr().err
+    assert run(config, "serve") == 1
+    assert f"chmod 600 {log}" in capsys.readouterr().err
+
+
 # --- db -------------------------------------------------------------------------------------
 
 
@@ -48,9 +90,7 @@ def test_db_upgrade_makes_the_private_folders_and_the_tables(
     monkeypatch.delenv("RESEARCH_API_CONFIG", raising=False)
     home = tmp_path / "fresh"
     path = tmp_path / "api.toml"
-    path.write_text(
-        f'data_dir = "{home}/data"\ndb_path = "{home}/db/api.sqlite3"\n', encoding="utf-8"
-    )
+    write_config(path, f'data_dir = "{home}/data"\ndb_path = "{home}/db/api.sqlite3"\n')
     assert cli.main(["db", "status", "--config", str(path)]) == 1
     assert "db upgrade" in capsys.readouterr().err
     assert cli.main(["db", "upgrade", "--config", str(path)]) == 0
@@ -88,9 +128,7 @@ def test_db_upgrade_refuses_an_open_folder(tmp_path: Path, capsys: Capture) -> N
     (home / "db").mkdir(parents=True, mode=0o755)
     (home / "db").chmod(0o755)
     path = tmp_path / "api.toml"
-    path.write_text(
-        f'data_dir = "{home}/data"\ndb_path = "{home}/db/api.sqlite3"\n', encoding="utf-8"
-    )
+    write_config(path, f'data_dir = "{home}/data"\ndb_path = "{home}/db/api.sqlite3"\n')
     assert cli.main(["db", "upgrade", "--config", str(path)]) == 1
     assert "chmod 700" in capsys.readouterr().err
     assert not (home / "db" / "api.sqlite3").exists()
@@ -268,7 +306,7 @@ def test_users_commands_refuse_a_database_that_was_never_made(
     monkeypatch.delenv("RESEARCH_API_CONFIG", raising=False)
     path = tmp_path / "api.toml"
     home = tmp_path / "h"
-    path.write_text(f'data_dir = "{home}/d"\ndb_path = "{home}/db/a.sqlite3"\n', encoding="utf-8")
+    write_config(path, f'data_dir = "{home}/d"\ndb_path = "{home}/db/a.sqlite3"\n')
     assert cli.main(["users", "add", "x", "--name", "X", "--config", str(path)]) == 1
     assert "db upgrade" in capsys.readouterr().err
 

@@ -40,8 +40,8 @@ from ..domain.status import Mode
 from ..ports.auth import PasswordHasher
 from ..ports.clock import Clock
 from .seed import SeedUser, default_seed_users
-from .settings import Settings, SettingsError, is_loopback, load_settings
-from .storage import open_current_database
+from .settings import Settings, SettingsError, is_loopback
+from .storage import load_private_settings, open_current_database
 
 CONFIG_ENV = "RESEARCH_API_CONFIG"
 FAKE_ENV = "RESEARCH_API_FAKE"
@@ -188,7 +188,7 @@ def container_from_env(environ: Mapping[str, str] | None = None) -> Container:
     path = env.get(CONFIG_ENV)
     if not path:
         raise SettingsError(f"set {CONFIG_ENV} to a settings file, or {FAKE_ENV}=1 for fake mode")
-    return build_container(load_settings(Path(path)))
+    return build_container(load_private_settings(Path(path)))
 
 
 @dataclass(frozen=True)

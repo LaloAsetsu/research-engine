@@ -40,6 +40,13 @@ def live_settings(folder: Path, **overrides: object) -> Settings:
     return Settings.model_validate({**values, **overrides})
 
 
+def write_config(path: Path, text: str) -> Path:
+    """A settings file the way the service wants it: mode 0600."""
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
 def prepare_live(settings: Settings) -> Settings:
     """Make the database of live settings (what `research-api db upgrade` does) and return them."""
     database = open_database(settings, create=True)
