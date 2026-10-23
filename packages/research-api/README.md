@@ -29,7 +29,6 @@ Start from [`config.example.toml`](config.example.toml). Keep your copy outside 
 | `bind_host` | `127.0.0.1` | A loopback address or a Tailscale address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`). `0.0.0.0`, a LAN address or a host name is refused by the settings loader. |
 | `port` | `8090` | An integer from 1 to 65535 (`"8090"` and `8090.0` are refused). |
 | `public_origin` | `http://<bind_host>:<port>` | The origin people type in the browser: scheme, host and port only (no path, query, fragment or credentials). It is rewritten the way a browser sends it in the `Origin` header: scheme and host in lowercase, an IPv6 host in its short form, no leading zeros in the port, and no port when it is the default one (`HTTP://Tool.Example:080` becomes `http://tool.example`). A value no browser sends is refused: an empty or zero port, a space or other stray character, a trailing dot, a numeric host that is not a plain IPv4 address. Later used to check where a write request came from. |
-
 | `[circuit_caps]` | see [Circuit check](#circuit-check) | A table with `max_body_bytes`, `max_ops` and `timeout_s`. Each is checked against a range, and a key that is not one of the three is an error. |
 
 A key that is not in the table is an error. Later pull requests add their keys here (database path, data folder, model servers, session lifetimes).
