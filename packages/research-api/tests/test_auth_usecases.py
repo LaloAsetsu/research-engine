@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import replace
+from datetime import datetime, timedelta
 
 import pytest
 from helpers import MovableClock
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
+from sqlalchemy import text
 
-from research_api.application.auth import AuthServices, hash_token
+from research_api.application.auth import AuthServices, LoginThrottle, hash_token
 from research_api.bootstrap import Container, Settings, build_container
-from research_api.domain.auth import ONE_TIME_ALPHABET, ONE_TIME_LENGTH, Role
+from research_api.domain.auth import ONE_TIME_ALPHABET, ONE_TIME_LENGTH, LoginPolicy, Role
 from research_api.domain.errors import (
     ConflictError,
     ForbiddenError,
@@ -222,6 +228,159 @@ def test_the_limits_come_from_the_settings(clock: MovableClock) -> None:
     assert blocked.value.retry_after_s == 60
     clock.advance(minutes=1)
     assert auth.sign_in("ana", GOOD, ADDRESS)
+
+
+def stored_names(container: Container) -> list[str]:
+    """Every username column of the failed-login table, as the database holds it."""
+    attempts = container.auth.sign_in._throttle._attempts
+    with attempts._engine.connect() as connection:  # type: ignore[attr-defined]
+        return [row[0] for row in connection.execute(text("SELECT username FROM login_attempts"))]
+
+
+def slow_down(auth: AuthServices, seconds: float = 0.05) -> list[int]:
+    """Make each password check take a moment, as the real hash does; count the checks."""
+    hasher = auth.sign_in._hasher
+    real, checks = hasher.verify, []
+
+    def verify(password: str, password_hash: str):
+        checks.append(1)
+        time.sleep(seconds)
+        return real(password, password_hash)
+
+    hasher.verify = verify  # type: ignore[method-assign]
+    return checks
+
+
+def test_parallel_wrong_logins_are_checked_at_most_five_times(
+    container: Container, auth: AuthServices
+) -> None:
+    checks = slow_down(auth)
+    barrier = threading.Barrier(30)
+
+    def attempt(i: int) -> str:
+        barrier.wait()
+        try:
+            auth.sign_in("beto", f"wrong-guess-number-{i:03d}", ADDRESS)
+        except UnauthenticatedError:
+            return "401"
+        except RateLimitedError:
+            return "429"
+        return "ok"
+
+    with ThreadPoolExecutor(30) as pool:
+        answers = list(pool.map(attempt, range(30)))
+    assert answers.count("401") == 5
+    assert answers.count("429") == 25
+    assert len(checks) == 5
+    assert len(stored_names(container)) == 5
+
+
+def test_parallel_logins_from_one_address_stop_at_twenty(
+    container: Container, auth: AuthServices
+) -> None:
+    checks = slow_down(auth)
+    barrier = threading.Barrier(40)
+
+    def attempt(i: int) -> None:
+        barrier.wait()
+        with suppress(UnauthenticatedError, RateLimitedError):
+            auth.sign_in(f"guess{i}", "wrong-guess-number-1", ADDRESS)
+
+    with ThreadPoolExecutor(40) as pool:
+        list(pool.map(attempt, range(40)))
+    assert len(checks) <= 20
+
+
+def test_parallel_wrong_current_passwords_are_checked_at_most_five_times(
+    auth: AuthServices,
+) -> None:
+    who = auth.authenticate(auth.sign_in("ana", GOOD, ADDRESS).token)
+    checks = slow_down(auth)
+    barrier = threading.Barrier(20)
+
+    def attempt(i: int) -> None:
+        barrier.wait()
+        with suppress(ForbiddenError, RateLimitedError):
+            auth.change_password(who, f"wrong-current-{i:03d}", "a-new-long-password-1", ADDRESS)
+
+    with ThreadPoolExecutor(20) as pool:
+        list(pool.map(attempt, range(20)))
+    assert len(checks) == 5
+
+
+def test_a_right_password_gives_back_its_reserved_failure(
+    container: Container, auth: AuthServices
+) -> None:
+    for _ in range(4):
+        fail_login(auth)
+    auth.sign_in("ana", GOOD, ADDRESS)
+    assert stored_names(container) == []
+
+
+def test_a_weak_new_password_does_not_count_as_a_failure(
+    container: Container, auth: AuthServices
+) -> None:
+    who = auth.authenticate(auth.sign_in("ana", GOOD, ADDRESS).token)
+    for _ in range(8):
+        with pytest.raises(InvalidInputError):
+            auth.change_password(who, GOOD, "short", ADDRESS)
+    assert stored_names(container) == []
+
+
+def test_the_text_typed_for_an_unknown_name_is_never_stored(
+    container: Container, auth: AuthServices
+) -> None:
+    typed = ["correct horse battery staple", "hunter2", "Ghost.User", "  PADDED  "]
+    for name in typed:
+        fail_login(auth, name)
+    stored = stored_names(container)
+    assert len(stored) == len(typed)
+    for name in typed:
+        digest = hashlib.sha256(name.strip().lower().encode()).hexdigest()
+        assert not any(name.strip().lower() in row or digest[:16] in row for row in stored)
+    assert all(row.startswith("~") for row in stored)  # no username can start with ~
+
+
+def test_an_unknown_name_is_counted_by_itself_not_in_a_shared_bucket(auth: AuthServices) -> None:
+    """Otherwise 'blocked after five tries' would tell a real name from one nobody owns."""
+    for _ in range(5):
+        fail_login(auth, "ghost")
+    with pytest.raises(RateLimitedError):
+        auth.sign_in("ghost", "x", ADDRESS)
+    with pytest.raises(UnauthenticatedError):  # another unknown name is not blocked by it
+        auth.sign_in("phantom", "x", "10.0.0.9")
+
+
+def test_the_digest_of_a_name_changes_with_the_secret(clock: MovableClock) -> None:
+    first, second = make(clock), make(clock)
+    one = first.auth.sign_in._throttle.bucket("ghost", None)
+    assert one == first.auth.sign_in._throttle.bucket("ghost", None)
+    assert one != second.auth.sign_in._throttle.bucket("ghost", None)
+    assert first.auth.sign_in._throttle.bucket("ana", "ana") == "ana"
+
+
+class SilentAttempts:
+    """A store that refuses a reservation yet shows no failures: the window moved in between."""
+
+    def reserve(self, **_: object) -> None:
+        return None
+
+    def purge_before(self, at: datetime) -> None:
+        pass
+
+    def failure_times(self, **_: object) -> list[datetime]:
+        return []
+
+
+def test_a_refusal_with_no_failures_left_to_count_waits_one_second(clock: MovableClock) -> None:
+    throttle = LoginThrottle(
+        attempts=SilentAttempts(),  # type: ignore[arg-type]
+        clock=clock,
+        policy=LoginPolicy(max_failures=5, window=timedelta(minutes=15)),
+    )
+    with pytest.raises(RateLimitedError) as blocked:
+        throttle.reserve("ana", "ana", ADDRESS)
+    assert blocked.value.retry_after_s == 1
 
 
 # --- authenticate ---------------------------------------------------------------------------

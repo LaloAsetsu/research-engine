@@ -106,10 +106,6 @@ def normalize_username(raw: str) -> str:
     return raw.strip().lower()
 
 
-def is_valid_username(name: str) -> bool:
-    return _USERNAME.fullmatch(name) is not None
-
-
 def validate_username(raw: str) -> str:
     name = normalize_username(raw)
     if not _USERNAME.fullmatch(name):

@@ -245,15 +245,17 @@ def test_blocked_attempts_password_changes_and_ended_sessions_are_logged(
     assert "password.changed" in {line["event"] for line in lines(path) if "event" in line}
 
 
-def test_a_typed_username_that_cannot_be_one_is_not_written_down(
+def test_a_typed_username_that_names_no_account_is_not_written_down(
     logged: tuple[TestClient, Path, list[str]],
 ) -> None:
     client, path, _ = logged
-    client.post("/api/v1/auth/login", json={"username": "my pass word 123", "password": "x"})
+    for typed in ("my pass word 123", "hunter2-looks-like-a-name"):
+        client.post("/api/v1/auth/login", json={"username": typed, "password": "x"})
     text = path.read_text(encoding="utf-8")
     assert "my pass word" not in text
-    failure = next(line for line in lines(path) if line.get("event") == "login.failure")
-    assert failure["username"] == "(invalid)"
+    assert "hunter2-looks" not in text
+    failures = [line for line in lines(path) if line.get("event") == "login.failure"]
+    assert [f["username"] for f in failures] == ["(unknown)", "(unknown)"]
 
 
 def test_a_request_line_has_the_route_template_not_the_path_or_the_query(

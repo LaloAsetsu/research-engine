@@ -7,6 +7,7 @@ cannot be turned into a session. Nothing here logs a password, a token or a hash
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import secrets
 from dataclasses import dataclass, replace
@@ -24,7 +25,6 @@ from ..domain.auth import (
     SessionPolicy,
     User,
     check_password,
-    is_valid_username,
     normalize_username,
     validate_display_name,
     validate_username,
@@ -48,17 +48,12 @@ TOUCH_EVERY = timedelta(seconds=60)
 
 WRONG_LOGIN = "Wrong username or password."
 NOT_SIGNED_IN = "Sign in to continue."
+UNKNOWN = "(unknown)"
 
 
 def audit(event: str, **fields: object) -> None:
     """One line of the audit trail. Only plain facts: never a password, token or hash."""
     audit_log.info(event, extra={"event": event, **fields})
-
-
-def loggable(name: str) -> str:
-    """A typed username for the log. Anything that cannot be a username is not written down: it
-    may be a password typed into the wrong box."""
-    return name if is_valid_username(name) else "(invalid)"
 
 
 def hash_token(token: str) -> str:
@@ -110,21 +105,76 @@ def _open_session(user: User, now: datetime) -> NewSession:
     return NewSession(token=token, session=session, user=user)
 
 
-class LoginThrottle:
-    """Failed logins counted per username and per address in a window, kept in the database."""
+@dataclass(frozen=True)
+class Attempt:
+    """A failure taken in advance for a login that is being checked."""
 
-    def __init__(self, *, attempts: LoginAttempts, clock: Clock, policy: LoginPolicy) -> None:
+    id: int
+    bucket: str
+    """The name the failure is counted under (see ``LoginThrottle.bucket``)."""
+
+
+class LoginThrottle:
+    """Failed logins counted per username and per address in a window, kept in the database.
+
+    A login takes its failure in advance (``reserve``), before the slow password check, and gives
+    it back if the password was right. That way a burst of parallel requests cannot get more
+    checks than the limit allows.
+    """
+
+    def __init__(
+        self,
+        *,
+        attempts: LoginAttempts,
+        clock: Clock,
+        policy: LoginPolicy,
+        secret: bytes | None = None,
+    ) -> None:
         self._attempts = attempts
         self._clock = clock
         self._policy = policy
+        # Keyed per process, never stored: a name nobody owns is counted under a digest of it that
+        # nobody can turn back into the text, which may have been a password typed in the wrong
+        # box. A restart forgets these counts, which were only guesses at names that do not exist.
+        self._secret = secret if secret is not None else secrets.token_bytes(32)
 
-    def check(self, username: str, address: str) -> int | None:
-        """Seconds to wait when this caller is over a limit, else ``None``."""
+    def bucket(self, name: str, account: str | None) -> str:
+        """What a failure is counted under: the account's username, else a keyed digest.
+
+        An unknown name is still counted one by one, so that the answer for a name nobody owns
+        looks like the answer for a real one. The digest starts with ``~``, which no username can.
+        """
+        if account is not None:
+            return account
+        digest = hmac.new(self._secret, name.encode("utf-8"), hashlib.sha256).hexdigest()
+        return "~" + digest[:32]
+
+    def reserve(self, name: str, account: str | None, address: str) -> Attempt:
+        """Take a failure for this login, or raise ``RateLimitedError`` when a limit is reached.
+
+        ``name`` is what was typed; ``account`` is the username of the account it names, or
+        ``None`` when there is none.
+        """
+        bucket = self.bucket(name, account)
         now = self._clock.now()
         since = now - self._policy.window
         self._attempts.purge_before(since)
+        taken = self._attempts.reserve(
+            username=bucket,
+            address=address,
+            at=now,
+            since=since,
+            max_by_username=self._policy.max_failures,
+            max_by_address=self._policy.max_failures_per_address,
+        )
+        if taken is None:
+            raise _too_many(self._wait(bucket, address, now, since))
+        return Attempt(id=taken, bucket=bucket)
+
+    def _wait(self, bucket: str, address: str, now: datetime, since: datetime) -> int:
+        """Seconds until the failures that block this caller have left the window."""
         by_name = self._policy.retry_after_s(
-            self._attempts.failure_times(username=username, since=since),
+            self._attempts.failure_times(username=bucket, since=since),
             self._policy.max_failures,
             now,
         )
@@ -134,10 +184,12 @@ class LoginThrottle:
             now,
         )
         waits = [w for w in (by_name, by_address) if w is not None]
-        return max(waits) if waits else None
+        # A caller that was blocked a moment ago can find the window moved on; wait at least 1 s.
+        return max(waits) if waits else 1
 
-    def fail(self, username: str, address: str) -> None:
-        self._attempts.record_failure(username=username, address=address, at=self._clock.now())
+    def release(self, attempt: Attempt) -> None:
+        """The password was right: the failure taken in advance did not happen."""
+        self._attempts.release(attempt.id)
 
     def succeed(self, username: str) -> None:
         self._attempts.clear_username(username)
@@ -167,11 +219,15 @@ class SignIn:
 
     def __call__(self, username: str, password: str, address: str) -> NewSession:
         name = normalize_username(username)
-        wait = self._throttle.check(name, address)
-        if wait is not None:
-            audit("login.blocked", username=loggable(name), address=address)
-            raise _too_many(wait)
         user = self._users.by_username(name)
+        # The typed text is never logged or stored: it may be a password typed in the wrong box.
+        # An account is named by its own username; any other name is "(unknown)" from here on.
+        shown = user.username if user is not None else UNKNOWN
+        try:
+            self._throttle.reserve(name, user.username if user else None, address)
+        except RateLimitedError:
+            audit("login.blocked", username=shown, address=address)
+            raise
         if user is None:
             self._hasher.burn(password)  # an unknown name takes as long as a wrong password
             ok = False
@@ -182,10 +238,9 @@ class SignIn:
                 user = replace(user, password_hash=verification.upgraded_hash)
                 self._users.save(user)
         if not ok or user is None:
-            self._throttle.fail(name, address)
-            audit("login.failure", username=loggable(name), address=address)
+            audit("login.failure", username=shown, address=address)  # the reserved failure stands
             raise UnauthenticatedError(WRONG_LOGIN)
-        self._throttle.succeed(name)
+        self._throttle.succeed(user.username)  # also takes back the failure reserved above
         now = self._clock.now()
         self._sessions.delete_idle_or_old(
             idle_before=now - self._policy.idle, created_before=now - self._policy.absolute
@@ -262,13 +317,11 @@ class ChangePassword:
 
     def __call__(self, who: Authenticated, current: str, new: str, address: str) -> NewSession:
         user = who.user
-        wait = self._throttle.check(user.username, address)
-        if wait is not None:
-            raise _too_many(wait)
+        attempt = self._throttle.reserve(user.username, user.username, address)
         if not self._hasher.verify(current, user.password_hash).ok:
-            self._throttle.fail(user.username, address)
             audit("password.refused", username=user.username, address=address)
             raise ForbiddenError("The current password is wrong.")
+        self._throttle.release(attempt)
         check_password(new, user.username)
         if new == current:
             raise InvalidInputError(

@@ -56,7 +56,30 @@ class SessionRepo(Protocol):
 
 
 class LoginAttempts(Protocol):
-    def record_failure(self, *, username: str, address: str, at: datetime) -> None: ...
+    def reserve(
+        self,
+        *,
+        username: str,
+        address: str,
+        at: datetime,
+        since: datetime,
+        max_by_username: int,
+        max_by_address: int,
+    ) -> int | None:
+        """Take one of the failures a caller may still make, before the password is checked.
+
+        In one step that no other caller can interleave with, count the failures after ``since``
+        for ``username`` and for ``address``; when both counts are under their limits, record a
+        failure at ``at`` and return its id, else record nothing and return ``None``. The row is
+        the attempt in progress: it stays if the password was wrong and goes with ``release`` if
+        it was right. Checking first and recording later would let a burst of parallel requests
+        all pass the check before the first failure was written.
+        """
+        ...
+
+    def release(self, attempt_id: int) -> None:
+        """Give back a reserved failure: the password was right after all."""
+        ...
 
     def failure_times(
         self, *, username: str | None = None, address: str | None = None, since: datetime

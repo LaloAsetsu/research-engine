@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, Engine, delete, select, update
+from sqlalchemy import CursorResult, Engine, delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
@@ -166,9 +166,50 @@ class SqlLoginAttempts:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
 
-    def record_failure(self, *, username: str, address: str, at: datetime) -> None:
+    def reserve(
+        self,
+        *,
+        username: str,
+        address: str,
+        at: datetime,
+        since: datetime,
+        max_by_username: int,
+        max_by_address: int,
+    ) -> int | None:
+        name, where = username[:64], address[:64]
+        # The write lock is taken before the counts are read (BEGIN IMMEDIATE), so two callers
+        # cannot both see "four failures" and both record the fifth. SQLAlchemy is told to leave
+        # transactions alone for this one connection, because the sqlite driver would otherwise
+        # begin them lazily, at the first write.
+        with self._engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                by_name = connection.scalar(
+                    select(func.count())
+                    .select_from(LoginAttemptRow)
+                    .where(LoginAttemptRow.at > since, LoginAttemptRow.username == name)
+                )
+                by_address = connection.scalar(
+                    select(func.count())
+                    .select_from(LoginAttemptRow)
+                    .where(LoginAttemptRow.at > since, LoginAttemptRow.address == where)
+                )
+                attempt_id: int | None = None
+                if (by_name or 0) < max_by_username and (by_address or 0) < max_by_address:
+                    key = connection.execute(
+                        insert(LoginAttemptRow).values(username=name, address=where, at=at)
+                    ).inserted_primary_key
+                    assert key is not None  # a plain insert reports the new row's key
+                    attempt_id = int(key[0])
+                connection.exec_driver_sql("COMMIT")
+            except BaseException:
+                connection.exec_driver_sql("ROLLBACK")
+                raise
+        return attempt_id
+
+    def release(self, attempt_id: int) -> None:
         with DbSession(self._engine) as db, db.begin():
-            db.add(LoginAttemptRow(username=username[:64], address=address[:64], at=at))
+            db.execute(delete(LoginAttemptRow).where(LoginAttemptRow.id == attempt_id))
 
     def failure_times(
         self, *, username: str | None = None, address: str | None = None, since: datetime

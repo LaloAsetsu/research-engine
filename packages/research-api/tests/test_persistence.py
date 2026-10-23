@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 import stat
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -27,6 +29,20 @@ def db(tmp_path: Path) -> Database:
     database.upgrade()
     yield database
     database.close()
+
+
+def fail(db: Database, *, username: str, address: str, at: datetime) -> int:
+    """Record one failed login, with limits too high to matter. Returns its id."""
+    taken = db.attempts.reserve(
+        username=username,
+        address=address,
+        at=at,
+        since=at - timedelta(days=1),
+        max_by_username=10_000,
+        max_by_address=10_000,
+    )
+    assert taken is not None
+    return taken
 
 
 def new_user(name: str = "ana", **kw: object) -> NewUser:
@@ -294,9 +310,9 @@ def test_a_token_hash_is_unique(db: Database) -> None:
 
 def test_failures_are_counted_per_username_and_per_address(db: Database) -> None:
     attempts = db.attempts
-    attempts.record_failure(username="ana", address="10.0.0.1", at=T0)
-    attempts.record_failure(username="ana", address="10.0.0.2", at=T0 + timedelta(seconds=1))
-    attempts.record_failure(username="beto", address="10.0.0.1", at=T0 + timedelta(seconds=2))
+    fail(db, username="ana", address="10.0.0.1", at=T0)
+    fail(db, username="ana", address="10.0.0.2", at=T0 + timedelta(seconds=1))
+    fail(db, username="beto", address="10.0.0.1", at=T0 + timedelta(seconds=2))
     before = T0 - timedelta(seconds=1)
     assert len(attempts.failure_times(username="ana", since=before)) == 2
     assert len(attempts.failure_times(address="10.0.0.1", since=before)) == 2
@@ -306,7 +322,7 @@ def test_failures_are_counted_per_username_and_per_address(db: Database) -> None
 
 def test_failure_times_come_back_oldest_first(db: Database) -> None:
     for seconds in (5, 1, 3):
-        db.attempts.record_failure(username="ana", address="a", at=T0 + timedelta(seconds=seconds))
+        fail(db, username="ana", address="a", at=T0 + timedelta(seconds=seconds))
     assert db.attempts.failure_times(username="ana", since=T0) == [
         T0 + timedelta(seconds=s) for s in (1, 3, 5)
     ]
@@ -317,24 +333,82 @@ def test_failure_times_come_back_oldest_first(db: Database) -> None:
 
 def test_clearing_a_username_leaves_other_usernames_from_the_same_address(db: Database) -> None:
     before = T0 - timedelta(seconds=1)
-    db.attempts.record_failure(username="ana", address="10.0.0.1", at=T0)
-    db.attempts.record_failure(username="beto", address="10.0.0.1", at=T0)
+    fail(db, username="ana", address="10.0.0.1", at=T0)
+    fail(db, username="beto", address="10.0.0.1", at=T0)
     db.attempts.clear_username("ana")
     assert db.attempts.failure_times(username="ana", since=before) == []
     assert len(db.attempts.failure_times(address="10.0.0.1", since=before)) == 1
 
 
 def test_purge_forgets_only_old_failures(db: Database) -> None:
-    db.attempts.record_failure(username="a", address="x", at=T0 - timedelta(hours=1))
-    db.attempts.record_failure(username="a", address="x", at=T0)
+    fail(db, username="a", address="x", at=T0 - timedelta(hours=1))
+    fail(db, username="a", address="x", at=T0)
     db.attempts.purge_before(T0 - timedelta(minutes=1))
     assert db.attempts.failure_times(username="a", since=T0 - timedelta(days=1)) == [T0]
 
 
 def test_a_very_long_name_is_cut_to_the_column_and_still_counts(db: Database) -> None:
     long = "x" * 500
-    db.attempts.record_failure(username=long, address="a", at=T0)
+    fail(db, username=long, address="a", at=T0)
     assert len(db.attempts.failure_times(username=long, since=T0 - timedelta(seconds=1))) == 1
+
+
+def reserve(db: Database, username: str, address: str, *, name_max: int = 5, addr_max: int = 20):
+    return db.attempts.reserve(
+        username=username,
+        address=address,
+        at=T0,
+        since=T0 - timedelta(minutes=15),
+        max_by_username=name_max,
+        max_by_address=addr_max,
+    )
+
+
+def test_a_reservation_is_refused_at_the_username_limit(db: Database) -> None:
+    taken = [reserve(db, "ana", f"10.0.0.{i}") for i in range(7)]
+    assert [t is not None for t in taken] == [True] * 5 + [False] * 2
+    assert len(db.attempts.failure_times(username="ana", since=T0 - timedelta(hours=1))) == 5
+
+
+def test_a_reservation_is_refused_at_the_address_limit(db: Database) -> None:
+    taken = [reserve(db, f"user{i}", "10.0.0.1", addr_max=3) for i in range(5)]
+    assert [t is not None for t in taken] == [True] * 3 + [False] * 2
+
+
+def test_a_released_reservation_frees_its_place(db: Database) -> None:
+    taken = [reserve(db, "ana", "a", name_max=2) for _ in range(2)]
+    assert reserve(db, "ana", "a", name_max=2) is None
+    assert taken[0] is not None
+    db.attempts.release(taken[0])
+    assert reserve(db, "ana", "a", name_max=2) is not None
+
+
+def test_a_failed_reservation_leaves_nothing_behind(db: Database) -> None:
+    naive = datetime(2026, 3, 4)  # the column refuses a time without a zone
+    with pytest.raises(StatementError):
+        db.attempts.reserve(
+            username="ana",
+            address="a",
+            at=naive,
+            since=T0,
+            max_by_username=5,
+            max_by_address=20,
+        )
+    assert db.attempts.failure_times(username="ana", since=T0 - timedelta(days=1)) == []
+    assert reserve(db, "ana", "a") is not None  # the connection is not stuck in a transaction
+
+
+def test_parallel_reservations_never_pass_the_limit(db: Database) -> None:
+    barrier = threading.Barrier(24)
+
+    def one(i: int) -> int | None:
+        barrier.wait()
+        return reserve(db, "ana", f"10.0.0.{i}")
+
+    with ThreadPoolExecutor(24) as pool:
+        taken = list(pool.map(one, range(24)))
+    assert sum(t is not None for t in taken) == 5
+    assert len(db.attempts.failure_times(username="ana", since=T0 - timedelta(hours=1))) == 5
 
 
 def test_the_models_know_every_table() -> None:
