@@ -7,14 +7,12 @@ Reviews are only ever appended.
 
 from __future__ import annotations
 
-import contextlib
 import os
-import tempfile
 import threading
 from pathlib import Path
 
 from ...domain.sets import SetRef, valid_name, valid_version
-from .private import FILE_MODE, ensure_private_dir
+from .private import FILE_MODE, ensure_private_dir, replace_file
 
 SET_SUFFIX = ".qset.jsonl"
 REVIEWS_SUFFIX = ".reviews.jsonl"
@@ -53,7 +51,7 @@ class SetFileStore:
 
     def write(self, ref: SetRef, data: bytes) -> None:
         folder = self._make_folder(ref)
-        self._replace(folder, self._path(ref, SET_SUFFIX), data)
+        replace_file(folder, self._path(ref, SET_SUFFIX), data)
 
     def _copy_path(self, ref: SetRef, label: str) -> Path:
         if not label.isalnum():
@@ -62,7 +60,7 @@ class SetFileStore:
 
     def keep_copy(self, ref: SetRef, label: str, data: bytes) -> None:
         folder = self._make_folder(ref)
-        self._replace(folder, self._copy_path(ref, label), data)
+        replace_file(folder, self._copy_path(ref, label), data)
 
     def read_copy(self, ref: SetRef, label: str) -> bytes | None:
         return self._read(self._copy_path(ref, label))
@@ -72,7 +70,7 @@ class SetFileStore:
 
     def write_reviews(self, ref: SetRef, data: bytes) -> None:
         folder = self._make_folder(ref)
-        self._replace(folder, self._path(ref, REVIEWS_SUFFIX), data)
+        replace_file(folder, self._path(ref, REVIEWS_SUFFIX), data)
 
     def append_reviews(self, ref: SetRef, data: bytes) -> None:
         self._make_folder(ref)
@@ -83,29 +81,3 @@ class SetFileStore:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-
-    @staticmethod
-    def _sync_folder(folder: Path) -> None:
-        """Flush the folder's own entry, or a power cut can lose the rename."""
-        descriptor = os.open(folder, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-
-    @staticmethod
-    def _replace(folder: Path, target: Path, data: bytes) -> None:
-        descriptor, temp_name = tempfile.mkstemp(dir=folder, prefix=".tmp-", suffix=".part")
-        temp = Path(temp_name)
-        try:
-            os.fchmod(descriptor, FILE_MODE)
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(data)
-                stream.flush()
-                os.fsync(stream.fileno())
-            temp.replace(target)
-            SetFileStore._sync_folder(folder)
-        except BaseException:
-            with contextlib.suppress(FileNotFoundError):
-                temp.unlink()
-            raise
