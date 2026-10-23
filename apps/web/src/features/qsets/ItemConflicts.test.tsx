@@ -119,6 +119,12 @@ function gate() {
   return { wait, release };
 }
 
+/** Replace the text of a box of JSON with `value`. */
+async function setBox(user: ReturnType<typeof userEvent.setup>, box: HTMLElement, value: unknown) {
+  await user.clear(box);
+  await user.paste(JSON.stringify(value, null, 2));
+}
+
 /**
  * Add text to a box of JSON so that it cannot be read: the person is half way through an edit.
  * The text is added to the end, so the last text that could be read is still the one saved.
@@ -726,5 +732,277 @@ describe("text that cannot be read yet is an edit (blocker 2 of round 2)", () =>
     await user.click(screen.getByRole("button", { name: "Merge with my edits" }));
     expect(question()).toHaveValue("Changed while I typed");
     expect(notes().value).toMatch(/ mine$/);
+  });
+});
+
+describe("text that cannot be read, round 3", () => {
+  it("takes the latest value of a field that no broken box shows, and the broken box keeps its text", async () => {
+    const served = serve("DP-003");
+    const { user } = await openItem("DP-003");
+    await user.type(question(), " mine");
+    served.change({ question: "Their version of the question" });
+    await user.click(save());
+    await user.click(await screen.findByRole("button", { name: "Keep my edits" }));
+    await screen.findByText("Merged with the latest version");
+
+    await breakBox(user);
+    const useLatest = screen.getByRole("button", { name: "Use the latest value of question" });
+    expect(useLatest).toBeEnabled();
+    expect(screen.queryByText(/Fix that box before you take the latest value/)).toBeNull();
+    await user.click(useLatest);
+    expect(question()).toHaveValue("Their version of the question");
+    expect(otherBox().value).toMatch(/ nope$/);
+    expect(screen.getAllByText(/Not valid JSON/).length).toBeGreaterThan(0);
+  });
+
+  it("waits for the box that shows the field, and takes the value once it can be read", async () => {
+    const served = serve("DP-003");
+    const { user } = await openItem("DP-003");
+    await setBox(user, otherBox(), { writer: "mine" });
+    served.change({ writer: "theirs", question: "Changed too" });
+    await user.click(save());
+    await user.click(await screen.findByRole("button", { name: "Keep my edits" }));
+    await screen.findByText("Merged with the latest version");
+
+    await breakBox(user);
+    const useLatest = screen.getByRole("button", { name: "Use the latest value of writer" });
+    expect(useLatest).toBeDisabled();
+    expect(screen.getByText(/Fix that box before you take the latest value/)).toBeInTheDocument();
+    await user.click(useLatest);
+    expect(otherBox().value).toMatch(/ nope$/);
+
+    await user.clear(otherBox());
+    await user.paste(JSON.stringify({ writer: "mine" }));
+    await user.click(screen.getByRole("button", { name: "Use the latest value of writer" }));
+    expect(JSON.parse(otherBox().value)).toEqual({ writer: "theirs" });
+  });
+
+  it("holds every field while the box of the whole item cannot be read", async () => {
+    const served = serve("DP-003");
+    const { user } = await openItem("DP-003");
+    await user.type(question(), " mine");
+    served.change({ question: "Their version of the question" });
+    await user.click(save());
+    await user.click(await screen.findByRole("button", { name: "Keep my edits" }));
+    await screen.findByText("Merged with the latest version");
+
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    await user.type(screen.getByLabelText("The whole item as JSON"), " nope");
+    await screen.findAllByText(/Not valid JSON/);
+    expect(screen.getByRole("button", { name: "Use the latest value of question" })).toBeDisabled();
+  });
+
+  it("says why Keep my edits is off while a box cannot be read", async () => {
+    const served = serve("DP-003");
+    const { user } = await openItem("DP-003");
+    await user.type(notes(), " mine");
+    served.change({ question: "Changed while I typed" });
+    await user.click(save());
+    const keep = await screen.findByRole("button", { name: "Keep my edits" });
+    expect(keep).toBeEnabled();
+
+    await breakBox(user);
+    expect(screen.getByRole("button", { name: "Keep my edits" })).toBeDisabled();
+    expect(screen.getByText(/Fix that box to keep your edits/)).toBeInTheDocument();
+    expect(otherBox().value).toMatch(/ nope$/);
+  });
+
+  it("does not discard while a save is in flight", async () => {
+    const held = gate();
+    const served = serve("DP-003", { gate: held.wait });
+    const { user } = await openItem("DP-003");
+    await user.type(notes(), " first");
+    await user.click(save());
+    await waitFor(() => expect(served.state.puts).toHaveLength(1));
+    const discard = screen.getByRole("button", { name: "Discard changes" });
+    expect(discard).toHaveAttribute("aria-disabled", "true");
+    await user.click(discard);
+    expect(notes().value).toMatch(/ first$/);
+    held.release();
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    expect(notes().value).toMatch(/ first$/);
+    expect(screen.getByRole("button", { name: "Discard changes" })).toBeDisabled();
+  });
+
+  it("keeps focus and a tag row just added when the server stores other text", async () => {
+    const held = gate();
+    const served = serve("DP-003", {
+      gate: held.wait,
+      transform: (body) => ({ ...body, question: `${String(body.question)} (normalized)` }),
+    });
+    const { user } = await openItem("DP-003");
+    await user.type(notes(), " first");
+    await user.click(save());
+    await waitFor(() => expect(served.state.puts).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Add a tag" }));
+    await user.type(rationale(), "typed during the save");
+    const tagsBefore = screen.getAllByLabelText(/^Tag \d+ name$/).length;
+    held.release();
+
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    await waitFor(() => expect(question().value).toMatch(/\(normalized\)$/));
+    expect(rationale()).toHaveFocus();
+    expect(rationale()).toHaveValue("typed during the save");
+    expect(screen.getAllByLabelText(/^Tag \d+ name$/)).toHaveLength(tagsBefore);
+  });
+
+  it("shows readable boxes what the server stored even when another box is broken", async () => {
+    const held = gate();
+    const served = serve("DP-003", {
+      gate: held.wait,
+      transform: (body) => ({ ...body, added_by_server: 7 }),
+    });
+    const { user } = await openItem("DP-003");
+    await user.type(notes(), " first");
+    await user.click(save());
+    await waitFor(() => expect(served.state.puts).toHaveLength(1));
+    const gold = () => screen.getByLabelText<HTMLTextAreaElement>("Gold papers (JSON)");
+    await user.type(gold(), " nope");
+    await screen.findAllByText(/Not valid JSON/);
+    held.release();
+
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    await waitFor(() => expect(otherBox().value).toContain("added_by_server"));
+    expect(gold().value).toMatch(/ nope$/);
+  });
+});
+
+describe("a field shown in a part that keeps its own text", () => {
+  async function mergeWith(
+    edit: (user: ReturnType<typeof userEvent.setup>) => Promise<void>,
+    theirs: Record<string, unknown>,
+  ) {
+    const served = serve("DP-003");
+    const { user } = await openItem("DP-003");
+    await edit(user);
+    served.change(theirs);
+    await user.click(save());
+    await user.click(await screen.findByRole("button", { name: "Keep my edits" }));
+    await screen.findByText("Merged with the latest version");
+    return { user };
+  }
+
+  it("shows the latest value of a field in Other fields (JSON)", async () => {
+    const { user } = await mergeWith((user) => setBox(user, otherBox(), { writer: "mine" }), {
+      writer: "theirs",
+    });
+    await user.click(screen.getByRole("button", { name: "Use the latest value of writer" }));
+    expect(JSON.parse(otherBox().value)).toEqual({ writer: "theirs" });
+  });
+
+  it("shows the latest value of a field in its own box of JSON", async () => {
+    const box = () => screen.getByLabelText<HTMLTextAreaElement>("Search record (JSON)");
+    const { user } = await mergeWith(
+      (user) => setBox(user, box(), { corpus: "demo-corpus", terms: ["mine"] }),
+      { search_record: { corpus: "demo-corpus", terms: ["theirs"] } },
+    );
+    await user.click(screen.getByRole("button", { name: "Use the latest value of search_record" }));
+    expect(JSON.parse(box().value)).toEqual({ corpus: "demo-corpus", terms: ["theirs"] });
+  });
+
+  it("shows the latest value of the tags", async () => {
+    const { user } = await mergeWith(
+      async (user) => {
+        await user.click(screen.getByRole("button", { name: "Add a tag" }));
+        await user.type(screen.getByLabelText("Tag 1 name"), "topic");
+        await user.type(screen.getByLabelText("Tag 1 value"), "mine");
+      },
+      { tags: { topic: "theirs" } },
+    );
+    await user.click(screen.getByRole("button", { name: "Use the latest value of tags" }));
+    expect(screen.getByLabelText("Tag 1 name")).toHaveValue("topic");
+    expect(screen.getByLabelText("Tag 1 value")).toHaveValue("theirs");
+  });
+
+  it("shows the latest value of the key facts", async () => {
+    const { user } = await mergeWith(
+      async (user) => {
+        await user.click(screen.getByRole("button", { name: "Add a key fact" }));
+      },
+      { key_facts: [{ type: "text", value: "their fact", alts: [] }] },
+    );
+    await user.click(screen.getByRole("button", { name: "Use the latest value of key_facts" }));
+    expect(screen.getByDisplayValue("their fact")).toBeInTheDocument();
+  });
+});
+
+describe("focus when the server changes the field in use", () => {
+  /** Hold a save, put focus in a control with `focus`, then let the save finish. */
+  async function focusDuringSave(
+    transform: (body: Record<string, any>) => Record<string, any>,
+    focus: (user: ReturnType<typeof userEvent.setup>) => Promise<void>,
+    prepare?: (user: ReturnType<typeof userEvent.setup>) => Promise<void>,
+  ) {
+    const held = gate();
+    const served = serve("DP-003", { gate: held.wait, transform });
+    const { user } = await openItem("DP-003");
+    await prepare?.(user);
+    await user.type(notes(), " first");
+    await user.click(save());
+    await waitFor(() => expect(served.state.puts).toHaveLength(1));
+    await focus(user);
+    held.release();
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+  }
+
+  it("keeps focus in the box of JSON of a field the server changed", async () => {
+    const box = () => screen.getByLabelText<HTMLTextAreaElement>("Search record (JSON)");
+    await focusDuringSave(
+      (body) => ({ ...body, search_record: { corpus: "stored", terms: [] } }),
+      async (user) => {
+        await user.click(box());
+        await user.keyboard(" ");
+      },
+    );
+    await waitFor(() => expect(box().value).toContain("stored"));
+    expect(box()).toHaveFocus();
+  });
+
+  it("keeps focus in Other fields (JSON) when the server adds a field", async () => {
+    await focusDuringSave(
+      (body) => ({ ...body, added_by_server: 7 }),
+      async (user) => {
+        await user.click(otherBox());
+        await user.keyboard(" ");
+      },
+    );
+    await waitFor(() => expect(otherBox().value).toContain("added_by_server"));
+    expect(otherBox()).toHaveFocus();
+  });
+
+  it("keeps focus in the tags when the server adds a tag", async () => {
+    await focusDuringSave(
+      (body) => ({ ...body, tags: { ...(body.tags ?? {}), extra: "1" } }),
+      async (user) => {
+        await user.click(screen.getByLabelText("Tag 1 value"));
+      },
+      async (user) => {
+        await user.click(screen.getByRole("button", { name: "Add a tag" }));
+        await user.type(screen.getByLabelText("Tag 1 name"), "topic");
+        await user.type(screen.getByLabelText("Tag 1 value"), "mine");
+      },
+    );
+    await screen.findByLabelText("Tag 2 name");
+    expect(screen.getByLabelText("Tag 1 value")).toHaveFocus();
+  });
+
+  it("keeps focus in the whole-item box when the server changes a field", async () => {
+    const held = gate();
+    const served = serve("DP-003", {
+      gate: held.wait,
+      transform: (body) => ({ ...body, added_by_server: 7 }),
+    });
+    const { user } = await openItem("DP-003");
+    await user.type(notes(), " first");
+    await user.click(save());
+    await waitFor(() => expect(served.state.puts).toHaveLength(1));
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    const whole = () => screen.getByLabelText<HTMLTextAreaElement>("The whole item as JSON");
+    await user.click(whole());
+    await user.keyboard(" ");
+    held.release();
+    expect(await screen.findByText("Saved.")).toBeInTheDocument();
+    await waitFor(() => expect(whole().value).toContain("added_by_server"));
+    expect(whole()).toHaveFocus();
   });
 });

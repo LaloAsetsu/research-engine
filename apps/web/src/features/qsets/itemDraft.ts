@@ -175,6 +175,16 @@ export const HANDLED_FIELDS = [
   "search_record",
 ] as const;
 
+const HANDLED = new Set<string>(HANDLED_FIELDS);
+
+/**
+ * The part of the form that shows a field and keeps its own text: the field's own name when the form
+ * has a control for it, "other" for every other field (the box of "Other fields (JSON)").
+ */
+export function partOf(field: string): string {
+  return HANDLED.has(field) ? field : "other";
+}
+
 export function otherFields(item: Item): Item {
   const handled = new Set<string>(HANDLED_FIELDS);
   return Object.fromEntries(Object.entries(item).filter(([key]) => !handled.has(key)));

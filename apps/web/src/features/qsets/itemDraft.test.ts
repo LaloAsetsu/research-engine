@@ -12,6 +12,7 @@ import {
   newItemTemplate,
   otherFields,
   parseJson,
+  partOf,
   sameValue,
   stable,
   standing,
@@ -250,5 +251,15 @@ describe("how the editor stands against the server", () => {
     expect(standing(base, { ...base }, latest, true)).toBe("behind");
     expect(standing(base, { ...base }, latest, false)).toBe("rebuild");
     expect(standing(base, { ...base }, { ...base }, true)).toBe("same");
+  });
+});
+
+describe("the part of the form that shows a field", () => {
+  it("is the field itself when the form has a control for it, and Other fields for the rest", () => {
+    expect(partOf("question")).toBe("question");
+    expect(partOf("tags")).toBe("tags");
+    expect(partOf("search_record")).toBe("search_record");
+    expect(partOf("writer")).toBe("other");
+    expect(partOf("ext")).toBe("other");
   });
 });

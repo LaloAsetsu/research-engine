@@ -74,13 +74,17 @@ export function BehindAlert({
 /** After a merge: what came from the latest version, and the fields both sides changed with both values. */
 export function MergeReportView({
   report,
+  isBlocked,
   onUseLatest,
 }: {
   report: MergeReport;
+  /** The box that shows this field cannot be read: it keeps its text, so taking the value waits. */
+  isBlocked: (field: string) => boolean;
   onUseLatest: (conflict: FieldConflict) => void;
 }) {
   const { t } = useTranslation();
   const removed = t("sets.editor.removedValue");
+  const anyBlocked = report.conflicts.some((conflict) => isBlocked(conflict.field));
   return (
     <Alert role="status" tabIndex={-1} data-note-focus className={FOCUS_RING}>
       <AlertTitle>{t("sets.editor.mergedTitle")}</AlertTitle>
@@ -91,6 +95,7 @@ export function MergeReportView({
         {report.conflicts.length > 0 ? (
           <>
             <p>{t("sets.editor.mergedConflicts")}</p>
+            {anyBlocked ? <p>{t("sets.editor.useLatestBlocked")}</p> : null}
             <ul className="grid gap-3">
               {report.conflicts.map((conflict) => (
                 <li key={conflict.field} className="grid gap-1">
@@ -110,6 +115,7 @@ export function MergeReportView({
                       type="button"
                       variant="outline"
                       aria-label={t("sets.editor.useLatestOf", { field: conflict.field })}
+                      disabled={isBlocked(conflict.field)}
                       onClick={() => onUseLatest(conflict)}
                     >
                       {t("sets.editor.useLatest")}

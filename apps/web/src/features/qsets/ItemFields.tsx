@@ -25,6 +25,8 @@ import { CONTENTS, FORMS, LANG_ORIGINS, LANGS, SPLITS, SYNTHESIS_KINDS, type Ite
 
 interface Props {
   draft: Item;
+  /** How many times each part that keeps its own text was started over (see ItemWorkspace). */
+  epochs: Readonly<Record<string, number>>;
   onChange: (draft: Item) => void;
   problems: readonly ProblemField[];
   /** A new item names its id; an existing one cannot change it. */
@@ -56,7 +58,7 @@ function TagsEditor({
     onChange(tagsFromRows(next));
   };
   return (
-    <fieldset className="grid gap-2">
+    <fieldset className="grid gap-2" data-part="tags">
       <legend className="text-sm font-medium">{t("sets.editor.tags")}</legend>
       {rows.map(([key, value], index) => (
         <div key={index} className="flex flex-wrap items-end gap-2">
@@ -102,7 +104,7 @@ function TagsEditor({
 }
 
 /** The fields of an item, by what its form asks for. Every field shows the problems the API found at it. */
-export function ItemFields({ draft, onChange, problems, idEditable, onProblem }: Props) {
+export function ItemFields({ draft, epochs, onChange, problems, idEditable, onProblem }: Props) {
   const { t } = useTranslation();
   const grouped = groupByField(problems).byField;
   const at = (key: string) => grouped.get(key);
@@ -285,17 +287,19 @@ export function ItemFields({ draft, onChange, problems, idEditable, onProblem }:
       />
 
       <TagsEditor
+        key={`tags-${epochs.tags ?? 0}`}
         tags={tagsOf(draft)}
         errors={messagesAt(at("tags"))}
         onChange={(tags) => set("tags", tags)}
       />
 
-      <section className="grid gap-2" aria-labelledby="key-facts-heading">
+      <section className="grid gap-2" aria-labelledby="key-facts-heading" data-part="key_facts">
         <h3 id="key-facts-heading" className="text-sm font-medium">
           {t("sets.editor.keyFacts")}
         </h3>
         <p className="text-sm text-muted-foreground">{t("sets.editor.keyFactsHint")}</p>
         <KeyFactsEditor
+          key={`key_facts-${epochs.key_facts ?? 0}`}
           facts={Array.isArray(draft.key_facts) ? (draft.key_facts as unknown[]) : []}
           problems={at("key_facts") ?? []}
           onChange={(facts) => set("key_facts", facts)}
@@ -303,6 +307,7 @@ export function ItemFields({ draft, onChange, problems, idEditable, onProblem }:
       </section>
 
       <JsonField
+        key={`gold_papers-${epochs.gold_papers ?? 0}`}
         fieldKey="gold_papers"
         label={t("sets.editor.goldPapers")}
         value={draft.gold_papers}
@@ -349,6 +354,7 @@ export function ItemFields({ draft, onChange, problems, idEditable, onProblem }:
       ) : null}
       {showNecessity ? (
         <JsonField
+          key={`necessity-${epochs.necessity ?? 0}`}
           fieldKey="necessity"
           label={t("sets.editor.necessity")}
           value={draft.necessity}
@@ -360,6 +366,7 @@ export function ItemFields({ draft, onChange, problems, idEditable, onProblem }:
       ) : null}
       {showCircuit ? (
         <JsonField
+          key={`circuit-${epochs.circuit ?? 0}`}
           fieldKey="circuit"
           label={t("sets.editor.circuit")}
           value={draft.circuit}
@@ -371,6 +378,7 @@ export function ItemFields({ draft, onChange, problems, idEditable, onProblem }:
       ) : null}
       {showSearch ? (
         <JsonField
+          key={`search_record-${epochs.search_record ?? 0}`}
           fieldKey="search_record"
           label={t("sets.editor.searchRecord")}
           value={draft.search_record}
@@ -382,6 +390,7 @@ export function ItemFields({ draft, onChange, problems, idEditable, onProblem }:
       ) : null}
 
       <JsonField
+        key={`other-${epochs.other ?? 0}`}
         fieldKey="other"
         label={t("sets.editor.other")}
         value={otherFields(draft)}

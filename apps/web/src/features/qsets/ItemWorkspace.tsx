@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useBlocker, useNavigate } from "react-router";
 import { isApiError, type ProblemField } from "@/shared/api/errors";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { useAddItem, useDeleteItem, useSaveItem, useValidateItem } from "./api";
 import { BehindAlert, MergeReportView, RemoteNotice, type MergeReport } from "./EditNotices";
 import { BUSY, DESTRUCTIVE } from "./fields";
+import { markFocus, restoreFocus, type FocusMark } from "./focusMark";
 import { ItemFields } from "./ItemFields";
 import {
   changedFields,
@@ -16,6 +17,7 @@ import {
   hasChanges,
   isPlainObject,
   mergeItems,
+  partOf,
   sameValue,
   standing,
   type FieldConflict,
@@ -119,6 +121,10 @@ export function ItemWorkspace({
   });
   const [draft, setDraft] = useState<Item>(initial);
   const [formKey, setFormKey] = useState(0);
+  // Parts of the form that keep their own text (the tags, the key facts, the boxes of JSON) start
+  // over only when the text they show changed under them, so that typing, focus and a row just
+  // added survive a save that changes something else. "$" is the box of the whole item.
+  const [epochs, setEpochs] = useState<Record<string, number>>({});
   const [tab, setTab] = useState("form");
   // The text of the box that could not be read when a switch of view was refused.
   const [refusedFor, setRefusedFor] = useState<string | null>(null);
@@ -126,6 +132,12 @@ export function ItemWorkspace({
   const [jsonProblems, setJsonProblems] = useState<Record<string, string>>({});
   // The same list for code that runs outside a render (the answer to a save).
   const jsonProblemsRef = useRef<Record<string, string>>({});
+  // The draft for code that runs outside a render (the answer to a save). `commitDraft` writes it
+  // together with the state, so it never waits for an effect; the effect below covers the one
+  // place that sets the draft while rendering.
+  const draftRef = useRef<Item>(initial);
+  // Where focus stood in a part of the form that is being drawn again, to put it back after.
+  const focusMark = useRef<FocusMark | null>(null);
   const [problems, setProblems] = useState<ProblemField[]>([]);
   const [notice, setNotice] = useState<Notice>(null);
   const [remote, setRemote] = useState<string[] | null>(null);
@@ -144,6 +156,12 @@ export function ItemWorkspace({
     ? { item: detail.item, etag: detail.version.etag, at: readAt }
     : null;
   const latest = read && read.at >= base.at ? read : null;
+
+  /** Set the draft and the ref that code outside a render reads, in one step. */
+  function commitDraft(next: Item) {
+    draftRef.current = next;
+    setDraft(next);
+  }
 
   function show(to: FocusRequest["to"]) {
     setFocus((current) => ({ n: current.n + 1, to }));
@@ -181,6 +199,37 @@ export function ItemWorkspace({
     setRemote(fields);
   }
 
+  // The draft can also be set while rendering (a rebuild, above): this keeps the ref in step.
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  /**
+   * Start over the parts of the form that show the fields in `fields` and keep their own text,
+   * and give focus back to the control that had it. A box of JSON that cannot be read is left
+   * alone: starting it over would drop what was typed.
+   */
+  function restartParts(fields: string[]) {
+    if (fields.length === 0) return;
+    const broken = jsonProblemsRef.current;
+    const parts = new Set(["$", ...fields.map(partOf)].filter((part) => !(part in broken)));
+    if (parts.size === 0) return;
+    focusMark.current = markFocus(root, parts);
+    setEpochs((current) => {
+      const next = { ...current };
+      for (const part of parts) next[part] = (next[part] ?? 0) + 1;
+      return next;
+    });
+  }
+
+  // Runs once the parts are drawn again, before the browser paints.
+  useLayoutEffect(() => {
+    const mark = focusMark.current;
+    if (mark === null) return;
+    focusMark.current = null;
+    restoreFocus(root, mark);
+  }, [epochs, root]);
+
   const save = useSaveItem(ref, (stored, sent) => {
     // The editor stands on what the server stored. The fields stay editable while the save is in
     // flight, so the draft may hold more than was sent: that text is compared with `sent`, never
@@ -190,9 +239,11 @@ export function ItemWorkspace({
     const fresh = stored.item;
     setBase({ item: fresh, etag: stored.version.etag, at: Date.now() });
     if (sameValue(fresh, sent)) return;
-    setDraft((current) => mergeItems(sent, current, fresh).merged);
-    // A remount would drop a box of JSON the person is still writing.
-    if (Object.keys(jsonProblemsRef.current).length === 0) setFormKey((key) => key + 1);
+    const current = draftRef.current;
+    const merged = mergeItems(sent, current, fresh).merged;
+    commitDraft(merged);
+    // Only what the server changed is shown again; the rest of the form is left as it is.
+    restartParts(changedFields(current, merged));
   });
   const add = useAddItem(ref);
   const del = useDeleteItem(ref);
@@ -349,7 +400,7 @@ export function ItemWorkspace({
     }
     const merge = mergeItems(base.item, draft, fresh.item);
     reset({ item: fresh.item, etag: fresh.etag, at: fresh.at });
-    setDraft(merge.merged);
+    commitDraft(merge.merged);
     if (merge.fromLatest.length === 0 && merge.conflicts.length === 0) {
       setNotice({ kind: "kept" });
     } else {
@@ -374,12 +425,22 @@ export function ItemWorkspace({
     if (fresh) next(fresh);
   }
 
+  /**
+   * The box that shows `field` cannot be read (the box of the whole item shows every field). That
+   * box keeps its text when the rest is drawn again, so taking the latest value now would leave
+   * the box on the old text, and fixing it later would write over the value just taken.
+   */
+  function takeBlocked(field: string): boolean {
+    return "$" in jsonProblems || partOf(field) in jsonProblems;
+  }
+
   function useLatestValue(conflict: FieldConflict) {
+    if (takeBlocked(conflict.field)) return;
     const next = { ...draft };
     if (conflict.theirs === undefined) delete next[conflict.field];
     else next[conflict.field] = conflict.theirs;
-    setDraft(next);
-    setFormKey((key) => key + 1);
+    commitDraft(next);
+    restartParts([conflict.field]);
     setReport((current) =>
       current
         ? { ...current, conflicts: current.conflicts.filter((c) => c.field !== conflict.field) }
@@ -421,7 +482,7 @@ export function ItemWorkspace({
           />
         ) : null}
         {report && report.conflicts.length + report.fromLatest.length > 0 ? (
-          <MergeReportView report={report} onUseLatest={useLatestValue} />
+          <MergeReportView report={report} isBlocked={takeBlocked} onUseLatest={useLatestValue} />
         ) : null}
         <Section
           title={isNew ? t("sets.editor.newTitle") : t("sets.editor.title")}
@@ -437,9 +498,10 @@ export function ItemWorkspace({
             <TabsContent value="form" className="pt-3">
               <ItemFields
                 key={formKey}
+                epochs={epochs}
                 draft={draft}
                 onChange={(next) => {
-                  setDraft(next);
+                  commitDraft(next);
                   setNotice(null);
                 }}
                 problems={problems}
@@ -449,7 +511,7 @@ export function ItemWorkspace({
             </TabsContent>
             <TabsContent value="json" className="pt-3">
               <JsonField
-                key={formKey}
+                key={`${formKey}-${epochs.$ ?? 0}`}
                 fieldKey="$"
                 label={t("sets.editor.wholeItem")}
                 value={draft}
@@ -458,7 +520,7 @@ export function ItemWorkspace({
                 wholeItem
                 accept={(value) => (isPlainObject(value) ? null : t("sets.editor.mustBeObject"))}
                 onChange={(value) => {
-                  setDraft(isPlainObject(value) ? value : {});
+                  commitDraft(isPlainObject(value) ? value : {});
                   setNotice(null);
                 }}
                 onProblem={setJsonProblem}
@@ -486,6 +548,7 @@ export function ItemWorkspace({
                 <AlertTitle>{t("sets.editor.staleTitle")}</AlertTitle>
                 <AlertDescription>
                   <p>{t("sets.editor.staleBody")}</p>
+                  {unreadable ? <p>{t("sets.editor.keepBlocked")}</p> : null}
                   <div className="mt-3 flex flex-wrap gap-2">
                     {!isNew ? (
                       <Button
@@ -499,6 +562,7 @@ export function ItemWorkspace({
                     <Button
                       type="button"
                       variant="outline"
+                      disabled={unreadable}
                       onClick={() => void refreshThen(rebase)}
                     >
                       {t("sets.editor.keepEdits")}
@@ -573,7 +637,10 @@ export function ItemWorkspace({
               <Button
                 variant="outline"
                 disabled={!hasChanges(changes) && !unreadable}
+                aria-disabled={busy || undefined}
+                className={BUSY}
                 onClick={() => {
+                  if (busy) return;
                   if (latest && behind) loadLatest(latest);
                   else void refreshThen(loadLatest);
                 }}

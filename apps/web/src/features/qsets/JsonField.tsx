@@ -82,7 +82,7 @@ export function JsonField({
     .join(" ");
 
   return (
-    <div className="grid gap-1.5">
+    <div className="grid gap-1.5" data-part={fieldKey}>
       <Label htmlFor={id}>{label}</Label>
       <Textarea
         id={id}
