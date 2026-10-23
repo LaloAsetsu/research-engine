@@ -183,6 +183,52 @@ describe("a version (S1)", () => {
     expect(await findItemsTable("Items 51 to 100 of 120")).toBeInTheDocument();
   });
 
+  describe("an address that names a page past the end", () => {
+    function longList() {
+      server.use(
+        http.get("*/api/v1/sets/demo-papers/versions/v2", ({ request }) => {
+          const offset = Number(new URL(request.url).searchParams.get("offset") ?? 0);
+          const body = capturedBody<Record<string, any>>("page demo-papers/v2");
+          const template = body.items[0];
+          body.total = 120;
+          body.offset = offset;
+          body.limit = 50;
+          body.items = Array.from({ length: Math.max(0, Math.min(50, 120 - offset)) }, (_, i) => ({
+            ...template,
+            id: `X-${offset + i + 1}`,
+            mirror_of: null,
+          }));
+          return HttpResponse.json(body);
+        }),
+      );
+    }
+
+    it("says so, instead of saying that no filter matches, and offers the last page", async () => {
+      longList();
+      const user = userEvent.setup();
+      const app = renderApp("/sets/demo-papers/v2?offset=99999");
+      expect(
+        await screen.findByText(/starts at item 99999, but the list has only 120/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("No item matches these filters.")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Go to the last page" }));
+      expect(
+        await screen.findByRole("table", { name: "Items 101 to 120 of 120" }),
+      ).toBeInTheDocument();
+      expect(app.router.state.location.search).toBe("?offset=100");
+    });
+
+    it("steps back to the last page, not 50 items from the address", async () => {
+      longList();
+      const user = userEvent.setup();
+      renderApp("/sets/demo-papers/v2?offset=99999");
+      await user.click(await screen.findByRole("button", { name: "Previous page" }));
+      expect(
+        await screen.findByRole("table", { name: "Items 101 to 120 of 120" }),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("keeps the page buttons focusable and quiet while the next page loads", async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {

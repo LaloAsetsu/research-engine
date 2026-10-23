@@ -79,6 +79,11 @@ function Summary({ page }: { page: ItemPage }) {
   );
 }
 
+/** The offset of the last page: the address can name a page beyond the end. */
+function lastOffset(total: number): number {
+  return total === 0 ? 0 : Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE;
+}
+
 /** Both buttons stay focusable while the next page loads (`aria-disabled`) and ignore clicks until it is there. */
 function Pager({
   page,
@@ -101,7 +106,9 @@ function Pager({
         aria-disabled={loading || undefined}
         className={BUSY}
         onClick={() => {
-          if (!loading) onOffset(Math.max(0, page.offset - PAGE_SIZE));
+          if (!loading) {
+            onOffset(Math.max(0, Math.min(page.offset - PAGE_SIZE, lastOffset(page.total))));
+          }
         }}
       >
         {t("sets.items.previous")}
@@ -279,7 +286,19 @@ export function VersionPage() {
             onChange={setFilters}
             onClear={() => setParams((current) => withoutFilters(current))}
           />
-          {data.items.length === 0 ? (
+          {data.items.length === 0 && data.total > 0 && data.offset > 0 ? (
+            <div className="grid justify-items-start gap-2">
+              <p className="text-muted-foreground">
+                {t("sets.items.pastEnd", { offset: data.offset, total: data.total })}
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => setParams((current) => withOffset(current, lastOffset(data.total)))}
+              >
+                {t("sets.items.lastPage")}
+              </Button>
+            </div>
+          ) : data.items.length === 0 ? (
             <p className="text-muted-foreground">
               {data.total === 0 && Object.keys(filters).length === 0
                 ? t("sets.items.none")

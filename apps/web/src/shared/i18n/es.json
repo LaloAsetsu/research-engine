@@ -351,6 +351,8 @@
       "description": "Los filtros se guardan en la dirección, así que una lista filtrada se puede compartir.",
       "none": "Esta versión aún no tiene elementos.",
       "noMatch": "Ningún elemento coincide con estos filtros.",
+      "pastEnd": "Esta dirección empieza en el elemento {{offset}}, pero la lista solo tiene {{total}}.",
+      "lastPage": "Ir a la última página",
       "caption": "Elementos {{first}} a {{last}} de {{total}}",
       "scroll": "Elementos, tabla con desplazamiento",
       "pages": "Páginas de elementos",
