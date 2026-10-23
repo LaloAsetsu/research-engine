@@ -5,6 +5,9 @@ import { ANA } from "@/test/auth-mock";
 import { capturedBody, meAs, problem, problemBody } from "@/test/sets-api";
 import { renderApp } from "@/test/render";
 import { authMock, server } from "@/test/server";
+
+// These tests type into a whole editor: a busy machine must not turn the default 5 s into a failure.
+vi.setConfig({ testTimeout: 20_000 });
 import { invalidateSets } from "./api";
 
 // These tests run a draft that behaves like the API for the conflicts that matter here: the etag

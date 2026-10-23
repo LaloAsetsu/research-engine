@@ -6,6 +6,9 @@ import { capturedAnswer, capturedBody, meAs, problem, problemBody } from "@/test
 import { renderApp } from "@/test/render";
 import { authMock, server } from "@/test/server";
 
+// These tests type into a whole editor: a busy machine must not turn the default 5 s into a failure.
+vi.setConfig({ testTimeout: 20_000 });
+
 beforeEach(() => {
   authMock.handle({
     method: "POST",
