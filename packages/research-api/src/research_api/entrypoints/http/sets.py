@@ -159,6 +159,10 @@ class CappedRoute(APIRoute):
     first and held to the same rule (and ``NaN`` and ``Infinity`` are refused with it).
     """
 
+    def body_limit(self) -> int:
+        """The most bytes the body of this route may have."""
+        return _limit_for(self.path)
+
     def get_route_handler(self) -> Callable[[Request], Any]:
         original = super().get_route_handler()
         template = self.path
@@ -166,7 +170,7 @@ class CappedRoute(APIRoute):
         async def handler(request: Request) -> Response:
             await run_in_threadpool(check_caller, request)
             bounded = _BoundedRequest(request.scope, request.receive)
-            bounded.limit = _limit_for(template)
+            bounded.limit = self.body_limit()
             body = await bounded.body()
             if body and _is_json_body(template):
                 read_json_strict(body, what="The request body")

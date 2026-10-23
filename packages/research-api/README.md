@@ -88,7 +88,7 @@ All paths are under `/api/v1`.
 | `GET /sets/{name}/versions/{version}/freeze` | signed in | What freezing would do, by item, and the `etag` of that plan (`ETag` header and `plan.etag`). Nothing changes. Refuses what the freeze would refuse (`422`, naming the item by id). |
 | `POST /sets/{name}/versions/{version}/freeze` | owner or admin | Applies the reviews and closes the version for good. `If-Match` with the plan's `etag` is required: `428` without it, `409` when a decision or an item changed since the plan was read. |
 | `GET /models` | signed in | The models of the settings, each probed with a two second timeout: `{name, label, revision, available}`. |
-| `POST /runs` | signed in | `{set: {name, version}, arms: [{name, variant?, overrides?}], models: [name], repeats?, notes?}`. `202` and one queued job for each arm and model. `409` for a draft, `404` for an unknown set, `422` for a bad arm, model or repeats, `503` for a model or an arm that is not available, `429` past twelve open jobs. |
+| `POST /runs` | signed in | `{set: {name, version}, arms: [{name, variant?, overrides?}], models: [name], repeats?, notes?}`. `202` and one queued job for each arm and model. `409` for a draft, `404` for an unknown set, `422` for a bad arm, model or repeats, `503` for a model or an arm that is not available, `429` past twelve open jobs, `413` for a body over 32 KiB, `400` for a key written twice. |
 | `GET /jobs` | signed in | Jobs, newest first. Filters `state`, `kind`, `mine`; `limit` (at most 200), `offset`. |
 | `GET /jobs/{id}` | signed in | One job: `state`, `settled`, `progress {done, total}`, its times, `error`, and for a queued run its `position` and `waiting_for`. Poll it every two seconds until `settled`. |
 | `GET /jobs/{id}/log?offset=` | signed in | Plain text lines with times, from a byte offset; the headers `X-Log-Next-Offset` and `X-Log-Size` say where to go on. |
@@ -97,7 +97,7 @@ All paths are under `/api/v1`.
 | `GET /runs` | signed in | Every `qa-run/1` file in the runs folder, whoever made it: set, arm, model, times, `answers`, `errors`, `complete`, and the job that made it. A file is listed only when its header is a valid `qa-run/1` header and its `run_id` is the name of the file (`r1.qa-run.jsonl` holds run `r1`), because that id is what the other routes and `qa-bench score` use; any other file is left out and logged once (`runs.skipped`). |
 | `GET /runs/{run_id}` | signed in | One run. |
 | `GET /runs/{run_id}/items` | signed in | The lines of a run with the question and the reference answer of the set. Filters `filter` (`all`, `errors`, `answered`), `id`; `offset`, `limit`, `contexts=false` to leave the chunks out. A line of a run file dropped in by hand that does not follow `qa-run/1` (a wrong type in `answer`, `citations`, `timings`, `contexts` or `error`) is left out of the page and the total, and logged once per change of the file (`runs.lines_skipped`); the run's `answers` count still counts it. |
-| `POST /scores` | signed in | `{set, runs: [run_id], pairs?: [[base, variant]], noise?: [a, b], group_by?, groups?, bootstrap_engine?, number_words?}`. `202` and a job for the CPU lane that writes one `qa-score/1` file. `409` for a run that has not ended, `422` for a run that does not fit the set. |
+| `POST /scores` | signed in | `{set, runs: [run_id], pairs?: [[base, variant]], noise?: [a, b], group_by?, groups?, bootstrap_engine?, number_words?}`. `202` and a job for the CPU lane that writes one `qa-score/1` file. `409` for a run that has not ended (also when it was resumed while the scoring waited for its lane), `422` for a run that does not fit the set or is not a run listed by `GET /runs`, `413` and `400` as for `POST /runs`. |
 | `GET /scores` | signed in | The scores made, newest first. |
 | `GET /scores/{score_id}` | signed in | The header, the `group` records (mean and 95% interval per run, group and metric) and the `compare` records (difference, interval, up and down, noise floor). |
 | `GET /scores/{score_id}/items` | signed in | The `item` records: the metrics of each answer and the keys it hit. Filters `run_id`, `id`; `offset`, `limit`. |
@@ -400,7 +400,7 @@ The job table (`jobs`, migration `0003`) holds who started each job, its state, 
 
 ### Limits
 
-Twelve jobs open (queued, running or being cancelled) per member (`429` with `Retry-After`), one to three arms and one to four models in a request, repeats 1 to 10, notes 1000 characters, twelve runs and twelve pairs in a scoring.
+Twelve jobs open (queued, running or being cancelled) per member (`429` with `Retry-After`), one to three arms and one to four models in a request, repeats 1 to 10, notes 1000 characters, twelve runs and twelve pairs in a scoring. A request body is at most 32 KiB (`413`); a model name is at most 128 characters, a run id has the pattern of a run id, a scoring has at most 8 `group_by` fields of 200 characters and 32 `groups` of 400.
 
 ## Layout
 

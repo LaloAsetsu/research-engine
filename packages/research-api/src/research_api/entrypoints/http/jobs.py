@@ -16,6 +16,7 @@ from ...domain.sets import Actor
 from .auth import DEFAULT, INVALID, PROTECTED
 from .job_schemas import (
     JOB_ID_REGEX,
+    MAX_BODY_BYTES,
     RUN_ID_REGEX,
     JobOut,
     ModelOut,
@@ -29,11 +30,23 @@ from .job_schemas import (
 )
 from .schemas import Problem
 from .security import container_of, member
+from .sets import CappedRoute
 
 Member = Annotated[Authenticated, Depends(member)]
 NO_STORE = {"Cache-Control": "no-store"}
+
+
+class BenchRoute(CappedRoute):
+    """The same checks as the sets routes (caller first, body capped, JSON keys not repeated),
+    with the cap of these bodies: a run request or a scoring request is a few hundred bytes."""
+
+    def body_limit(self) -> int:
+        return MAX_BODY_BYTES
+
+
 router = APIRouter(
     tags=["benchmarks"],
+    route_class=BenchRoute,
     dependencies=[Depends(member)],
     responses={**DEFAULT, **PROTECTED},
 )
@@ -42,6 +55,13 @@ JobId = Annotated[str, Path(pattern=JOB_ID_REGEX, description="A job id.")]
 RunId = Annotated[str, Path(pattern=RUN_ID_REGEX, description="A run id.")]
 NO_SUCH = {404: {"model": Problem, "description": "No such job, run or score."}}
 CONFLICT = {409: {"model": Problem, "description": "The job is in a state that does not allow it."}}
+BAD_BODY = {
+    400: {
+        "model": Problem,
+        "description": "The body is not valid JSON, or a JSON key is written twice.",
+    },
+    413: {"model": Problem, "description": "The body is over the cap (32 KiB)."},
+}
 FORBIDDEN = {
     403: {"model": Problem, "description": "Only the job's owner or an admin can do this."}
 }
@@ -71,6 +91,7 @@ async def list_models(request: Request) -> list[ModelOut]:
     status_code=202,
     responses={
         **NO_SUCH,
+        **BAD_BODY,
         409: {"model": Problem, "description": "The set version is a draft: freeze it first."},
         422: INVALID,
         429: {"model": Problem, "description": "You have too many jobs waiting."},
@@ -225,6 +246,7 @@ def list_run_items(
     status_code=202,
     responses={
         **NO_SUCH,
+        **BAD_BODY,
         409: {"model": Problem, "description": "A run has not ended yet."},
         422: INVALID,
         429: {"model": Problem, "description": "You have too many jobs waiting."},

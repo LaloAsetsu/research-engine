@@ -7,9 +7,9 @@ have them (plus the question and reference answer the run was asked, for the sid
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from ...application.jobs import JobView, RunRequest, ScoreRequest
 from ...application.results import (
@@ -45,7 +45,16 @@ from .set_schemas import NAME_REGEX, VERSION_REGEX
 
 RUN_ID_REGEX = f"^{RUN_ID_PATTERN}$"
 JOB_ID_REGEX = f"^{JOB_ID_PATTERN}$"
+MAX_BODY_BYTES = 32 * 1024
+"""The most a run or scoring request may hold. Each field below has its own caps too."""
+MAX_GROUP_FIELDS = 8
+MAX_GROUPS = 32
+MAX_TEXT = 200
 ArmName = Literal["bare", "harness", "oracle"]
+ModelName = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+RunIdIn = Annotated[str, StringConstraints(pattern=RUN_ID_REGEX)]
+FieldName = Annotated[str, StringConstraints(min_length=1, max_length=MAX_TEXT)]
+GroupText = Annotated[str, StringConstraints(min_length=1, max_length=2 * MAX_TEXT)]
 Engine = Literal["python_random", "numpy_pcg64"]
 assert set(ARMS) == {"bare", "harness", "oracle"}
 
@@ -82,7 +91,7 @@ class ArmIn(_Body):
 class RunRequestBody(_Body):
     set: SetRefIn
     arms: list[ArmIn] = Field(min_length=1, max_length=MAX_ARMS)
-    models: list[str] = Field(
+    models: list[ModelName] = Field(
         min_length=1,
         max_length=MAX_MODELS,
         description="Names from `GET /models`. One job is made for each arm and model.",
@@ -100,24 +109,30 @@ class RunRequestBody(_Body):
 
 class ScoreRequestBody(_Body):
     set: SetRefIn
-    runs: list[str] = Field(
+    runs: list[RunIdIn] = Field(
         min_length=1,
         max_length=MAX_SCORE_RUNS,
         description="Run ids, all on this set version.",
     )
-    pairs: list[tuple[str, str]] = Field(
+    pairs: list[tuple[RunIdIn, RunIdIn]] = Field(
         default_factory=list,
         max_length=MAX_PAIRS,
         description="`[base, variant]`: the paired bootstrap of variant minus base.",
     )
-    noise: tuple[str, str] | None = Field(
+    noise: tuple[RunIdIn, RunIdIn] | None = Field(
         default=None,
         description="Two runs of the same arm: their differences are the noise floor.",
     )
-    group_by: list[str] | None = Field(
-        default=None, description="Set fields (or `tag:NAME`) that split the questions into groups."
+    group_by: list[FieldName] | None = Field(
+        default=None,
+        max_length=MAX_GROUP_FIELDS,
+        description="Set fields (or `tag:NAME`) that split the questions into groups.",
     )
-    groups: list[str] = Field(default_factory=list, description="Unions written `label=v1|v2`.")
+    groups: list[GroupText] = Field(
+        default_factory=list,
+        max_length=MAX_GROUPS,
+        description="Unions written `label=v1|v2`.",
+    )
     bootstrap_engine: Engine = "python_random"
     number_words: bool = False
 

@@ -71,9 +71,14 @@ def test_the_score_request_takes_pairs_as_two_run_ids() -> None:
     body = SCHEMAS["ScoreRequestBody"]
     assert set(body["required"]) == {"set", "runs"}
     pairs = body["properties"]["pairs"]
-    assert pairs["items"]["prefixItems"] == [{"type": "string"}, {"type": "string"}]
+    assert [p["type"] for p in pairs["items"]["prefixItems"]] == ["string", "string"]
+    assert pairs["maxItems"] == 12 and body["properties"]["runs"]["maxItems"] == 12
+    assert body["properties"]["groups"]["maxItems"] == 32
+    assert SCHEMAS["RunRequestBody"]["properties"]["models"]["items"]["maxLength"] == 128
     assert body["properties"]["bootstrap_engine"]["enum"] == ["python_random", "numpy_pcg64"]
     assert "202" in PATHS["/api/v1/scores"]["post"]["responses"]
+    for path in ("/api/v1/runs", "/api/v1/scores"):
+        assert {"400", "413"} <= set(PATHS[path]["post"]["responses"])
 
 
 def test_a_job_says_its_state_and_when_to_stop_polling() -> None:

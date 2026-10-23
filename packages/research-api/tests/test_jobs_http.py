@@ -623,3 +623,47 @@ def test_deleting_is_not_offered() -> None:
         settled(client, job["id"])
         assert delete(client, f"{JOBS}/{job['id']}").status_code == 405
         assert delete(client, f"{RUNS}/{job['run']['run_id']}").status_code == 405
+
+
+# --- the size of a request ---------------------------------------------------------------------
+
+
+def test_a_body_over_the_cap_is_a_413_before_anything_is_read_into_a_job() -> None:
+    with bench_app() as (client, _):
+        for path in (RUNS, SCORES):
+            done = post(client, path, content=b'{"notes": "' + b"x" * 40_000 + b'"}')
+            assert done.status_code == 413 and done.headers["content-type"].startswith(PROBLEM)
+        assert client.get(JOBS).json() == []
+
+
+def test_a_key_written_twice_in_a_body_is_a_400() -> None:
+    with bench_app() as (client, _):
+        body = '{"set": {"name": "demo-papers", "version": "v1"}, "arms": [{"name": "bare"}], '
+        body += '"models": ["fake-model"], "repeats": 1, "repeats": 2}'
+        done = post(
+            client, RUNS, content=body.encode(), headers={"Content-Type": "application/json"}
+        )
+        assert done.status_code == 400 and done.headers["content-type"].startswith(PROBLEM)
+        assert client.get(JOBS).json() == []
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (RUNS, {**run_body(), "models": ["m" * 129]}),
+        (RUNS, {**run_body(), "models": [""]}),
+        (SCORES, {"set": DEMO, "runs": ["r" * 129]}),
+        (SCORES, {"set": DEMO, "runs": ["../x"]}),
+        (SCORES, {"set": DEMO, "runs": ["a"], "pairs": [["a", "b" * 200]]}),
+        (SCORES, {"set": DEMO, "runs": ["a", "b"], "noise": ["a", "/b"]}),
+        (SCORES, {"set": DEMO, "runs": ["a"], "group_by": ["f"] * 9}),
+        (SCORES, {"set": DEMO, "runs": ["a"], "group_by": ["f" * 201]}),
+        (SCORES, {"set": DEMO, "runs": ["a"], "groups": ["g=1"] * 33}),
+        (SCORES, {"set": DEMO, "runs": ["a"], "groups": ["g" * 401]}),
+    ],
+)
+def test_the_lists_and_names_of_a_request_have_caps(path: str, body: dict[str, Any]) -> None:
+    with bench_app() as (client, _):
+        done = post(client, path, json=body)
+        assert done.status_code == 422, done.text
+        assert client.get(JOBS).json() == []
