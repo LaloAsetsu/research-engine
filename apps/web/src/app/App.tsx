@@ -2,6 +2,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { createBrowserRouter, type RouteObject } from "react-router";
 import { RouterProvider } from "react-router/dom";
 import { LOGIN_PATH, loginPath } from "@/features/auth/guards";
+import { endSession } from "@/shared/lib/session";
 import { LanguageProvider } from "./LanguageProvider";
 import { createQueryClient } from "./queryClient";
 import { appRoutes } from "./router";
@@ -25,6 +26,7 @@ export function createApp(
     const { pathname, search } = router.state.location;
     if (pathname === LOGIN_PATH) return;
     queryClient.clear();
+    endSession();
     void router.navigate(loginPath(pathname + search), { replace: true });
   });
   const router = makeRouter(appRoutes(queryClient));

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, EXPECTS_UNAUTHORIZED, fetchClient } from "@/shared/api/client";
 import { isApiError } from "@/shared/api/errors";
+import { endSession } from "@/shared/lib/session";
 import type { LoginRequest, Me, PasswordChangeRequest } from "@/shared/api/types";
 
 const LOGIN = "/api/v1/auth/login";
@@ -54,6 +55,9 @@ export function useLogout() {
     },
     // Once the server has ended the session, nothing of it may stay in memory. When the call
     // fails the session is still alive, so the page stays as it is (a 401 is handled globally).
-    onSuccess: () => queryClient.clear(),
+    onSuccess: () => {
+      queryClient.clear();
+      endSession();
+    },
   });
 }
