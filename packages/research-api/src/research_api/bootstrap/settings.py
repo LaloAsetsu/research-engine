@@ -131,6 +131,28 @@ class CircuitCapsSettings(BaseModel):
         return CircuitCaps(self.max_body_bytes, self.max_ops, float(self.timeout_s))
 
 
+class ModelSetting(BaseModel):
+    """One ``[[models]]`` entry: a model that benchmark runs may ask, and the OpenAI-compatible
+    server that serves it. ``name`` is the name the server knows it by (vLLM's served name)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+    endpoint: str = Field(description="The address up to and including /v1.")
+    label: str | None = Field(default=None, min_length=1, max_length=80)
+    revision: str | None = Field(default=None, min_length=1, max_length=80)
+
+    @field_validator("endpoint")
+    @classmethod
+    def _endpoint_is_plain(cls, value: str) -> str:
+        parts = urlsplit(value)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError("must look like http://127.0.0.1:8001/v1")
+        if parts.username or parts.password or parts.query or parts.fragment:
+            raise ValueError("must have no credentials, query or fragment: a key never goes here")
+        return value.rstrip("/")
+
+
 class Settings(BaseModel):
     """Every key is optional; a mistyped one is an error (``extra="forbid"``)."""
 
@@ -148,6 +170,9 @@ class Settings(BaseModel):
     # The docingest settings file that names the corpus, the index and the model servers. Without
     # it everything but asking works. Absolute path; a change needs a restart.
     docingest_config: Path | None = None
+    # The models that benchmark runs may ask (the closed-book arm calls them directly). The
+    # harness arm uses the model of the docingest file; its entry here only names it in the run.
+    models: tuple[ModelSetting, ...] = ()
     session_idle_hours: StrictInt = Field(default=12, ge=1, le=720)
     session_max_days: StrictInt = Field(default=7, ge=1, le=90)
     login_max_failures: StrictInt = Field(default=5, ge=1, le=100)
@@ -175,6 +200,14 @@ class Settings(BaseModel):
         value = value.expanduser()
         if not value.is_absolute():
             raise ValueError("must be an absolute path")
+        return value
+
+    @field_validator("models")
+    @classmethod
+    def _model_names_are_unique(cls, value: tuple[ModelSetting, ...]) -> tuple[ModelSetting, ...]:
+        names = [m.name for m in value]
+        if len(set(names)) != len(names):
+            raise ValueError("a model is listed twice")
         return value
 
     @model_validator(mode="after")

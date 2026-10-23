@@ -5,10 +5,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from .ask import FakeAskEngine, FakeDocumentReader
+from .bench import FakeArms, FakeModelServer
 
 FAKE_EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
-__all__ = ["FAKE_EPOCH", "FakeAskEngine", "FakeDocumentReader", "FixedClock"]
+__all__ = [
+    "FAKE_EPOCH",
+    "FakeArms",
+    "FakeAskEngine",
+    "FakeDocumentReader",
+    "FakeModelServer",
+    "FixedClock",
+]
 
 
 class FixedClock:
