@@ -25,6 +25,7 @@ from typing import Any
 
 from ..domain.errors import (
     ConflictError,
+    CorruptStoreError,
     FieldError,
     InvalidInputError,
     NotFoundError,
@@ -311,20 +312,16 @@ class JobDesk:
         await self.start()
         self._check_score(request)
         self._sets.export(request.set)  # NotFoundError when there is no such version
-        busy = {
-            j.artifact_id
-            for j in self._repo.list(kind="run", states=OPEN_STATES, limit=1000)
-            if j.artifact_id
-        }
+        busy = self._open_run_ids()
         for index, run_id in enumerate(request.runs):
-            stamp = self._files.run_stamp(run_id)
-            if stamp is None:
+            if self._files.run_stamp(run_id) is None:
                 raise _bad(f"/runs/{index}", "No such run.")
             if run_id in busy:
-                raise ConflictError(
-                    f"The run {run_id} has not ended. Wait for it, or cancel it, and score it then."
-                )
-            header = self._read_run(run_id).header
+                raise _not_ended(run_id)
+            try:
+                header = self._read_run(run_id).header
+            except NotFoundError:  # a file that is not a run of this service (see RunsDesk)
+                raise _bad(f"/runs/{index}", "No such run.") from None
             if header.get("set", {}).get("name") != request.set.header_name:
                 raise _bad(f"/runs/{index}", f"This run is not on {request.set.header_name}.")
         if self._repo.open_count(actor.username) + 1 > MAX_OPEN_PER_MEMBER:
@@ -349,6 +346,14 @@ class JobDesk:
         self._log(job_id, f"queued by {actor.username}")
         self._submit_score(job_id)
         return self._view(job, [])
+
+    def _open_run_ids(self) -> set[str]:
+        """The runs that are queued, running or being cancelled: their files may still grow."""
+        return {
+            j.artifact_id
+            for j in self._repo.list(kind="run", states=OPEN_STATES, limit=1000)
+            if j.artifact_id
+        }
 
     @staticmethod
     def _check_score(request: ScoreRequest) -> None:
@@ -868,10 +873,23 @@ class JobDesk:
         return scored.warnings
 
     def _read_run(self, run_id: str) -> RunData:
+        """A run as ``GET /runs`` would show it: the file's name is the run id of its header."""
         data = self._files.read_run(run_id)
         if data is None:
             raise NotFoundError("No such run.")
-        return self._formats.read(data)
+        try:
+            run = self._formats.read(data)
+        except CorruptStoreError:
+            raise NotFoundError("No such run.") from None
+        if run.header.get("run_id") != run_id:
+            raise NotFoundError("No such run.")
+        return run
+
+
+def _not_ended(run_id: str) -> ConflictError:
+    return ConflictError(
+        f"The run {run_id} has not ended. Wait for it, or cancel it, and score it then."
+    )
 
 
 def _answered(item_id: str, repeat: int, have: int, total: int, answer: RunAnswer) -> str:

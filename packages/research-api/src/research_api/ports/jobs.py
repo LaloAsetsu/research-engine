@@ -125,9 +125,14 @@ class RunFormats(Protocol):
 
     def item_line(self, item: Mapping[str, Any]) -> bytes: ...
 
+    def item_fits(self, item: Mapping[str, Any]) -> bool:
+        """Whether a line read from a file follows ``qa-run/1`` as an item line."""
+        ...
+
     def read(self, data: bytes) -> RunData:
-        """Header and items of a run file (plain or gzip) without checking every line again.
-        ``CorruptStoreError`` when there is no readable header."""
+        """Header and items of a run file (plain or gzip) without checking every item line again.
+        ``CorruptStoreError`` when there is no readable header, or the header is not a valid
+        ``qa-run/1`` header (a file dropped by hand may have any JSON on its first line)."""
         ...
 
 

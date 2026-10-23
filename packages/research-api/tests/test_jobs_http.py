@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -424,6 +425,28 @@ def test_the_items_of_a_run_come_with_their_questions() -> None:
             assert client.get(f"{RUNS}/{run_id}/items", params=bad).status_code == 422
         assert client.get(f"{RUNS}/ghost/items").status_code == 404
         assert client.get(f"{RUNS}/.hidden").status_code == 422
+
+
+def test_item_lines_of_the_wrong_type_in_a_hand_edited_run_do_not_break_the_page() -> None:
+    wrong = [
+        {"citations": 5},
+        {"answer": 123},
+        {"timings": "x"},
+        {"contexts": [1, 2]},
+        {"error": "x"},
+    ]
+    with bench_app() as (client, container):
+        job = start_run(client)
+        settled(client, job["id"])
+        run_id = job["run"]["run_id"]
+        extra = "".join(
+            json.dumps({"id": "DP-001", "repeat": 9 + n, **fields}) + "\n"
+            for n, fields in enumerate(wrong)
+        )
+        container.bench.jobs._files.append_run(run_id, extra.encode())
+        page = client.get(f"{RUNS}/{run_id}/items", params={"limit": 200})
+        assert page.status_code == 200 and page.json()["total"] == 6
+        assert client.get(RUNS).status_code == 200
 
 
 def test_contexts_can_be_left_out_of_a_page() -> None:

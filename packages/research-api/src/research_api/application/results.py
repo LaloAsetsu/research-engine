@@ -8,6 +8,8 @@ still growing is read as far as its last whole line.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -22,10 +24,32 @@ from ..ports.jobs import BenchFiles, JobRepo, RunFormats, ScoreData, Scorer
 from ..ports.sets import SetFormats
 from .sets import ManageSets
 
+log = logging.getLogger("research_api.results")
+
 DEFAULT_PAGE = 20
 MAX_PAGE = 200
 SCORE_CACHE = 16
+ITEM_CHECK_CACHE = 32
 RUN_FILTERS = ("all", "errors", "answered")
+
+
+@dataclass(frozen=True)
+class _ItemCheck:
+    """Which item lines of a run file were found not to follow ``qa-run/1``, and for which bytes.
+
+    ``size`` and ``digest`` say what was read; ``count`` is how many items it held. A file that
+    only grew keeps the verdicts it already has (a line never changes once it is whole), so a
+    run that is still going is checked a few lines at a time, not whole at every request.
+    """
+
+    size: int
+    digest: bytes
+    count: int
+    bad: frozenset[int]
+
+
+def _digest(data: bytes) -> bytes:
+    return hashlib.blake2b(data, digest_size=16).digest()
 
 
 @dataclass(frozen=True)
@@ -131,7 +155,8 @@ class RunsDesk:
         self._sets = sets
         self._set_formats = set_formats
         self._lock = threading.Lock()
-        self._cache: dict[str, tuple[tuple[int, int], RunSummary]] = {}
+        self._cache: dict[str, tuple[tuple[int, int], RunSummary | None]] = {}
+        self._checked: dict[str, _ItemCheck] = {}
 
     def _jobs_by_run(self) -> dict[str, Job]:
         found: dict[str, Job] = {}
@@ -141,6 +166,15 @@ class RunsDesk:
         return found
 
     def _summary(self, run_id: str) -> RunSummary | None:
+        """What the file ``run_id`` holds, or None when it is not a run this service can show.
+
+        A run has one id, the name of its file, and the run id in its header must be the same:
+        the id is what ``GET /runs/{id}`` and ``POST /scores`` open, and ``qa_bench.score`` matches
+        the pairs it is given against the header's. A file whose header says another id (a copy
+        under a new name, a file renamed by hand) is left out, as is a file whose header is not a
+        valid ``qa-run/1`` header. The verdict is kept with the file's stamp, so a file left out is
+        logged once, not at every listing.
+        """
         stamp = self._files.run_stamp(run_id)
         if stamp is None:
             return None
@@ -152,20 +186,32 @@ class RunsDesk:
         if data is None:
             return None
         try:
-            run = self._formats.read(data)
-        except CorruptStoreError:
-            return None
+            summary = self._read_summary(run_id, data)
+        except CorruptStoreError as error:
+            log.warning(
+                "a run file was left out",
+                extra={"event": "runs.skipped", "run_id": run_id, "reason": error.detail},
+            )
+            summary = None
+        with self._lock:
+            self._cache[run_id] = (stamp, summary)
+        return summary
+
+    def _read_summary(self, run_id: str, data: bytes) -> RunSummary:
+        run = self._formats.read(data)
         header = run.header
-        arm = header.get("arm", {})
+        if header.get("run_id") != run_id:
+            raise CorruptStoreError("the run id in the header is not the name of the file")
+        arm = header["arm"]
         errors = sum(1 for i in run.items if "error" in i)
-        summary = RunSummary(
-            run_id=str(header.get("run_id", run_id)),
-            set_name=str(header.get("set", {}).get("name", "")),
-            set_md5=str(header.get("set", {}).get("md5", "")),
-            arm=str(arm.get("name", "")),
+        return RunSummary(
+            run_id=run_id,
+            set_name=str(header["set"]["name"]),
+            set_md5=str(header["set"]["md5"]),
+            arm=str(arm["name"]),
             variant=arm.get("variant"),
-            model=str(header.get("model", {}).get("id", "")),
-            created=str(header.get("created", "")),
+            model=str(header["model"]["id"]),
+            created=str(header["created"]),
             started=header.get("started"),
             ended=header.get("ended"),
             repeats=header.get("repeats"),
@@ -175,9 +221,6 @@ class RunsDesk:
             complete=header.get("ended") is not None,
             notes=str(header.get("notes", "")),
         )
-        with self._lock:
-            self._cache[run_id] = (stamp, summary)
-        return summary
 
     def _with_job(self, summary: RunSummary, jobs: Mapping[str, Job]) -> RunSummary:
         job = jobs.get(summary.run_id)
@@ -221,11 +264,14 @@ class RunsDesk:
         data = self._files.read_run(run_id)
         if data is None:
             raise NotFoundError("No such run.")
-        run = self._formats.read(data)
+        try:
+            run = self._formats.read(data)
+        except CorruptStoreError:  # the file changed since the summary was made
+            raise NotFoundError("No such run.") from None
         questions = self._questions(summary.set_name)
         chosen = [
             i
-            for i in run.items
+            for i in self._fitting(run_id, data, run.items)
             if (item_id is None or i["id"] == item_id)
             and (filter == "all" or (filter == "errors") == ("error" in i))
         ]
@@ -248,6 +294,42 @@ class RunsDesk:
                 )
             )
         return RunItemsPage(summary, shown, len(chosen), offset, limit)
+
+    def _fitting(
+        self, run_id: str, data: bytes, items: tuple[dict[str, Any], ...]
+    ) -> list[dict[str, Any]]:
+        """The item lines that follow ``qa-run/1``. A file dropped in by hand may hold a line with
+        a wrong type (an answer that is a number, citations that are a count): it is left out
+        here, as the scorer would refuse it, and does not break the page."""
+        digest = _digest(data)
+        with self._lock:
+            known = self._checked.get(run_id)
+        if known is not None and known.size == len(data) and known.digest == digest:
+            check = known
+        else:
+            start, before = 0, frozenset[int]()
+            if (
+                known is not None
+                and known.size < len(data)
+                and known.count <= len(items)
+                and _digest(data[: known.size]) == known.digest
+            ):
+                start, before = known.count, known.bad
+            bad = before | {
+                n for n in range(start, len(items)) if not self._formats.item_fits(items[n])
+            }
+            check = _ItemCheck(len(data), digest, len(items), bad)
+            if bad != before:
+                log.warning(
+                    "item lines of a run file were left out",
+                    extra={"event": "runs.lines_skipped", "run_id": run_id, "lines": len(bad)},
+                )
+            with self._lock:
+                self._checked.pop(run_id, None)
+                self._checked[run_id] = check
+                while len(self._checked) > ITEM_CHECK_CACHE:
+                    del self._checked[next(iter(self._checked))]
+        return [item for n, item in enumerate(items) if n not in check.bad]
 
     def _questions(self, set_name: str) -> dict[str, Mapping[str, Any]]:
         """The items of the set the run is on, by id; empty when the set is gone."""

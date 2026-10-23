@@ -13,7 +13,7 @@ from helpers import arun
 from research_api.application.jobs import RunRequest, ScoreRequest
 from research_api.application.results import RunsDesk
 from research_api.bootstrap import Container
-from research_api.domain.errors import CorruptStoreError, NotFoundError
+from research_api.domain.errors import CorruptStoreError, InvalidInputError, NotFoundError
 from research_api.domain.jobs import ArmSpec
 from research_api.domain.sets import SetRef
 
@@ -247,6 +247,185 @@ def test_runs_from_different_time_zones_are_listed_by_the_moment_they_started(
     # 07:00 at -06:00 is 13:00 UTC, later than 09:00 UTC, though "07" sorts before "09" as text
     drop(container, "early-utc", lines(header("early-utc", started="2026-10-22T09:00:00+00:00")))
     drop(container, "late-local", lines(header("late-local", started="2026-10-22T07:00:00-06:00")))
+    drop(container, "no-started", lines(header("no-started", created="2026-10-22T08:00:00Z")))
+    assert [r.run_id for r in runs.list()] == ["late-local", "early-utc", "no-started"]
+
+
+def test_a_run_with_a_time_that_is_not_a_date_time_is_left_out_as_qa_bench_would_refuse_it(
+    container: Container, runs: RunsDesk
+) -> None:
     drop(container, "no-zone", lines(header("no-zone", started="2026-10-22T08:00:00")))
     drop(container, "no-time", lines(header("no-time", created="not a time")))
-    assert [r.run_id for r in runs.list()] == ["late-local", "early-utc", "no-zone", "no-time"]
+    assert runs.list() == []
+
+
+# --- a file is a run under its own name ---------------------------------------------------
+
+
+def test_a_file_renamed_by_hand_is_not_listed_under_an_id_nothing_can_open(
+    container: Container, runs: RunsDesk
+) -> None:
+    drop(container, "r426-main", lines(header("r426"), answer("DP-001")))
+    assert runs.list() == []
+    for run_id in ("r426-main", "r426"):
+        with pytest.raises(NotFoundError):
+            runs.get(run_id)
+        with pytest.raises(NotFoundError):
+            runs.items(run_id)
+
+
+def test_a_copy_under_another_name_is_not_a_second_run_with_the_same_id(
+    container: Container, runs: RunsDesk
+) -> None:
+    data = lines(header("r1"), answer("DP-001"))
+    drop(container, "r1", data)
+    drop(container, "r1-copy", data)
+    assert [r.run_id for r in runs.list()] == ["r1"]
+    assert runs.get("r1").answers == 1
+
+
+@arun
+async def test_a_run_dropped_under_another_name_or_with_a_broken_header_cannot_be_scored(
+    container: Container,
+) -> None:
+    drop(container, "r426-main", lines(header("r426"), answer("DP-001")))
+    drop(container, "bad-set", lines(header("bad-set", **{"set": "x"})))
+    desk = container.bench.jobs
+    for name in ("r426-main", "r426", "bad-set"):
+        with pytest.raises(InvalidInputError) as caught:
+            await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (name,)))
+        assert caught.value.errors[0].path == "/runs/0"
+        assert caught.value.errors[0].message == "No such run."
+
+
+def test_a_header_of_the_wrong_shape_does_not_break_the_list(
+    container: Container, runs: RunsDesk
+) -> None:
+    drop(container, "good-run", lines(header("good-run")))
+    drop(container, "bad-set", lines(header("bad-set", **{"set": "x"})))
+    drop(container, "bad-arm", lines(header("bad-arm", arm=[1, 2])))
+    drop(container, "bad-model", lines(header("bad-model", model={"id": 7})))
+    drop(
+        container,
+        "no-created",
+        lines({k: v for k, v in header("no-created").items() if k != "created"}),
+    )
+    assert [r.run_id for r in runs.list()] == ["good-run"]
+
+
+def test_a_file_that_is_left_out_is_logged_once_not_at_every_listing(
+    container: Container, runs: RunsDesk, caplog: pytest.LogCaptureFixture
+) -> None:
+    drop(container, "r426-main", lines(header("r426")))
+    for _ in range(3):
+        runs.list()
+    skipped = [r for r in caplog.records if getattr(r, "event", "") == "runs.skipped"]
+    assert len(skipped) == 1 and skipped[0].run_id == "r426-main"  # type: ignore[attr-defined]
+    assert "the name of the file" in skipped[0].reason  # type: ignore[attr-defined]
+
+
+def test_lines_of_a_dropped_file_that_lack_an_id_or_a_repeat_are_not_shown(
+    container: Container, runs: RunsDesk
+) -> None:
+    drop(
+        container,
+        "odd-lines",
+        lines(
+            header("odd-lines"), answer("DP-001"), {"id": "DP-002"}, {"repeat": 1}, answer("DP-003")
+        ),
+    )
+    page = runs.items("odd-lines")
+    assert [i.id for i in page.items] == ["DP-001", "DP-003"] and page.total == 2
+    assert [i.id for i in runs.items("odd-lines", item_id="DP-002").items] == []
+
+
+def test_a_file_that_changes_into_a_non_run_between_the_summary_and_the_items_is_not_found(
+    container: Container, runs: RunsDesk
+) -> None:
+    drop(container, "r1", lines(header("r1")))
+    runs.get("r1")  # summary cached
+    files = container.bench.jobs._files
+    original = files.read_run
+
+    def read(run_id: str) -> bytes | None:
+        files.read_run = original  # type: ignore[method-assign]
+        return b"not a run\n"
+
+    files.read_run = read  # type: ignore[method-assign]
+    with pytest.raises(NotFoundError):
+        runs.items("r1")
+
+
+WRONG_ITEMS = [
+    {"citations": 5},
+    {"answer": 123},
+    {"timings": "x"},
+    {"contexts": [1, 2]},
+    {"error": "x"},
+]
+
+
+@pytest.mark.parametrize("wrong", WRONG_ITEMS, ids=lambda w: next(iter(w)))
+def test_an_item_line_of_the_wrong_type_is_left_out_of_the_items_not_a_500(
+    container: Container, runs: RunsDesk, wrong: dict[str, Any]
+) -> None:
+    drop(
+        container,
+        "wrong-types",
+        lines(header("wrong-types"), answer("DP-001"), answer("DP-002", **wrong), answer("DP-003")),
+    )
+    page = runs.items("wrong-types")
+    assert [i.id for i in page.items] == ["DP-001", "DP-003"] and page.total == 2
+    assert [i.id for i in runs.items("wrong-types", filter="errors").items] == []
+    assert [i.id for i in runs.items("wrong-types", item_id="DP-002").items] == []
+    assert runs.get("wrong-types").run_id == "wrong-types"  # the list and the summary stay
+
+
+def test_the_item_lines_of_a_gzip_run_are_checked_too(container: Container, runs: RunsDesk) -> None:
+    drop(
+        container,
+        "zip-wrong",
+        gzip.compress(lines(header("zip-wrong"), answer("DP-001", citations=5), answer("DP-002"))),
+        ".qa-run.jsonl.gz",
+    )
+    assert [i.id for i in runs.items("zip-wrong").items] == ["DP-002"]
+
+
+def test_the_lines_are_checked_once_per_content_and_a_growing_file_only_for_its_new_lines(
+    container: Container, runs: RunsDesk, caplog: pytest.LogCaptureFixture
+) -> None:
+    drop(container, "grow", lines(header("grow"), answer("DP-001"), answer("DP-002", answer=1)))
+    checked: list[str] = []
+    real = runs._formats.item_fits
+
+    def spy(item: Any) -> bool:
+        checked.append(item["id"])
+        return real(item)
+
+    runs._formats.item_fits = spy  # type: ignore[method-assign]
+    for _ in range(3):
+        assert [i.id for i in runs.items("grow").items] == ["DP-001"]
+    assert checked == ["DP-001", "DP-002"]
+    path = container.bench.jobs._files.root / "runs" / "grow.qa-run.jsonl"
+    with path.open("ab") as stream:
+        stream.write(lines(answer("DP-003"), answer("DP-004", citations=5)))
+    checked.clear()
+    assert [i.id for i in runs.items("grow").items] == ["DP-001", "DP-003"]
+    assert checked == ["DP-003", "DP-004"]  # the first two lines are not looked at again
+    skipped = [r for r in caplog.records if getattr(r, "event", "") == "runs.lines_skipped"]
+    assert [r.lines for r in skipped] == [1, 2]  # type: ignore[attr-defined]
+    assert all(r.run_id == "grow" for r in skipped)  # type: ignore[attr-defined]
+
+
+def test_a_line_that_is_rewritten_is_checked_again(container: Container, runs: RunsDesk) -> None:
+    drop(container, "redo", lines(header("redo"), answer("DP-001", answer=1), answer("DP-002")))
+    assert [i.id for i in runs.items("redo").items] == ["DP-002"]
+    drop(container, "redo", lines(header("redo"), answer("DP-001"), answer("DP-002", answer=1)))
+    assert [i.id for i in runs.items("redo").items] == ["DP-001"]
+
+
+def test_only_a_few_runs_keep_their_verdicts(container: Container, runs: RunsDesk) -> None:
+    for n in range(40):
+        drop(container, f"many-{n:02d}", lines(header(f"many-{n:02d}"), answer("DP-001")))
+        runs.items(f"many-{n:02d}")
+    assert len(runs._checked) == 32

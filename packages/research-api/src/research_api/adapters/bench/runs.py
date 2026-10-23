@@ -40,6 +40,9 @@ class QaBenchRunFormats:
     def item_line(self, item: Mapping[str, Any]) -> bytes:
         return self._line(item, header=False)
 
+    def item_fits(self, item: Mapping[str, Any]) -> bool:
+        return not check_line(QA_RUN, dict(item), header=False)
+
     @staticmethod
     def _line(record: Mapping[str, Any], *, header: bool) -> bytes:
         problems = check_line(QA_RUN, dict(record), header=header)
@@ -65,6 +68,8 @@ class QaBenchRunFormats:
             raise CorruptStoreError("a run file has a line that is not JSON") from None
         if not isinstance(header, dict) or header.get("format") != QA_RUN:
             raise CorruptStoreError("a run file does not start with a qa-run/1 header")
+        if check_line(QA_RUN, header, header=True):
+            raise CorruptStoreError("a run file has a qa-run/1 header that does not fit the format")
         if not all(isinstance(i, dict) for i in items):
             raise CorruptStoreError("a run file has a line that is not an object")
         return RunData(header, items, end)
