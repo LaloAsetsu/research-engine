@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useLoaderData } from "react-router";
-import type { Me } from "@/shared/api/pending";
+import type { Me } from "@/shared/api/types";
 import { useFocusPageTitle } from "@/shared/layout/useFocusPageTitle";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card";
 import { ChangePasswordForm } from "./ChangePasswordForm";

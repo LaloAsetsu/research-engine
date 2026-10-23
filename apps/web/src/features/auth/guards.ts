@@ -1,6 +1,6 @@
 import { redirect, type LoaderFunctionArgs } from "react-router";
 import type { QueryClient } from "@tanstack/react-query";
-import type { Me } from "@/shared/api/pending";
+import type { Me } from "@/shared/api/types";
 import { ensureMe } from "./api";
 
 export const DEFAULT_PATH = "/ask";

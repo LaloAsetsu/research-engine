@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, EXPECTS_UNAUTHORIZED, fetchClient } from "@/shared/api/client";
 import { isApiError } from "@/shared/api/errors";
-import type { LoginRequest, Me, PasswordChangeRequest } from "@/shared/api/pending";
+import type { LoginRequest, Me, PasswordChangeRequest } from "@/shared/api/types";
 
 const LOGIN = "/api/v1/auth/login";
 const LOGOUT = "/api/v1/auth/logout";

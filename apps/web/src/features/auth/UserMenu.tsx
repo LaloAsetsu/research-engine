@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
 import { isApiError } from "@/shared/api/errors";
-import type { Me } from "@/shared/api/pending";
+import type { Me } from "@/shared/api/types";
 import { Button } from "@/shared/ui/button";
 import {
   DropdownMenu,

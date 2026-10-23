@@ -57,9 +57,9 @@ cd apps/web && pnpm gen:api
 
 ## Sign-in and the mock
 
-The sign-in endpoints of the scope (`/auth/login`, `/auth/logout`, `/auth/me`, `/auth/password`) are not in the API yet, so they are not in the generated types. `src/shared/api/pending.ts` describes them by hand and the client merges them in. `pending.test.ts` fails as soon as `openapi.json` contains any of those paths: delete `pending.ts` and its use in `client.ts` then.
+The sign-in endpoints (`/auth/login`, `/auth/logout`, `/auth/me`, `/auth/password`) are in the generated types like any other; `src/shared/api/types.ts` gives `Me`, `LoginRequest` and `PasswordChangeRequest` their short names.
 
-`src/test/auth-mock.ts` is a small state machine for those endpoints (two made-up accounts, one of them with a temporary password, a failed-login limit, a CSRF check). The Vitest tests serve it through MSW and the Playwright test through route interception; `/health` and `/status` in the end-to-end test come from the real API in fake mode. The accounts exist only in that file and are replaced by the API's seeded test users when sign-in lands.
+`src/test/auth-mock.ts` is a small state machine for those endpoints (two made-up accounts, one of them with a temporary password, a failed-login limit, a CSRF check). The Vitest tests serve it through MSW and the Playwright test through route interception; `/health` and `/status` in the end-to-end test come from the real API in fake mode. Its accounts (`ana`, and `temp` with a temporary password) copy two of the API's seeded test users for fake mode, so the mock and the real API answer to the same names. The mock stays so that most tests need no account state.
 
 ## Structure
 
@@ -68,7 +68,7 @@ src/
   app/            router, providers, layout, top bar, error and not-found screens
   features/       one folder per screen: auth, status, ask, benchmarks, qsets, circuits
   shared/
-    api/          generated types, the client, ApiError, the pending sign-in types
+    api/          generated types, the client, ApiError
     i18n/         es.json, en.json, language detection
     layout/       page heading, placeholder page
     forms/        labelled text field

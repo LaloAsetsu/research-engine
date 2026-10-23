@@ -1,9 +1,8 @@
 /**
- * A stand-in for the sign-in endpoints that the API does not serve yet (see
- * shared/api/pending.ts). One pure state machine, used by MSW in the Vitest tests and by
- * Playwright's route interception in the end-to-end test, so both exercise the same behavior.
- * The accounts are made up and exist only here; when the API's sign-in lands, the end-to-end
- * test switches to the API's seeded test users.
+ * A stand-in for the sign-in endpoints of the API, with the same answers. One pure state machine,
+ * used by MSW in the Vitest tests and by Playwright's route interception in the end-to-end test,
+ * so both exercise the same behavior. The accounts are two of the API's seed file for fake mode
+ * (packages/research-api/tests/fixtures/seed-users.json), with the same names and passwords.
  */
 
 export interface MockUser {

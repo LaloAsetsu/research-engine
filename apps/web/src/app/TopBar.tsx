@@ -4,7 +4,7 @@ import { NavLink } from "react-router";
 import { UserMenu } from "@/features/auth/UserMenu";
 import { StatusBadge } from "@/features/status/StatusBadge";
 import { LANGUAGES } from "@/shared/i18n/detect";
-import type { Me } from "@/shared/api/pending";
+import type { Me } from "@/shared/api/types";
 import { THEMES, type Theme } from "@/shared/lib/theme";
 import { cn } from "@/shared/lib/utils";
 import { useUiStore } from "@/shared/stores/ui-store";

@@ -1,7 +1,6 @@
 import createFetchClient, { type Middleware } from "openapi-fetch";
 import createClient from "openapi-react-query";
 import { problemFromResponse } from "./errors";
-import type { PendingPaths } from "./pending";
 import type { paths } from "./schema";
 
 /** Marks a query whose 401 is an answer, not a sign that the session ended (the session check). */
@@ -38,11 +37,9 @@ export const problemMiddleware: Middleware = {
   },
 };
 
-export type ApiPaths = paths & PendingPaths;
-
 export function createApiClient(baseUrl: string) {
   // Looked up at call time, not captured here: a test double installed later must be used.
-  const fetchClient = createFetchClient<ApiPaths>({
+  const fetchClient = createFetchClient<paths>({
     baseUrl,
     fetch: (request) => globalThis.fetch(request),
   });

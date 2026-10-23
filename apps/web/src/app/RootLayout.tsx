@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Outlet, useLoaderData, useLocation } from "react-router";
-import type { Me } from "@/shared/api/pending";
+import type { Me } from "@/shared/api/types";
 import { useFocusPageTitle } from "@/shared/layout/useFocusPageTitle";
 import { TopBar } from "./TopBar";
 
