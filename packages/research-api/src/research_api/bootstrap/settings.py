@@ -9,7 +9,22 @@ from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    ValidationError,
+    field_validator,
+)
+
+from ..domain.circuits import (
+    DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_MAX_OPS,
+    DEFAULT_TIMEOUT_S,
+    CircuitCaps,
+)
 
 # Tailscale hands out addresses from the CGNAT block (IPv4) and a unique-local block (IPv6).
 _TAILSCALE_NETWORKS = (
@@ -97,6 +112,20 @@ def normalize_origin(value: str) -> str:
     return _origin_text(scheme, host, port)
 
 
+class CircuitCapsSettings(BaseModel):
+    """The ``[circuit_caps]`` table. The upper bounds are quantum-sim's own limits (32 Mi
+    characters of input, 10,000 operations) and a timeout of ten minutes."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_body_bytes: StrictInt = Field(default=DEFAULT_MAX_BODY_BYTES, ge=1, le=32 * 1024 * 1024)
+    max_ops: StrictInt = Field(default=DEFAULT_MAX_OPS, ge=1, le=10_000)
+    timeout_s: StrictInt | StrictFloat = Field(default=DEFAULT_TIMEOUT_S, gt=0, le=600)
+
+    def caps(self) -> CircuitCaps:
+        return CircuitCaps(self.max_body_bytes, self.max_ops, float(self.timeout_s))
+
+
 class Settings(BaseModel):
     """Every key is optional; a mistyped one is an error (``extra="forbid"``)."""
 
@@ -105,6 +134,7 @@ class Settings(BaseModel):
     bind_host: str = "127.0.0.1"
     port: StrictInt = Field(default=8090, ge=1, le=65535)
     public_origin: str | None = None
+    circuit_caps: CircuitCapsSettings = CircuitCapsSettings()
 
     @field_validator("bind_host")
     @classmethod

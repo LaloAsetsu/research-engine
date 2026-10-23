@@ -6,6 +6,7 @@ import pytest
 
 from research_api.bootstrap import Settings, SettingsError, load_settings
 from research_api.bootstrap.settings import is_loopback, is_tailscale
+from research_api.domain.circuits import CircuitCaps
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -25,6 +26,40 @@ def test_defaults_listen_on_loopback() -> None:
 def test_the_example_file_loads() -> None:
     settings = load_settings(PACKAGE / "config.example.toml")
     assert settings.origin == "http://127.0.0.1:8090"
+
+
+def test_the_example_file_states_the_default_circuit_caps() -> None:
+    settings = load_settings(PACKAGE / "config.example.toml")
+    assert settings.circuit_caps == Settings.defaults().circuit_caps
+    assert settings.circuit_caps.caps() == CircuitCaps(1024 * 1024, 2000, 30.0)
+
+
+def test_circuit_caps_can_be_set(tmp_path: Path) -> None:
+    path = write(tmp_path, "[circuit_caps]\nmax_ops = 50\ntimeout_s = 2.5\n")
+    assert load_settings(path).circuit_caps.caps() == CircuitCaps(1024 * 1024, 50, 2.5)
+
+
+@pytest.mark.parametrize(
+    ("line", "key"),
+    [
+        ("max_body_bytes = 0", "max_body_bytes"),
+        ("max_body_bytes = 33554433", "max_body_bytes"),
+        ("max_body_bytes = 1.5", "max_body_bytes"),
+        ("max_ops = 0", "max_ops"),
+        ("max_ops = 10001", "max_ops"),
+        ("max_ops = true", "max_ops"),
+        ("timeout_s = 0", "timeout_s"),
+        ("timeout_s = -1", "timeout_s"),
+        ("timeout_s = 601", "timeout_s"),
+        ("timeout_s = nan", "timeout_s"),
+        ("timeout_s = true", "timeout_s"),
+        ('timeout_s = "30"', "timeout_s"),
+        ("max_op = 5", "max_op"),
+    ],
+)
+def test_a_circuit_cap_out_of_range_is_refused_by_name(tmp_path: Path, line: str, key: str) -> None:
+    with pytest.raises(SettingsError, match=rf"circuit_caps\.{key}"):
+        load_settings(write(tmp_path, f"[circuit_caps]\n{line}\n"))
 
 
 def test_an_empty_file_is_all_defaults(tmp_path: Path) -> None:

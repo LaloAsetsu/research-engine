@@ -11,3 +11,10 @@ port = 8090
 # Written the way a browser sends it: lowercase, and no port when it is the default one (80 for
 # http, 443 for https). Defaults to http://<bind_host>:<port>.
 public_origin = "http://127.0.0.1:8090"
+
+# What the circuit check accepts. The check runs inside the API process, so these keep one
+# request small. A bigger circuit is a 422 that points to the `quantum-sim` command.
+[circuit_caps]
+max_body_bytes = 1048576   # request body, in bytes (answer 413 above it)
+max_ops = 2000             # operations in the circuits of one request (answer 422 above it)
+timeout_s = 30             # seconds to wait for one request (answer 422 after it)
