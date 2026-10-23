@@ -57,6 +57,14 @@ test.describe("login", () => {
 
   test("walks the four screens", async ({ page, authMock }) => {
     void authMock;
+    // The mock signs in, but the real API behind it would refuse the question-set calls (no real
+    // session); the screens themselves are tested against the real API in sets.spec.ts.
+    await page.route("**/api/v1/sets", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
+    await page.route("**/api/v1/sets/import/shapes", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
     await page.goto("/login");
     await signIn(page, ANA);
     const nav = page.getByRole("navigation", { name: "Main" });
