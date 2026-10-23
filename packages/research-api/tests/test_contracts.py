@@ -371,6 +371,62 @@ CASES = {
         "from ..domain import documents\nfrom ..ports import documents as ports",
         set(),
     ),
+    "domain sets imports qa_bench": (
+        "domain/sets.py",
+        "import qa_bench",
+        {PURE, PORTS_ONLY, QA_BENCH},
+    ),
+    "domain sets imports jsonschema": ("domain/sets.py", "import jsonschema", {PURE, PORTS_ONLY}),
+    "application sets imports qa_bench": (
+        "application/sets.py",
+        "import qa_bench",
+        {PORTS_ONLY, QA_BENCH},
+    ),
+    "application sets imports the bench adapter": (
+        "application/sets.py",
+        "from ..adapters import bench",
+        {LAYERS, PROTECTED, PORTS_ONLY},  # and qa_bench, through the chain
+    ),
+    "ports sets import jsonschema": ("ports/sets.py", "import jsonschema", {PORTS_ONLY}),
+    "the set formats import sqlalchemy": ("adapters/bench/sets.py", "import sqlalchemy", {SQL}),
+    "the set formats import docingest": ("adapters/bench/sets.py", "import docingest", {DOCINGEST}),
+    "the set file store imports qa_bench": (
+        "adapters/files/sets.py",
+        "import qa_bench",
+        {QA_BENCH},
+    ),
+    "the catalog imports qa_bench": (
+        "adapters/persistence/repos.py",
+        "import qa_bench",
+        {QA_BENCH},
+    ),
+    "the set formats import the file store": (
+        "adapters/bench/sets.py",
+        "from .. import files",
+        {INDEPENDENT},
+    ),
+    "the catalog imports the set formats": (
+        "adapters/persistence/repos.py",
+        "from .. import bench",
+        {INDEPENDENT},
+    ),
+    "the http set routes import qa_bench": (
+        "entrypoints/http/sets.py",
+        "import qa_bench",
+        {QA_BENCH},
+    ),
+    "the demo sets import qa_bench": ("bootstrap/demo_sets.py", "import qa_bench", {QA_BENCH}),
+    "control: qa_bench in the set formats": ("adapters/bench/sets.py", "import qa_bench", set()),
+    "control: bootstrap wires the set adapters": (
+        "bootstrap/container.py",
+        "from ..adapters import bench, files, persistence",
+        set(),
+    ),
+    "control: the http set routes import the domain": (
+        "entrypoints/http/sets.py",
+        "from ...domain import sets",
+        set(),
+    ),
 }
 
 

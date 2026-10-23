@@ -352,6 +352,221 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The catalog of question sets
+         * @description Every set with its versions, each with its status, md5, items, owner and review progress.
+         */
+        get: operations["listSets"];
+        put?: never;
+        /**
+         * Start a draft
+         * @description An empty draft under a new name, or, with `copy_from`, the next version of an existing
+         *     set as a copy of one of its versions.
+         */
+        post: operations["createSet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a file as a new draft
+         * @description Nothing is stored unless the whole file is accepted. A `qset/1` file whose header already
+         *     names the target is stored byte for byte, so its md5 is the one it came with.
+         */
+        post: operations["importSet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/import/shapes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Older formats that can be imported */
+        get: operations["listImportShapes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an item or a file
+         * @description A dry run against `qset/1`: every problem with its place, and nothing is stored.
+         */
+        post: operations["validateSet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/{name}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A version and a page of its items
+         * @description The header, the review counts and the matching items (id, form, language, tags, the
+         *     question's start and the review state). Read one item for all of it.
+         */
+        get: operations["getSetVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/{name}/versions/{version}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the file */
+        get: operations["exportSetVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/{name}/versions/{version}/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What freezing would do
+         * @description The reviews it would apply, by item. Nothing changes.
+         */
+        get: operations["previewFreeze"];
+        put?: never;
+        /**
+         * Apply the reviews and freeze a draft
+         * @description Owner or admin. The latest human decision of each item is applied (accepted and edited
+         *     items stay, rejected ones go) and the file gets a new md5 that never changes again. The draft
+         *     as it was is kept beside it on the server.
+         */
+        post: operations["freezeSetVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/{name}/versions/{version}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add an item to a draft */
+        post: operations["addSetItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/{name}/versions/{version}/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One item with its reviews and its validation */
+        get: operations["getSetItem"];
+        /**
+         * Replace one item of a draft
+         * @description Owner or admin, drafts only. `422` lists each problem with a JSON pointer into the item.
+         */
+        put: operations["putSetItem"];
+        post?: never;
+        /**
+         * Remove an item from a draft
+         * @description `409` when another item is a mirror of this one.
+         */
+        delete: operations["deleteSetItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sets/{name}/versions/{version}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The decisions on a version's items
+         * @description Oldest first, as in the `reviews/1` file.
+         */
+        get: operations["listSetReviews"];
+        put?: never;
+        /**
+         * Accept, edit or reject an item
+         * @description Any member may review any item of a draft. The file is append only: a new decision
+         *     replaces yours, it never edits it. `edit` and `reject` need a `note`; an `edit` lists the
+         *     item fields to replace and is applied when the draft is frozen.
+         */
+        post: operations["addSetReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/status": {
         parameters: {
             query?: never;
@@ -678,6 +893,49 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * FreezePlanOut
+         * @description What freezing does, by item id.
+         */
+        FreezePlanOut: {
+            /** Accepted */
+            accepted: string[];
+            /** Edited */
+            edited: string[];
+            /** Items After */
+            items_after: number;
+            /** Items Before */
+            items_before: number;
+            /**
+             * Needs Second
+             * @description Accepted by one person only; still kept.
+             */
+            needs_second: string[];
+            /** Rejected */
+            rejected: string[];
+            /**
+             * Stale
+             * @description Decided on an earlier state of the draft.
+             */
+            stale: string[];
+            /**
+             * Unknown
+             * @description Decisions about items the draft no longer has.
+             */
+            unknown: string[];
+            /** Unreviewed */
+            unreviewed: string[];
+        };
+        /** FreezePreview */
+        FreezePreview: {
+            plan: components["schemas"]["FreezePlanOut"];
+            version: components["schemas"]["SetVersionOut"];
+        };
+        /** FreezeResult */
+        FreezeResult: {
+            plan: components["schemas"]["FreezePlanOut"];
+            version: components["schemas"]["SetVersionOut"];
+        };
         /** GateListResponse */
         GateListResponse: {
             /**
@@ -704,6 +962,117 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** ImportResult */
+        ImportResult: {
+            /** Items Read */
+            items_read: number;
+            /**
+             * Shape
+             * @description The older shape that was converted, if any.
+             */
+            shape: string | null;
+            version: components["schemas"]["SetVersionOut"];
+        };
+        /** ImportShapeOut */
+        ImportShapeOut: {
+            /** Description */
+            description: string;
+            /** Name */
+            name: string;
+            /** Needs Corpus */
+            needs_corpus: boolean;
+            /** Suffix */
+            suffix: string;
+        };
+        /** ItemDetail */
+        ItemDetail: {
+            /**
+             * Item
+             * @description The `qset/1` item as stored.
+             */
+            item: {
+                [key: string]: unknown;
+            };
+            review: components["schemas"]["ItemReviewOut"];
+            /**
+             * Reviews
+             * @description Every decision on this item, oldest first.
+             */
+            reviews: components["schemas"]["ReviewLine"][];
+            /**
+             * Validation
+             * @description What `qset/1` says about the item. Empty when valid.
+             */
+            validation: components["schemas"]["ProblemAt"][];
+            version: components["schemas"]["SetVersionOut"];
+        };
+        /** ItemPage */
+        ItemPage: {
+            header: components["schemas"]["QSetHeader"];
+            /** Items */
+            items: components["schemas"]["ItemSummaryOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            review: components["schemas"]["ReviewProgressOut"];
+            /**
+             * Total
+             * @description Items matching the filters, before paging.
+             */
+            total: number;
+            version: components["schemas"]["SetVersionOut"];
+        };
+        /** ItemReviewOut */
+        ItemReviewOut: {
+            /** Accepted By */
+            accepted_by: string[];
+            /** @description The latest decision, which freezing applies. */
+            deciding: components["schemas"]["ReviewLine"] | null;
+            /**
+             * Gold
+             * @description True when two different people accepted it.
+             */
+            gold: boolean;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "none" | "needs_second" | "accepted" | "edited" | "rejected";
+        };
+        /** ItemSummaryOut */
+        ItemSummaryOut: {
+            /** Accepted By */
+            accepted_by: string[];
+            /** Content */
+            content: string | null;
+            /** Corpus */
+            corpus: string;
+            /** Form */
+            form: string;
+            /** Id */
+            id: string;
+            /** Lang */
+            lang: string;
+            /** Mirror Of */
+            mirror_of: string | null;
+            /**
+             * Question
+             * @description The question, cut to 240 characters.
+             */
+            question: string;
+            /**
+             * Review
+             * @enum {string}
+             */
+            review: "none" | "needs_second" | "accepted" | "edited" | "rejected";
+            /** Split */
+            split: string | null;
+            /** Tags */
+            tags: {
+                [key: string]: string;
+            };
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Password */
@@ -728,6 +1097,46 @@ export interface components {
             role: components["schemas"]["Role"];
             /** Username */
             username: string;
+        };
+        /**
+         * NewReview
+         * @description The server adds the reviewer (you), the role (`human`), the date and the set md5.
+         */
+        NewReview: {
+            /**
+             * Edit
+             * @description For `edit`: the item fields to replace, with their new values.
+             */
+            edit?: {
+                [key: string]: unknown;
+            } | null;
+            /** Item Id */
+            item_id: string;
+            /**
+             * Note
+             * @description Required for edit and reject.
+             */
+            note?: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "accept" | "edit" | "reject";
+        };
+        /** NewSet */
+        NewSet: {
+            /**
+             * Copy From
+             * @description Start the next version of an existing set as a copy of this version.
+             */
+            copy_from?: string | null;
+            /**
+             * Corpus
+             * @description The corpus new items name when they leave it out.
+             */
+            corpus?: string | null;
+            /** Name */
+            name: string;
         };
         /** PageInfoOut */
         PageInfoOut: {
@@ -788,6 +1197,16 @@ export interface components {
             /** Type */
             type: string;
         };
+        /** ProblemAt */
+        ProblemAt: {
+            /** Message */
+            message: string;
+            /**
+             * Path
+             * @description JSON pointer to the value (`/lines/N/...` for a file).
+             */
+            path: string;
+        };
         /** ProblemField */
         ProblemField: {
             /** Message */
@@ -797,6 +1216,96 @@ export interface components {
              * @description JSON pointer to the offending value.
              */
             path: string;
+        };
+        /**
+         * QSetHeader
+         * @description Line 1 of a `qset/1` file.
+         */
+        QSetHeader: {
+            /** Created */
+            created: string;
+            /** Format */
+            format: string;
+            /** Notes */
+            notes?: string | null;
+            /** Set */
+            set: string;
+            /** Source */
+            source?: {
+                [key: string]: string;
+            } | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ReviewLine
+         * @description One `reviews/1` decision on an item, as stored.
+         */
+        ReviewLine: {
+            /** Date */
+            date: string;
+            /** Edit */
+            edit?: {
+                [key: string]: unknown;
+            } | null;
+            /** Item Id */
+            item_id: string;
+            /** Note */
+            note?: string | null;
+            /** Reviewer */
+            reviewer: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "human" | "checker";
+            /** Set Md5 */
+            set_md5?: string | null;
+            /**
+             * Target
+             * @constant
+             */
+            target: "item";
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "accept" | "edit" | "reject";
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ReviewProgressOut
+         * @description How many items are in each review state.
+         */
+        ReviewProgressOut: {
+            /**
+             * Accepted
+             * @description Accepted by two different people (gold).
+             */
+            accepted: number;
+            /**
+             * Edited
+             * @description The latest decision is an edit.
+             */
+            edited: number;
+            /** Items */
+            items: number;
+            /**
+             * Needs Second
+             * @description Accepted by one person; a second is needed.
+             */
+            needs_second: number;
+            /**
+             * None
+             * @description No human has decided yet.
+             */
+            none: number;
+            /**
+             * Rejected
+             * @description The latest decision is a reject.
+             */
+            rejected: number;
         };
         /**
          * Role
@@ -859,6 +1368,60 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** SetOut */
+        SetOut: {
+            /** Corpus */
+            corpus: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Versions
+             * @description Oldest first.
+             */
+            versions: components["schemas"]["SetVersionOut"][];
+        };
+        /** SetVersionOut */
+        SetVersionOut: {
+            /** Corpus */
+            corpus: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Etag
+             * @description Send this in `If-Match` to change a draft.
+             */
+            etag: string;
+            /** Frozen At */
+            frozen_at?: string | null;
+            /** Items */
+            items: number;
+            /**
+             * Md5
+             * @description The md5 of the file: the identity of a frozen version.
+             */
+            md5: string;
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /** @description Left out when the file could not be read for the count. */
+            review?: components["schemas"]["ReviewProgressOut"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "frozen";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: string;
+        };
         /** Status */
         Status: {
             /** Api Version */
@@ -888,6 +1451,25 @@ export interface components {
             retrieve_s: number;
             /** Wall S */
             wall_s: number;
+        };
+        /**
+         * ValidateRequest
+         * @description Give `item` (one item) or `text` (the text of a whole file).
+         */
+        ValidateRequest: {
+            /** Item */
+            item?: {
+                [key: string]: unknown;
+            } | null;
+            /** Text */
+            text?: string | null;
+        };
+        /** Validation */
+        Validation: {
+            /** Errors */
+            errors: components["schemas"]["ProblemAt"][];
+            /** Ok */
+            ok: boolean;
         };
     };
     responses: never;
@@ -1974,6 +2556,939 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listSets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetOut"][];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    createSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewSet"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetVersionOut"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A set with that name exists (copy it instead). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    importSet: {
+        parameters: {
+            query?: {
+                /** @description The new set's name. Default: the name in the file's header. */
+                name?: string | null;
+                /** @description Default: the file's, if free, else the next. */
+                version?: string | null;
+                /** @description An older shape to convert (see `/sets/import/shapes`). */
+                shape?: string | null;
+                /** @description For shapes with no corpus. */
+                corpus?: string | null;
+                /** @description The original file name, recorded. */
+                source_file?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The file itself: a `qset/1` JSON-lines file (plain or gzip), or the file of an older shape named in `shape`. */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResult"];
+                };
+            };
+            /** @description That name and version exist. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The file is over the cap (20 MiB). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The file was refused; `errors` says why. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listImportShapes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportShapeOut"][];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    validateSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Validation"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getSetVersion: {
+        parameters: {
+            query?: {
+                /** @description `single`, `multi_chain`, `circuit_verify`... */
+                form?: string | null;
+                /** @description `math`, `circuit` or `other`. */
+                content?: string | null;
+                /** @description `en` or `es`. */
+                lang?: string | null;
+                /** @description `dev` or `test`. */
+                split?: string | null;
+                /** @description `key=value`, or `key` for any value. */
+                tag?: string | null;
+                /** @description The review state. */
+                review?: ("none" | "needs_second" | "accepted" | "edited" | "rejected") | null;
+                /** @description Text in the id, question, answer or notes. */
+                q?: string | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description The version's etag (its md5, quoted). */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemPage"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    exportSetVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The `qset/1` file exactly as stored: its md5 is the version's md5. */
+            200: {
+                headers: {
+                    /** @description The version's etag (its md5, quoted). */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/x-ndjson": string;
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    previewFreeze: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FreezePreview"];
+                };
+            };
+            /** @description The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    freezeSetVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FreezeResult"];
+                };
+            };
+            /** @description The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The draft changed since you read it (`If-Match`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `If-Match` is missing. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    addSetItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since. */
+                "if-match"?: string | null;
+            };
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    /** @description The version's etag (its md5, quoted). */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemDetail"];
+                };
+            };
+            /** @description The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The draft changed since you read it (`If-Match`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `If-Match` is missing. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getSetItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+                /** @description The item's id. */
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description The version's etag (its md5, quoted). */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemDetail"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    putSetItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since. */
+                "if-match"?: string | null;
+            };
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+                /** @description The item's id. */
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description The version's etag (its md5, quoted). */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemDetail"];
+                };
+            };
+            /** @description The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The draft changed since you read it (`If-Match`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `If-Match` is missing. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    deleteSetItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since. */
+                "if-match"?: string | null;
+            };
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+                /** @description The item's id. */
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description The version's etag (its md5, quoted). */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetVersionOut"];
+                };
+            };
+            /** @description The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The draft changed since you read it (`If-Match`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `If-Match` is missing. */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listSetReviews: {
+        parameters: {
+            query?: {
+                /** @description Only this item. */
+                item_id?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewLine"][];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A problem. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    addSetReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The set's name. */
+                name: string;
+                /** @description The version, like `v1`. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewLine"];
+                };
+            };
+            /** @description The version is frozen (or the CSRF header is missing). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description No such set, version or item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description A problem. */

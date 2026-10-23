@@ -1,8 +1,8 @@
 # research-api
 
-The HTTP API of the research engine. A FastAPI service built in the same hexagonal style as [docingest](../docingest/README.md): the rules sit in a pure core, the libraries sit in adapters, and import-linter contracts keep it that way. It serves the web app with cited answers, the papers they cite and the circuit check, and will serve question sets and benchmark runs, using docingest and [quantum-sim](../quantum-sim/README.md) as libraries.
+The HTTP API of the research engine. A FastAPI service built in the same hexagonal style as [docingest](../docingest/README.md): the rules sit in a pure core, the libraries sit in adapters, and import-linter contracts keep it that way. It serves the web app with cited answers, the papers they cite, the circuit check and the question sets, and will serve benchmark runs, using docingest and [quantum-sim](../quantum-sim/README.md) as libraries.
 
-It has the layers, the import contracts, the settings loader, a fake mode, the error format, the OpenAPI export, the circuit check endpoints and the sign-in part: accounts in SQLite, Argon2id password hashes, cookie sessions with a CSRF check, a login rate limit, two roles, the `users` command and the private data folder, and the ask path: questions answered one at a time by docingest, followed as server-sent events, with the cited papers readable at a page (see [Asking and reading papers](#asking-and-reading-papers)). Everything else (sets, benchmarks) arrives in later pull requests, each adding use cases, ports and adapters inside this structure.
+It has the layers, the import contracts, the settings loader, a fake mode, the error format, the OpenAPI export, the circuit check endpoints and the sign-in part: accounts in SQLite, Argon2id password hashes, cookie sessions with a CSRF check, a login rate limit, two roles, the `users` command and the private data folder, and the ask path: questions answered one at a time by docingest, followed as server-sent events, with the cited papers readable at a page (see [Asking and reading papers](#asking-and-reading-papers)), and the question sets: a catalog of `qset/1` files with drafts, items edited under `If-Match`, validation, import, export, reviews and freezing. Everything else (benchmarks) arrives in later pull requests, each adding use cases, ports and adapters inside this structure.
 
 ## Run it
 
@@ -15,7 +15,7 @@ curl -s http://127.0.0.1:8090/api/v1/health
 curl -s http://127.0.0.1:8090/api/v1/status
 ```
 
-`--fake` builds the service from stand-ins: no settings file, no network, a clock fixed at 2026-01-01 so documents repeat exactly, and a throwaway SQLite database in a private temporary folder that is removed when the server stops. It answers on loopback only. It creates the test accounts of [`tests/fixtures/seed-users.json`](tests/fixtures/seed-users.json) (made-up names and test passwords: `ana` admin, `beto` and `dani` members, `temp` a member with a temporary password that must be changed at the first sign-in), or those of the file named by `--seed FILE`. It is what the end-to-end tests of the web app run against. The clock of fake mode is fixed, so a session never expires and a rate-limit block never lifts: a test that fails five sign-ins on purpose should use its own account (`dani`) and a restart clears it. Fake mode also accepts any loopback `Origin` and `Host`, because the web app's development and test servers run on another loopback port and forward `/api` here.
+`--fake` builds the service from stand-ins: no settings file, no network, a clock fixed at 2026-01-01 so documents repeat exactly, and a throwaway SQLite database in a private temporary folder that is removed when the server stops. It answers on loopback only. It creates the test accounts of [`tests/fixtures/seed-users.json`](tests/fixtures/seed-users.json) (made-up names and test passwords: `ana` admin, `beto` and `dani` members, `temp` a member with a temporary password that must be changed at the first sign-in), or those of the file named by `--seed FILE`. It is what the end-to-end tests of the web app run against. The clock of fake mode is fixed, so a session never expires and a rate-limit block never lifts: a test that fails five sign-ins on purpose should use its own account (`dani`) and a restart clears it. Fake mode also accepts any loopback `Origin` and `Host`, because the web app's development and test servers run on another loopback port and forward `/api` here. It also fills the question sets with a few made-up ones (see [Question sets](#question-sets)): a frozen version, a draft with a review in every state, and a draft of circuit questions.
 
 A real run needs a settings file, a database and at least one account:
 
@@ -70,6 +70,21 @@ All paths are under `/api/v1`.
 | `GET /documents?query=&limit=` | member | `{items, total}`: papers by part of a title or the start of an id, `limit` 1 to 100 (default 20). |
 | `GET /documents/{doc_id}` | member | Title, source, authors, year, and each page with how its text was made. `doc_id` is the full id or the 16 or more hex characters a citation prints; `409` if two papers match. |
 | `GET /documents/{doc_id}/pages/{n}` | member | `{doc_id, page, pages, kind, title, markdown}`: page `n` (1-based, as the page markers of the paper). `kind` is `section` for a LaTeX source, whose markers number sections. |
+| `GET /sets` | signed in | The catalog: each set with its versions (`status` `draft` or `frozen`, `md5`, `etag`, `items`, `owner`, dates) and the review count of each. |
+| `POST /sets` | signed in | `{name, corpus?, copy_from?}`. `201` and a new draft: empty under a new name, or the next version of an existing set as a copy of `copy_from`. `409` when the name exists and no `copy_from` is given. |
+| `POST /sets/validate` | signed in | `{item}` or `{text}`: a dry run against `qset/1`. Every problem with its place; nothing is stored. |
+| `GET /sets/import/shapes` | signed in | The older file shapes that can be converted. |
+| `POST /sets/import` | signed in | The body is the file (`qset/1`, plain or gzip, or an older shape named by `?shape=`); `?name=`, `?version=`, `?corpus=`, `?source_file=`. `201` and a new draft. All or nothing: a refused file is a `422` that lists the lines and fields at fault. At most 20 MiB (`413`). |
+| `GET /sets/{name}/versions/{version}` | signed in | The header, review counts and a page of item summaries. Filters `form`, `content`, `lang`, `split`, `tag`, `review`, `q`; `offset`, `limit` (at most 200). `ETag` header. |
+| `GET /sets/{name}/versions/{version}/items/{id}` | signed in | One item, its decisions, its review state and what `qset/1` says about it. |
+| `PUT /sets/{name}/versions/{version}/items/{id}` | owner or admin | Replace an item of a draft. `If-Match` required (`428` without, `409` when the draft changed). `422` with a JSON pointer per problem. |
+| `POST /sets/{name}/versions/{version}/items` | owner or admin | Add an item to a draft (`If-Match` as above). `201`. |
+| `DELETE /sets/{name}/versions/{version}/items/{id}` | owner or admin | Remove an item (`If-Match` as above). `409` when it is the original of a mirror. |
+| `GET /sets/{name}/versions/{version}/export` | signed in | The file exactly as stored (`application/x-ndjson`): its md5 is the version's md5. |
+| `GET /sets/{name}/versions/{version}/reviews` | signed in | The decisions on a version, oldest first (`?item_id=` for one item). |
+| `POST /sets/{name}/versions/{version}/reviews` | signed in | `{item_id, verdict, note?, edit?}`: accept, edit or reject one item of a draft. The server fills in the reviewer (you), the role `human`, the date and the set md5. |
+| `GET /sets/{name}/versions/{version}/freeze` | owner or admin | What freezing would do, by item. Nothing changes. |
+| `POST /sets/{name}/versions/{version}/freeze` | owner or admin | Applies the reviews and closes the version for good. |
 
 Accounts are made, disabled, reset and given a role with the `users` command, never over HTTP (see Sign-in below).
 
@@ -101,6 +116,7 @@ Every error leaves as `application/problem+json` ([RFC 9457](https://www.rfc-edi
 | `ForbiddenError` | 403 | `forbidden` |
 | `NotFoundError` | 404 | `not-found` |
 | `ConflictError` | 409 | `conflict` |
+| `PreconditionRequiredError` | 428 | `precondition-required` |
 | `TooLargeError` | 413 | `too-large` |
 | `InvalidInputError` (also a request that fails validation) | 422 | `invalid-input` |
 | `RateLimitedError` | 429 | `rate-limited` |
@@ -184,7 +200,7 @@ The `Host` header must name this service: `localhost`, a loopback address, the h
 
 The folders matter because the disk of the server is shared and its parent folder is open to everyone.
 
-SQLite runs in WAL mode with foreign keys on for every connection and a 5 s wait on a busy file. Tables: `users`, `sessions`, `login_attempts`, made by the Alembic migration `0001` (`adapters/persistence/migrations/`, batch mode for SQLite). `research-api db upgrade` creates the file and applies migrations; `serve` and `users` refuse to start on a database that is behind the code and say to run it. `research-api db status` prints the revision and exits 1 when behind. A change to a table needs a model change and a migration; `tests/test_persistence.py` fails when the two disagree. Fake mode builds its throwaway database straight from the models, and the same test checks that this gives the same tables as the migrations.
+SQLite runs in WAL mode with foreign keys on for every connection and a 5 s wait on a busy file. Tables: `users`, `sessions`, `login_attempts` (migration `0001`) and `artifacts`, the catalog of question-set versions (migration `0002`), made by the Alembic migrations (`adapters/persistence/migrations/`, batch mode for SQLite). `research-api db upgrade` creates the file and applies migrations; `serve` and `users` refuse to start on a database that is behind the code and say to run it. `research-api db status` prints the revision and exits 1 when behind. A change to a table needs a model change and a migration; `tests/test_persistence.py` fails when the two disagree. Fake mode builds its throwaway database straight from the models, and the same test checks that this gives the same tables as the migrations.
 
 ### Logging
 
@@ -258,31 +274,80 @@ A citation prints the first 16 characters of a document id and a page range. `GE
 
 `serve --fake` answers from six invented papers (titles end in "(synthetic)"; nothing in them comes from a real paper) with canned answers in English and Spanish that cite real pages of those papers, so the web app can be shown without a GPU: ask about T1 or transmons, the surface code, the teleportation circuit, Grover search, VQE and barren plateaus, or cross-resonance gates. The answers go through the same reader as the real ones, so the citations, the References list, the contexts and the page links behave the same. A question about anything else gets a polite "not in this corpus" answer with no sources. One answer carries a warning, to show that screen. The engine pauses between phases (`--ask-pause`, only with `--fake`, default 0.6 s; `RESEARCH_API_FAKE_ASK_PAUSE` for the factory) so a screen shows them. A question that contains `simulate-unavailable`, `simulate-upstream` or `simulate-crash` fails on purpose, for the error screens.
 
+## Question sets
+
+A question set is a [`qset/1`](../qa-bench/README.md) file; its reviews are a `reviews/1` file. The API reads, checks and writes both with qa-bench, so there is one description of an item: the format's JSON Schema. An item travels as a JSON object and is never copied into a second model.
+
+### What is stored where
+
+| What | Where | Rule |
+|---|---|---|
+| The set | `<data_dir>/sets/<name>/<version>.qset.jsonl` | Mode `0600` in a `0700` folder. Replaced all at once (written beside it, flushed, renamed over it), so a reader never sees half of a file. |
+| The decisions | `<data_dir>/sets/<name>/<version>.reviews.jsonl` | `reviews/1`, append only; its header names `<name>/<version>`, as the format wants. |
+| The draft before it was frozen | `<data_dir>/sets/<name>/<version>.prefreeze.qset.jsonl` | Kept when a version is frozen, so an item that a reviewer rejected is never lost for good. |
+| Owner, status, md5, item count, corpus, dates | the `artifacts` table | A catalog: the file is the truth. If a crash left the two apart, the file wins and the next write repairs the row. |
+
+The header's `set` field is `<name>/<version>` (for example `demo-papers/v2`), which is what runs and scores repeat. A name is letters, digits, `.`, `_` and `-`, starting with a letter or digit (64 at most); a version is `v1`, `v2`... A name that is a path never reaches the file system.
+
+### Drafts, versions and freezing
+
+A version is a **draft** until it is **frozen**. Its identity is the md5 of its file, and that md5 is also the draft's ETag. Only the owner or an admin changes a draft; any member may review any item of a draft. Nothing changes a frozen version: its items, its reviews and its md5 are fixed, and a run of the benchmark can name it by that md5.
+
+- `POST /sets` makes an empty draft under a new name, or, with `copy_from`, the next version of a set as a copy of one of its versions (the way to continue from a frozen one).
+- `POST /sets/import` makes a draft from a file. A `qset/1` file whose header already names the target is stored byte for byte, so its md5 is the one it came with; if the name or version differs the header's `set` is rewritten and the rest is kept. An older shape (`mathcirc-v1`, `circuit-tasks-v1`, `circuit-claims-v1`, `qubitqa-pilot`, `qasper`) is converted by qa-bench and its header records the source file and md5. A file with any problem is refused whole, with every problem (up to 100) as `/lines/<n>/<field>`.
+- Editing: `PUT`, `POST` and `DELETE` on items need `If-Match` with the `etag` the client read. Without it the answer is `428`; with a stale one `409` ("changed since you opened it") and nothing is written. Every write rebuilds the whole file through qa-bench, so what is stored is always a valid `qset/1` file (the ids are unique and every `mirror_of` names an item). All writes of this process take one lock.
+- `POST .../freeze` applies the latest human decision of each item, as `reviews/1` says: an accepted or edited item stays (an `edit` replaces the fields it names), a rejected item goes, an item nobody decided stays as it is. The frozen file gets a new header time and md5 and refuses everything from then on. A version with no item left cannot be frozen. `GET .../freeze` shows the same plan first, by item id.
+
+### Reviews
+
+A decision is `accept`, `edit` or `reject` on one item. `edit` and `reject` need a `note`; an `edit` lists the fields to change and is applied at the freeze (it does not change the draft before). The line in the file is made by the server: the reviewer is the signed-in user, the role is always `human`, the date is the server's, and `set_md5` is the md5 of the draft that was reviewed, so a decision made on an older state of the draft shows up as `stale` in the freeze plan (it still applies). An `edit` that would leave the item invalid is refused when it is made, so it cannot stop a freeze later.
+
+Per item, the review state is computed, not stored: `none`, `needs_second` (accepted by one person), `accepted` (the latest decision is an accept and two different people have accept as their own latest word: gold), `edited`, `rejected`. The latest decision by date holds, and on equal dates the line written last, as in the format.
+
+### The demo sets of fake mode
+
+`serve --fake` and the OpenAPI export start with three made-up sets, built through the same use cases as real ones (`bootstrap/demo_sets.py`; every paper, question and name in them is invented):
+
+| Set | State | Shows |
+|---|---|---|
+| `demo-papers` `v1` | frozen, owner `ana` | Six items in English and Spanish (a mirror pair, a two-paper chain, an unanswerable question, a near duplicate); one item was rejected before the freeze. |
+| `demo-papers` `v2` | draft, owner `beto` | A copy of `v1` plus a new item, with reviews in each state: `accepted`, `needs_second`, `edited`, `rejected` and `none`. |
+| `demo-circuits` `v1` | draft, owner `ana` | A circuit question to verify, one to create and one claim read from a paper. |
+
+### Limits
+
+An import is at most 20 MiB, an item body 1 MiB and a review 256 KiB; a body over its limit is a `413` before it is read in full. The service runs one process, so the lock above is enough; a second process on the same data folder would need a database transaction around each write. A catalog listing reads each version's file for its review count, which is cheap for the sets of hundreds of items this is made for.
+
 ## Layout
 
 ```text
 src/research_api/
   domain/          errors, ServerStatus, auth (User, Session, the password and session rules),
                    ask (the question, the answer, the reader of a formatted answer, the life of one
-                   ask), documents (papers, pages, the short-id rule), the circuit rules (strict
-                   JSON, caps). Standard library only.
+                   ask), documents (papers, pages, the short-id rule), sets (names, versions, who
+                   may edit, review states, filters), the circuit rules (strict JSON, caps).
+                   Standard library only.
   ports/           Protocols (Clock, CircuitEngine; UserRepo, SessionRepo, LoginAttempts,
-                   PasswordHasher; AskEngine; DocumentReader) and the values that cross them
+                   PasswordHasher; AskEngine; DocumentReader; SetCatalog, SetFiles, SetFormats) and
+                   the values that cross them
   application/     use cases (ReportStatus; SignIn, SignOut, Authenticate, ChangePassword,
                    ListSessions, EndSession, ManageUsers; AskDesk and the GpuLane; ListDocuments,
                    GetDocument, ReadPage; ParseCircuit, RunCircuit, CheckCircuit,
-                   ShowCircuitConventions)
+                   ShowCircuitConventions; ManageSets, ReviewItems, FreezeSets)
   adapters/        clock, fake (fake mode: clock, the invented corpus, the fake engine and reader),
-                   persistence (SQLAlchemy, Alembic), hashing (Argon2id), files (private folders),
-                   circuits (docingest gate lists and quantum-sim, with the thread that bounds the
-                   work), docingest_ask (the engine on AskSession, the paper reader, the wording of
-                   failures, the stand-ins for a service without a docingest file), and empty
-                   folders for the adapters to come: bench, models
+                   persistence (SQLAlchemy, Alembic; users, sessions, login attempts, the set
+                   catalog), hashing (Argon2id), files (private folders, the set files), circuits
+                   (docingest gate lists and quantum-sim, with the thread that bounds the work),
+                   docingest_ask (the engine on AskSession, the paper reader, the wording of
+                   failures, the stand-ins for a service without a docingest file), bench
+                   (qa-bench: reads, checks and converts sets), and an empty folder for the
+                   adapters to come: models
   bootstrap/       settings.py (the TOML loader and its rules), storage.py (private folders, the
-                   database), seed.py (fake-mode accounts), container.py (wiring, fake mode)
+                   database), seed.py (fake-mode accounts), demo_sets.py (fake-mode sets),
+                   container.py (wiring, fake mode)
   entrypoints/     http/ (FastAPI app, routes, auth routes, circuit routes, ask and document routes,
-                   security dependencies, Host and Origin checks, access log, no-store, schemas,
-                   problem details), cli.py, logs.py
+                   set routes and schemas, security dependencies, Host and Origin checks, access
+                   log, no-store, schemas, problem details), cli.py, logs.py
 ```
 
 The six layers import downward only: `entrypoints`, `bootstrap`, `adapters`, `application`, `ports`, `domain`. Only `bootstrap` and `entrypoints` import adapters. Use cases take their ports as keyword-only constructor arguments, as in docingest.
@@ -313,6 +378,6 @@ When a contract fails, fix the import; do not relax the contract. Adding an adap
 ./scripts/check.sh        # ruff, ruff format, lint-imports, pyright, pytest with coverage (floor 85%)
 ```
 
-`tests/` holds one file per concern: `test_settings.py`, `test_container.py`, `test_status.py`, `test_http.py` (routes, problem details, the OpenAPI text), `test_guard.py` (the address rule), `test_cli.py` (serve, openapi), `test_contracts.py`, and for sign-in `test_auth_domain.py` (rules), `test_auth_usecases.py` (use cases over a real SQLite file and a clock the test moves), `test_auth_http.py` (cookies, CSRF, roles, the contract), `test_hosts.py`, `test_origin.py`, `test_logs.py` (including a search of the log for every secret used), `test_persistence.py` (migrations, repositories), `test_storage.py` and `test_private_files.py` (modes and ownership), `test_hashing.py`, `test_seed.py`, `test_users_cli.py`, `test_real_server.py` (a real uvicorn over a socket), and for the circuit check `test_circuits_domain.py` (strict JSON, counting, caps), `test_circuits_lane.py` (the thread, the timeout, the adapter), `test_circuits_http.py` (the four routes, duplicate keys, refusals, caps, the contract) and `test_circuits_bridge.py` (every LaTeX source of `packages/quantum-sim/tests/fixtures/bridge/` sent through `/circuits/parse`, `/circuits/run` and `/circuits/check`, expecting what quantum-sim's `test_bridge.py` expects: the saved document, the refusals, the hand-written unitaries, the drawn identities and the three-wire QFT equal to the DFT), and for asking `test_ask_domain.py` (the reader of a formatted answer, the state of an ask), `test_lanes.py`, `test_ask_desk.py` (queue, limits, cancel, retention, failures, the log), `test_asks_http.py` and `test_documents_http.py` (the routes over the fake engine), `test_asks_real_server.py` (the stream over a real socket: phases arrive while the answer is made, keep-alive, a reader that hangs up), `test_asks_openapi.py`, `test_fake_ask.py` (the invented corpus is consistent), `test_docingest_ask.py` (the engine on a real `AskSession`, the paper reader on a real docingest store, the wording of failures), `test_ask_wiring.py` and `test_ask_edges.py`. The async tests run with `helpers.arun` (no async pytest plugin is installed); the stream tests that must hold a question use `ask_helpers.ScriptedEngine`. HTTP tests use FastAPI's `TestClient` over the fake container. Password hashing uses a cheap Argon2id cost in tests (`cheap_hashing=True`); one test checks the real default cost. Helpers are in `tests/helpers.py`. Test dependencies come from the `dev` group; `TestClient` needs `httpx`.
+`tests/` holds one file per concern: `test_settings.py`, `test_container.py`, `test_status.py`, `test_http.py` (routes, problem details, the OpenAPI text), `test_guard.py` (the address rule), `test_cli.py` (serve, openapi), `test_contracts.py`, and for sign-in `test_auth_domain.py` (rules), `test_auth_usecases.py` (use cases over a real SQLite file and a clock the test moves), `test_auth_http.py` (cookies, CSRF, roles, the contract), `test_hosts.py`, `test_origin.py`, `test_logs.py` (including a search of the log for every secret used), `test_persistence.py` (migrations, repositories), `test_storage.py` and `test_private_files.py` (modes and ownership), `test_hashing.py`, `test_seed.py`, `test_users_cli.py`, `test_real_server.py` (a real uvicorn over a socket), and for the circuit check `test_circuits_domain.py` (strict JSON, counting, caps), `test_circuits_lane.py` (the thread, the timeout, the adapter), `test_circuits_http.py` (the four routes, duplicate keys, refusals, caps, the contract) and `test_circuits_bridge.py` (every LaTeX source of `packages/quantum-sim/tests/fixtures/bridge/` sent through `/circuits/parse`, `/circuits/run` and `/circuits/check`, expecting what quantum-sim's `test_bridge.py` expects: the saved document, the refusals, the hand-written unitaries, the drawn identities and the three-wire QFT equal to the DFT), and for asking `test_ask_domain.py` (the reader of a formatted answer, the state of an ask), `test_lanes.py`, `test_ask_desk.py` (queue, limits, cancel, retention, failures, the log), `test_asks_http.py` and `test_documents_http.py` (the routes over the fake engine), `test_asks_real_server.py` (the stream over a real socket: phases arrive while the answer is made, keep-alive, a reader that hangs up), `test_asks_openapi.py`, `test_fake_ask.py` (the invented corpus is consistent), `test_docingest_ask.py` (the engine on a real `AskSession`, the paper reader on a real docingest store, the wording of failures), `test_ask_wiring.py` and `test_ask_edges.py`, and for the question sets `test_sets_domain.py` (rules, review states, filters), `test_sets_catalog.py`, `test_sets_files.py`, `test_sets_formats.py` (qa-bench adapter, every older shape), `test_sets_usecases.py` (use cases over a real database and real files, including parallel writers), `test_sets_http.py` (roles, `If-Match`, import, reviews, freeze, caps, the log) and `test_demo_sets.py`. The sets fixtures under `tests/fixtures/sets/` are made up. The async tests run with `helpers.arun` (no async pytest plugin is installed); the stream tests that must hold a question use `ask_helpers.ScriptedEngine`. HTTP tests use FastAPI's `TestClient` over the fake container. Password hashing uses a cheap Argon2id cost in tests (`cheap_hashing=True`); one test checks the real default cost. Helpers are in `tests/helpers.py`. Test dependencies come from the `dev` group; `TestClient` needs `httpx`.
 
 CI runs the package in the Linux lane (ruff, format, lint-imports, pytest) and the macOS lane (pyright, pytest), like the other packages.

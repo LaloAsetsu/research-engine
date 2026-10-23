@@ -22,6 +22,7 @@ from .nostore import NoStore
 from .origin import OriginGuard, origin_allowed_by
 from .problems import install_problem_handlers, use_problem_media_in_openapi
 from .routes import router
+from .sets import router as sets_router
 
 API_PREFIX = "/api/v1"
 
@@ -67,6 +68,7 @@ def build_app(container: Container) -> FastAPI:
     app.include_router(admin_router, prefix=API_PREFIX)
     app.include_router(asks_router, prefix=API_PREFIX)
     app.include_router(documents_router, prefix=API_PREFIX)
+    app.include_router(sets_router, prefix=API_PREFIX)
     install_problem_handlers(app)
     install_ask_handlers(app)
 

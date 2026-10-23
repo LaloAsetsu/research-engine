@@ -721,6 +721,116 @@
         "title": "DocumentSummaryOut",
         "type": "object"
       },
+      "FreezePlanOut": {
+        "description": "What freezing does, by item id.",
+        "properties": {
+          "accepted": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted",
+            "type": "array"
+          },
+          "edited": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Edited",
+            "type": "array"
+          },
+          "items_after": {
+            "title": "Items After",
+            "type": "integer"
+          },
+          "items_before": {
+            "title": "Items Before",
+            "type": "integer"
+          },
+          "needs_second": {
+            "description": "Accepted by one person only; still kept.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Needs Second",
+            "type": "array"
+          },
+          "rejected": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rejected",
+            "type": "array"
+          },
+          "stale": {
+            "description": "Decided on an earlier state of the draft.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Stale",
+            "type": "array"
+          },
+          "unknown": {
+            "description": "Decisions about items the draft no longer has.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unknown",
+            "type": "array"
+          },
+          "unreviewed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unreviewed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items_before",
+          "items_after",
+          "accepted",
+          "edited",
+          "rejected",
+          "unreviewed",
+          "needs_second",
+          "stale",
+          "unknown"
+        ],
+        "title": "FreezePlanOut",
+        "type": "object"
+      },
+      "FreezePreview": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/FreezePlanOut"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "plan"
+        ],
+        "title": "FreezePreview",
+        "type": "object"
+      },
+      "FreezeResult": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/FreezePlanOut"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "plan"
+        ],
+        "title": "FreezeResult",
+        "type": "object"
+      },
       "GateListResponse": {
         "properties": {
           "circuits": {
@@ -767,6 +877,293 @@
           "ok"
         ],
         "title": "Health",
+        "type": "object"
+      },
+      "ImportResult": {
+        "properties": {
+          "items_read": {
+            "title": "Items Read",
+            "type": "integer"
+          },
+          "shape": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The older shape that was converted, if any.",
+            "title": "Shape"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "items_read",
+          "shape"
+        ],
+        "title": "ImportResult",
+        "type": "object"
+      },
+      "ImportShapeOut": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "needs_corpus": {
+            "title": "Needs Corpus",
+            "type": "boolean"
+          },
+          "suffix": {
+            "title": "Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "suffix",
+          "needs_corpus"
+        ],
+        "title": "ImportShapeOut",
+        "type": "object"
+      },
+      "ItemDetail": {
+        "properties": {
+          "item": {
+            "additionalProperties": true,
+            "description": "The `qset/1` item as stored.",
+            "title": "Item",
+            "type": "object"
+          },
+          "review": {
+            "$ref": "#/components/schemas/ItemReviewOut"
+          },
+          "reviews": {
+            "description": "Every decision on this item, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ReviewLine"
+            },
+            "title": "Reviews",
+            "type": "array"
+          },
+          "validation": {
+            "description": "What `qset/1` says about the item. Empty when valid.",
+            "items": {
+              "$ref": "#/components/schemas/ProblemAt"
+            },
+            "title": "Validation",
+            "type": "array"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "item",
+          "review",
+          "reviews",
+          "validation"
+        ],
+        "title": "ItemDetail",
+        "type": "object"
+      },
+      "ItemPage": {
+        "properties": {
+          "header": {
+            "$ref": "#/components/schemas/QSetHeader"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemSummaryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "review": {
+            "$ref": "#/components/schemas/ReviewProgressOut"
+          },
+          "total": {
+            "description": "Items matching the filters, before paging.",
+            "title": "Total",
+            "type": "integer"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "header",
+          "review",
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "ItemPage",
+        "type": "object"
+      },
+      "ItemReviewOut": {
+        "properties": {
+          "accepted_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted By",
+            "type": "array"
+          },
+          "deciding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewLine"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The latest decision, which freezing applies."
+          },
+          "gold": {
+            "description": "True when two different people accepted it.",
+            "title": "Gold",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "none",
+              "needs_second",
+              "accepted",
+              "edited",
+              "rejected"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "gold",
+          "accepted_by",
+          "deciding"
+        ],
+        "title": "ItemReviewOut",
+        "type": "object"
+      },
+      "ItemSummaryOut": {
+        "properties": {
+          "accepted_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted By",
+            "type": "array"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "corpus": {
+            "title": "Corpus",
+            "type": "string"
+          },
+          "form": {
+            "title": "Form",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lang": {
+            "title": "Lang",
+            "type": "string"
+          },
+          "mirror_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mirror Of"
+          },
+          "question": {
+            "description": "The question, cut to 240 characters.",
+            "title": "Question",
+            "type": "string"
+          },
+          "review": {
+            "enum": [
+              "none",
+              "needs_second",
+              "accepted",
+              "edited",
+              "rejected"
+            ],
+            "title": "Review",
+            "type": "string"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "lang",
+          "form",
+          "content",
+          "corpus",
+          "split",
+          "question",
+          "tags",
+          "mirror_of",
+          "review",
+          "accepted_by"
+        ],
+        "title": "ItemSummaryOut",
         "type": "object"
       },
       "LoginRequest": {
@@ -827,6 +1224,100 @@
           "language"
         ],
         "title": "Me",
+        "type": "object"
+      },
+      "NewReview": {
+        "additionalProperties": false,
+        "description": "The server adds the reviewer (you), the role (`human`), the date and the set md5.",
+        "properties": {
+          "edit": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For `edit`: the item fields to replace, with their new values.",
+            "title": "Edit"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for edit and reject.",
+            "title": "Note"
+          },
+          "verdict": {
+            "enum": [
+              "accept",
+              "edit",
+              "reject"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "verdict"
+        ],
+        "title": "NewReview",
+        "type": "object"
+      },
+      "NewSet": {
+        "additionalProperties": false,
+        "properties": {
+          "copy_from": {
+            "anyOf": [
+              {
+                "pattern": "^v[1-9][0-9]{0,5}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start the next version of an existing set as a copy of this version.",
+            "title": "Copy From"
+          },
+          "corpus": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The corpus new items name when they leave it out.",
+            "title": "Corpus"
+          },
+          "name": {
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "NewSet",
         "type": "object"
       },
       "PageInfoOut": {
@@ -945,6 +1436,25 @@
         "title": "Problem",
         "type": "object"
       },
+      "ProblemAt": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "description": "JSON pointer to the value (`/lines/N/...` for a file).",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "title": "ProblemAt",
+        "type": "object"
+      },
       "ProblemField": {
         "properties": {
           "message": {
@@ -962,6 +1472,184 @@
           "message"
         ],
         "title": "ProblemField",
+        "type": "object"
+      },
+      "QSetHeader": {
+        "additionalProperties": true,
+        "description": "Line 1 of a `qset/1` file.",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "set": {
+            "title": "Set",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "format",
+          "set",
+          "created"
+        ],
+        "title": "QSetHeader",
+        "type": "object"
+      },
+      "ReviewLine": {
+        "additionalProperties": true,
+        "description": "One `reviews/1` decision on an item, as stored.",
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "edit": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edit"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reviewer": {
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "human",
+              "checker"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "set_md5": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Md5"
+          },
+          "target": {
+            "const": "item",
+            "title": "Target",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "accept",
+              "edit",
+              "reject"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "target",
+          "reviewer",
+          "role",
+          "verdict",
+          "date"
+        ],
+        "title": "ReviewLine",
+        "type": "object"
+      },
+      "ReviewProgressOut": {
+        "description": "How many items are in each review state.",
+        "properties": {
+          "accepted": {
+            "description": "Accepted by two different people (gold).",
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "edited": {
+            "description": "The latest decision is an edit.",
+            "title": "Edited",
+            "type": "integer"
+          },
+          "items": {
+            "title": "Items",
+            "type": "integer"
+          },
+          "needs_second": {
+            "description": "Accepted by one person; a second is needed.",
+            "title": "Needs Second",
+            "type": "integer"
+          },
+          "none": {
+            "description": "No human has decided yet.",
+            "title": "None",
+            "type": "integer"
+          },
+          "rejected": {
+            "description": "The latest decision is a reject.",
+            "title": "Rejected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "none",
+          "needs_second",
+          "accepted",
+          "edited",
+          "rejected"
+        ],
+        "title": "ReviewProgressOut",
         "type": "object"
       },
       "Role": {
@@ -1077,6 +1765,136 @@
         "title": "SessionOut",
         "type": "object"
       },
+      "SetOut": {
+        "properties": {
+          "corpus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corpus"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/SetVersionOut"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "corpus",
+          "versions"
+        ],
+        "title": "SetOut",
+        "type": "object"
+      },
+      "SetVersionOut": {
+        "properties": {
+          "corpus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corpus"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "etag": {
+            "description": "Send this in `If-Match` to change a draft.",
+            "title": "Etag",
+            "type": "string"
+          },
+          "frozen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frozen At"
+          },
+          "items": {
+            "title": "Items",
+            "type": "integer"
+          },
+          "md5": {
+            "description": "The md5 of the file: the identity of a frozen version.",
+            "title": "Md5",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewProgressOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Left out when the file could not be read for the count."
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "frozen"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "status",
+          "owner",
+          "md5",
+          "etag",
+          "items",
+          "corpus",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SetVersionOut",
+        "type": "object"
+      },
       "Status": {
         "properties": {
           "api_version": {
@@ -1141,6 +1959,58 @@
           "wall_s"
         ],
         "title": "TimingsOut",
+        "type": "object"
+      },
+      "ValidateRequest": {
+        "additionalProperties": false,
+        "description": "Give `item` (one item) or `text` (the text of a whole file).",
+        "properties": {
+          "item": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "ValidateRequest",
+        "type": "object"
+      },
+      "Validation": {
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemAt"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "errors"
+        ],
+        "title": "Validation",
         "type": "object"
       }
     },
@@ -2573,6 +3443,1715 @@
           }
         },
         "summary": "Liveness check"
+      }
+    },
+    "/api/v1/sets": {
+      "get": {
+        "description": "Every set with its versions, each with its status, md5, items, owner and review progress.",
+        "operationId": "listSets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SetOut"
+                  },
+                  "title": "Response Listsets",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The catalog of question sets",
+        "tags": [
+          "sets"
+        ]
+      },
+      "post": {
+        "description": "An empty draft under a new name, or, with `copy_from`, the next version of an existing\nset as a copy of one of its versions.",
+        "operationId": "createSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A set with that name exists (copy it instead)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Start a draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/import": {
+      "post": {
+        "description": "Nothing is stored unless the whole file is accepted. A `qset/1` file whose header already\nnames the target is stored byte for byte, so its md5 is the one it came with.",
+        "operationId": "importSet",
+        "parameters": [
+          {
+            "description": "The new set's name. Default: the name in the file's header.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The new set's name. Default: the name in the file's header.",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "Default: the file's, if free, else the next.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^v[1-9][0-9]{0,5}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the file's, if free, else the next.",
+              "title": "Version"
+            }
+          },
+          {
+            "description": "An older shape to convert (see `/sets/import/shapes`).",
+            "in": "query",
+            "name": "shape",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "An older shape to convert (see `/sets/import/shapes`).",
+              "title": "Shape"
+            }
+          },
+          {
+            "description": "For shapes with no corpus.",
+            "in": "query",
+            "name": "corpus",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For shapes with no corpus.",
+              "title": "Corpus"
+            }
+          },
+          {
+            "description": "The original file name, recorded.",
+            "in": "query",
+            "name": "source_file",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The original file name, recorded.",
+              "title": "Source File"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The file itself: a `qset/1` JSON-lines file (plain or gzip), or the file of an older shape named in `shape`.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "That name and version exist."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The file is over the cap (20 MiB)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The file was refused; `errors` says why."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Import a file as a new draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/import/shapes": {
+      "get": {
+        "operationId": "listImportShapes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImportShapeOut"
+                  },
+                  "title": "Response Listimportshapes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Older formats that can be imported",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/validate": {
+      "post": {
+        "description": "A dry run against `qset/1`: every problem with its place, and nothing is stored.",
+        "operationId": "validateSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Validation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Check an item or a file",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}": {
+      "get": {
+        "description": "The header, the review counts and the matching items (id, form, language, tags, the\nquestion's start and the review state). Read one item for all of it.",
+        "operationId": "getSetVersion",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`single`, `multi_chain`, `circuit_verify`...",
+            "in": "query",
+            "name": "form",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`single`, `multi_chain`, `circuit_verify`...",
+              "title": "Form"
+            }
+          },
+          {
+            "description": "`math`, `circuit` or `other`.",
+            "in": "query",
+            "name": "content",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`math`, `circuit` or `other`.",
+              "title": "Content"
+            }
+          },
+          {
+            "description": "`en` or `es`.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`en` or `es`.",
+              "title": "Lang"
+            }
+          },
+          {
+            "description": "`dev` or `test`.",
+            "in": "query",
+            "name": "split",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`dev` or `test`.",
+              "title": "Split"
+            }
+          },
+          {
+            "description": "`key=value`, or `key` for any value.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`key=value`, or `key` for any value.",
+              "title": "Tag"
+            }
+          },
+          {
+            "description": "The review state.",
+            "in": "query",
+            "name": "review",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "none",
+                    "needs_second",
+                    "accepted",
+                    "edited",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The review state.",
+              "title": "Review"
+            }
+          },
+          {
+            "description": "Text in the id, question, answer or notes.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Text in the id, question, answer or notes.",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemPage"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "A version and a page of its items",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/export": {
+      "get": {
+        "operationId": "exportSetVersion",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The `qset/1` file exactly as stored: its md5 is the version's md5.",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Download the file",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/freeze": {
+      "get": {
+        "description": "The reviews it would apply, by item. Nothing changes.",
+        "operationId": "previewFreeze",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreezePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "What freezing would do",
+        "tags": [
+          "sets"
+        ]
+      },
+      "post": {
+        "description": "Owner or admin. The latest human decision of each item is applied (accepted and edited\nitems stay, rejected ones go) and the file gets a new md5 that never changes again. The draft\nas it was is kept beside it on the server.",
+        "operationId": "freezeSetVersion",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreezeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Apply the reviews and freeze a draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/items": {
+      "post": {
+        "operationId": "addSetItem",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since.",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "description": "A `qset/1` item. `corpus` defaults to the set's.",
+                "title": "Item",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDetail"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Add an item to a draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/items/{item_id}": {
+      "delete": {
+        "description": "`409` when another item is a mirror of this one.",
+        "operationId": "deleteSetItem",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The item's id.",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "The item's id.",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since.",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Remove an item from a draft",
+        "tags": [
+          "sets"
+        ]
+      },
+      "get": {
+        "operationId": "getSetItem",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The item's id.",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "The item's id.",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDetail"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "One item with its reviews and its validation",
+        "tags": [
+          "sets"
+        ]
+      },
+      "put": {
+        "description": "Owner or admin, drafts only. `422` lists each problem with a JSON pointer into the item.",
+        "operationId": "putSetItem",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The item's id.",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "The item's id.",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `etag` of the draft you read (its `ETag` header). `428` without it, `409` when the draft has changed since.",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "description": "The whole item, a `qset/1` item.",
+                "title": "Item",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDetail"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Replace one item of a draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/reviews": {
+      "get": {
+        "description": "Oldest first, as in the `reviews/1` file.",
+        "operationId": "listSetReviews",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this item.",
+            "in": "query",
+            "name": "item_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this item.",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewLine"
+                  },
+                  "title": "Response Listsetreviews",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The decisions on a version's items",
+        "tags": [
+          "sets"
+        ]
+      },
+      "post": {
+        "description": "Any member may review any item of a draft. The file is append only: a new decision\nreplaces yours, it never edits it. `edit` and `reject` need a `note`; an `edit` lists the\nitem fields to replace and is applied when the draft is frozen.",
+        "operationId": "addSetReview",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewReview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewLine"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Accept, edit or reject an item",
+        "tags": [
+          "sets"
+        ]
       }
     },
     "/api/v1/status": {
