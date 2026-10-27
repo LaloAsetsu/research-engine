@@ -55,11 +55,82 @@ uv run docingest ingest-async "$RESEARCH_ENGINE_INPUT" \
   --config "$RESEARCH_ENGINE_CONFIG"
 ```
 
-This command supports PDF, Office, and image inputs, writes canonical Markdown and a manifest,
-and stores bounded raw parser blocks as `rag-anything.json` beside the result. The raw parser
-output is provenance/debug data and is not indexed independently. MinerU may require additional
-system tools or GPU runtime support; a missing parser dependency or failed external tool is
-reported as an ingestion failure rather than silently falling back to guessed text.
+For the installed `raganything==1.4.3` and `mineru==4.0.12` combination, docingest invokes
+MinerU 4's `mineru-kit parse` command directly. This avoids the legacy `mineru -p` command
+constructed by rag-anything 1.4.3, which MinerU 4 rejects. Use these modes:
+
+| Input | Configuration | Result |
+|---|---|---|
+| Born-digital PDF with a text layer | `tier = "flash"`, `ocr_mode = "txt"` | Fast text-layer extraction; no OCR |
+| Scanned PDF or image | `tier = "standard"`, `ocr_mode = "ocr"` | Local OCR/layout parsing; requires the MinerU engine/models |
+
+Validate one file before processing the corpus:
+
+```bash
+export PAPER="$(find "$RESEARCH_ENGINE_INPUT" -type f \( \
+  -iname '*.pdf' -o -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \
+  \) -print -quit)"
+export MINERU_TEST_OUTPUT="$RESEARCH_ENGINE_DATA/mineru-test"
+mkdir -p "$MINERU_TEST_OUTPUT"
+
+uv run mineru-kit parse "$PAPER" \
+  -o "$MINERU_TEST_OUTPUT/parsed.md" \
+  --tier flash --ocr-mode txt
+```
+
+For scanned PDFs and images, first verify the local MinerU engine and GPU:
+
+```bash
+uv run mineru-kit --help
+uv run mineru-kit models --help
+nvidia-smi
+```
+
+Configure the external TOML file as follows:
+
+```toml
+[rag_anything]
+parser = "mineru"
+method = "auto"
+tier = "standard"
+ocr_mode = "ocr"
+output_dir = "/home/mora/ITESM_Ago_Dic_26/research-data/rag-anything"
+raw_output = true
+max_raw_bytes = 268435456
+max_concurrency = 1
+```
+
+Run one smoke-test document:
+
+```bash
+mkdir -p "$RESEARCH_ENGINE_DATA/smoke-input"
+cp "$PAPER" "$RESEARCH_ENGINE_DATA/smoke-input/"
+
+uv run docingest ingest-async \
+  "$RESEARCH_ENGINE_DATA/smoke-input" \
+  --config "$RESEARCH_ENGINE_CONFIG"
+```
+
+After the smoke test succeeds, process all papers and images:
+
+```bash
+uv run docingest ingest-async \
+  "$RESEARCH_ENGINE_INPUT" \
+  --config "$RESEARCH_ENGINE_CONFIG"
+```
+
+The command supports PDF, Office, and image inputs, writes canonical Markdown and a manifest,
+and stores bounded parser output as `rag-anything.json` beside the normalized result. The raw
+output is provenance/debug data and is not indexed independently. Office inputs may require
+LibreOffice:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libreoffice poppler-utils ghostscript
+```
+
+`flash`/`txt` validates born-digital documents but does not OCR scanned pages. Do not process the
+full corpus until the `standard`/`ocr` smoke test succeeds.
 
 The guide links to the reference for each part instead of repeating it:
 

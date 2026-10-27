@@ -32,6 +32,8 @@ crawler = "arxiv"
 [rag_anything]
 # parser = "mineru"
 # method = "auto"
+# tier = "standard"             # MinerU 4 local OCR/layout tier
+# ocr_mode = "ocr"              # use "txt" only for born-digital PDFs
 # output_dir = "/srv/research/rag-anything"
 # raw_output = true
 # max_raw_bytes = 268435456

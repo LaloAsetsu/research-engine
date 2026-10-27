@@ -179,11 +179,19 @@ command continues to use the page router and synchronous converters.
 |---|---|---|---|
 | `parser` | string | `"mineru"` | rag-anything parser name. |
 | `method` | string | `"auto"` | Parser method, such as `auto`, `txt`, or `ocr`. |
+| `tier` | string | `"standard"` | MinerU 4 tier. Use `flash` for text-layer extraction or `standard` for local OCR/layout parsing. |
+| `ocr_mode` | string | `"ocr"` | MinerU 4 OCR mode. `txt` reads only an existing PDF text layer; `ocr` processes scanned pages and images. |
 | `output_dir` | path | `"data/rag-anything"` | Parser intermediates; use persistent Linux storage. |
 | `raw_output` | bool | `true` | Retain parser blocks in `rag-anything.json` beside the normalized result. |
 | `max_raw_bytes` | int | `268435456` | Maximum serialized raw parser output per document. |
 | `lang` | string or null | `null` | Optional parser language hint. |
 | `max_concurrency` | int | `1` | Maximum concurrent async conversions (`1` to `16`). |
+
+For `parser = "mineru"`, docingest invokes the MinerU 4 `mineru-kit parse` command directly.
+This avoids the legacy `mineru -p` command used internally by rag-anything 1.4.3. The
+`standard`/`ocr` combination is required for scanned PDFs and images and requires the
+corresponding MinerU 4 engine and model files. `flash`/`txt` is a local, text-layer-only
+fallback and does not perform OCR.
 
 ### `[routing]`
 

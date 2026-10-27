@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -67,7 +68,8 @@ class RagAnythingConverter:
         self.config = config
         self.fingerprint = (
             f"rag-anything {_version()} parser={config.parser} method={config.method} "
-            f"lang={config.lang or '-'} raw={config.raw_output}"
+            f"tier={config.tier} ocr={config.ocr_mode} lang={config.lang or '-'} "
+            f"raw={config.raw_output}"
         )
 
     async def convert_async(self, path: Path) -> Conversion:
@@ -80,6 +82,9 @@ class RagAnythingConverter:
         )
 
     def _convert(self, path: Path) -> Conversion:
+        if self.config.parser == "mineru" and self._mineru4_installed():
+            return self._convert_mineru4(path)
+
         try:
             from raganything.parser import get_parser  # type: ignore[reportMissingImports]
         except ImportError as error:
@@ -127,4 +132,72 @@ class RagAnythingConverter:
             engine=self.fingerprint,
             artifacts=_artifacts(blocks),
             raw_output=blocks if self.config.raw_output else None,
+        )
+
+    @staticmethod
+    def _mineru4_installed() -> bool:
+        try:
+            return version("mineru").split(".", 1)[0] == "4"
+        except PackageNotFoundError:
+            return False
+
+    def _convert_mineru4(self, path: Path) -> Conversion:
+        """Use MinerU 4's local CLI instead of rag-anything's legacy command."""
+        output_dir = Path(self.config.output_dir).expanduser().resolve()
+        document_dir = output_dir / path.stem
+        document_dir.mkdir(parents=True, exist_ok=True)
+        markdown_path = document_dir / f"{path.stem}.md"
+        ocr_mode = "txt" if self.config.method == "txt" else self.config.ocr_mode
+        command = [
+            "mineru-kit",
+            "parse",
+            str(path),
+            "-o",
+            str(markdown_path),
+            "--tier",
+            self.config.tier,
+            "--ocr-mode",
+            ocr_mode,
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as error:
+            raise ConversionError(
+                "MinerU 4 is not available; install it with "
+                "`uv sync --locked --extra rag-anything` and verify `uv run mineru-kit --help`."
+            ) from error
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise ConversionError(
+                f"MinerU 4 failed on {path.name} with exit code {result.returncode}: {detail}"
+            )
+        try:
+            text = markdown_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise ConversionError(
+                f"MinerU 4 completed without readable Markdown output for {path.name}: {error}"
+            ) from error
+        if not text.strip():
+            raise ConversionError(f"MinerU 4 produced no textual content for {path.name}")
+        raw_output = (
+            {
+                "backend": "mineru-kit",
+                "tier": self.config.tier,
+                "ocr_mode": ocr_mode,
+                "markdown": text,
+            }
+            if self.config.raw_output
+            else None
+        )
+        return Conversion(
+            segments=[Segment(text)],
+            method=PageMethod.RAG_ANYTHING,
+            engine=self.fingerprint,
+            artifacts=[],
+            raw_output=raw_output,
         )
