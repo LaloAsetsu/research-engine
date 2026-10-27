@@ -83,8 +83,16 @@ test.describe("B1: start a run", () => {
     await expect(form.getByText(/This creates 3 jobs, one for each arm and model/)).toBeVisible();
     await expectNoAxeViolations(page);
 
-    await form.getByRole("button", { name: "Start" }).click();
+    // a double click on Start sends one request, so the API makes three jobs and not six
+    const posts: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/runs") {
+        posts.push(request.url());
+      }
+    });
+    await form.getByRole("button", { name: "Start" }).dblclick();
     await expect(form.getByText("Started 3 jobs")).toBeVisible();
+    expect(posts).toHaveLength(1);
     const started = form.getByRole("list").getByRole("listitem");
     await expect(started).toHaveCount(3);
     await expect(started.nth(0)).toContainText("bare on fake-model");
@@ -235,8 +243,10 @@ test.describe("B3: cancel and resume", () => {
 
     // resume from the job page: it ends with every question and repeat once
     await row.getByRole("link", { name: runId }).click();
-    await page.getByRole("button", { name: "Resume" }).click();
+    // a double click resumes once: the second click does not meet a refusal
+    await page.getByRole("button", { name: "Resume" }).dblclick();
     await expect(status(page)).toContainText("Done. 60 of 60 answers", { timeout: 45_000 });
+    await expect(page.getByRole("alert")).toHaveCount(0);
     const items = await getJson<RunItemsBody>(
       api,
       `/api/v1/runs/${runId}/items?limit=200&contexts=false`,
@@ -261,6 +271,70 @@ test.describe("B3: cancel and resume", () => {
     await dialog.getByRole("button", { name: "Yes, cancel" }).click();
     await expect(status(page)).toContainText("Cancelled. 0 of 12 answers");
     await waitSettled(api, [first.id]);
+  });
+});
+
+test.describe("B3 and B4: a run resumed after it was scored", () => {
+  test("does not open the score of the partial run for the results of the whole one", async ({
+    page,
+    api,
+  }) => {
+    await openBenchmarks(page);
+    const [job] = await startRuns(api, ["bare"], 4, "B3 stale score");
+    if (!job?.run) return;
+    const runId = job.run.run_id;
+    await expect
+      .poll(async () => (await jobOf(api, job.id)).progress.done, { intervals: [100] })
+      .toBeGreaterThan(0);
+    expect((await api.post(`/api/v1/jobs/${job.id}/cancel`)).ok()).toBe(true);
+    await waitSettled(api, [job.id]);
+    // it stopped in the first question or so: fewer questions than the whole run answers
+    expect((await jobOf(api, job.id)).progress.done).toBeLessThan(4);
+
+    // score what the run has so far
+    await page.goto(`/benchmarks/compare?runs=${runId}`);
+    await page.getByRole("button", { name: "Score the run" }).click();
+    await expect(
+      page.getByRole("table", { name: /Mean and 95% interval of each metric/ }),
+    ).toBeVisible();
+    const partial = new URL(page.url()).searchParams.get("score") ?? "";
+    expect(partial).toMatch(/^[0-9a-z]{26}$/);
+    const before = await getJson<ScoreBody>(api, `/api/v1/scores/${partial}`);
+
+    // resume it to its end, and ask for the results
+    await page.goto(`/benchmarks/jobs/${job.id}`);
+    await page.getByRole("button", { name: "Resume" }).click();
+    await expect(status(page)).toContainText("Done. 24 of 24 answers", { timeout: 90_000 });
+    await page.getByRole("link", { name: "See results" }).click();
+    const starter = page.getByRole("region", { name: "Score these runs" });
+    await expect(starter).toContainText("was made before a run in it last changed");
+    expect(new URL(page.url()).searchParams.get("score")).toBeNull();
+    await expectNoAxeViolations(page);
+
+    // the older score is still there to open, and says that it is older
+    await starter.getByRole("link", { name: "Open it anyway" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "This score is older" })).toBeVisible();
+    await page.getByRole("link", { name: "Score the runs again" }).click();
+
+    // a new score holds all the questions of the whole run
+    await page.getByRole("button", { name: "Score the run" }).click();
+    await expect(
+      page.getByRole("table", { name: /Mean and 95% interval of each metric/ }),
+    ).toBeVisible();
+    const whole = new URL(page.url()).searchParams.get("score") ?? "";
+    expect(whole).toMatch(/^[0-9a-z]{26}$/);
+    expect(whole).not.toBe(partial);
+    const after = await getJson<ScoreBody>(api, `/api/v1/scores/${whole}`);
+    const questionsOf = (score: ScoreBody) =>
+      score.groups.find(
+        (record) =>
+          record.run_id === runId && record.group === "all" && record.metric === "all_keys",
+      )?.n ?? 0;
+    expect(questionsOf(after)).toBeGreaterThan(questionsOf(before));
+    // and a visit to the results finds that score from now on
+    await page.goto(`/benchmarks/compare?runs=${runId}`);
+    await expect(page.getByRole("table", { name: /Mean and 95% interval/ })).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("score")).toBe(whole);
   });
 });
 
@@ -300,7 +374,14 @@ test.describe("B4 and B5: results and comparison", () => {
     const starter = page.getByRole("region", { name: "Score these runs" });
     await expect(starter).toBeVisible();
     await expectNoAxeViolations(page);
-    await starter.getByRole("button", { name: "Score and compare" }).click();
+    // a double click scores once: one score holds this pair
+    const scorings: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/scores") {
+        scorings.push(request.url());
+      }
+    });
+    await starter.getByRole("button", { name: "Score and compare" }).dblclick();
     const summary = page.getByRole("table", { name: /Mean and 95% interval of each metric/ });
     await expect(summary).toBeVisible();
     const scoreId = new URL(page.url()).searchParams.get("score") ?? "";
@@ -354,6 +435,7 @@ test.describe("B4 and B5: results and comparison", () => {
         String(record.down),
       ]);
     }
+    expect(scorings).toHaveLength(1);
     await expectNoAxeViolations(page);
 
     // the filter lands on the questions where the arms disagree: the same count as the scorer's

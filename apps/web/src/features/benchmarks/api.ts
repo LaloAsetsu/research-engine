@@ -1,6 +1,13 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { $api, EXPECTS_UNAUTHORIZED, fetchClient } from "@/shared/api/client";
-import type { ItemPage, Job, RunRequest, ScoreItem, ScoreRequest } from "./types";
+import type { ItemPage, Job, RunRequest, RunSummary, ScoreItem, ScoreRequest } from "./types";
 import { readQuestionDetail, type QuestionDetail } from "./types";
 
 const STATUS = "/api/v1/status";
@@ -100,23 +107,40 @@ export interface LogTail {
   text: string;
   /** Where the next read starts: bytes of the log already read. */
   offset: number;
+  /**
+   * True once the log was read to its end by a read that began after the job settled and found
+   * nothing new. Until then the closing lines may still be missing.
+   */
+  closed: boolean;
 }
+
+/** The most pages one read follows: a guard against a server that never reaches the end. */
+const MAX_LOG_PAGES = 1000;
 
 /**
  * The log of a job, from the byte where the last read stopped, appended to what is held. The
- * query cache keeps the text; a log that shrank (the file was replaced) is read again from 0.
+ * query cache keeps the text. The API cuts a read at its page size, so a read follows the pages
+ * until it reaches the size of the log. A log that shrank (the file was replaced) is read again
+ * from 0. The runner settles a job before it writes its closing lines, so the reading goes on
+ * after the job settles, until a read that began then adds nothing.
  */
 export function useJobLog(jobId: string | undefined, settled: boolean | undefined) {
   const queryClient = useQueryClient();
   const key = ["bench", "log", jobId] as const;
-  return useQuery<LogTail>({
+  const query = useQuery<LogTail>({
     queryKey: key,
     enabled: jobId !== undefined,
     retry: false,
     staleTime: 0,
-    refetchInterval: settled === true ? false : polling.jobMs,
+    refetchInterval: (current) =>
+      settled === true && current.state.data?.closed === true ? false : polling.jobMs,
     queryFn: async () => {
-      const held = queryClient.getQueryData<LogTail>(key) ?? { text: "", offset: 0 };
+      const held = queryClient.getQueryData<LogTail>(key) ?? {
+        text: "",
+        offset: 0,
+        closed: false,
+      };
+      const afterSettled = settled === true;
       const read = async (offset: number) => {
         const { data, response } = await fetchClient.GET(JOB_LOG, {
           params: { path: { job_id: jobId ?? "" }, query: { offset } },
@@ -130,16 +154,39 @@ export function useJobLog(jobId: string | undefined, settled: boolean | undefine
           size,
         };
       };
-      let result = await read(held.offset);
-      let base = held.text;
-      if (Number.isFinite(result.size) && result.size < held.offset) {
-        // The log is shorter than what was read: it was replaced, so read it again from its start.
-        base = "";
-        result = await read(0);
+      let text = held.text;
+      let offset = held.offset;
+      let grew = false;
+      let replaced = false;
+      for (let pages = 0; pages < MAX_LOG_PAGES; pages += 1) {
+        const result = await read(offset);
+        if (!replaced && offset > 0 && Number.isFinite(result.size) && result.size < offset) {
+          // The log is shorter than what was read: it was replaced, so read it again from its start.
+          text = "";
+          offset = 0;
+          replaced = true;
+          continue;
+        }
+        if (result.next > offset) grew = true;
+        text += result.chunk;
+        const more = Number.isFinite(result.size) && result.next < result.size;
+        if (!more || result.next === offset) {
+          offset = result.next;
+          break;
+        }
+        offset = result.next;
       }
-      return { text: base + result.chunk, offset: result.next };
+      return { text, offset, closed: afterSettled && !grew && !replaced };
     },
   });
+  // The moment the job is seen settled, read once more instead of waiting for the next tick.
+  const { refetch } = query;
+  useEffect(() => {
+    if (settled !== true) return;
+    const current = queryClient.getQueryData<LogTail>(["bench", "log", jobId]);
+    if (current !== undefined && !current.closed) void refetch();
+  }, [settled, jobId, queryClient, refetch]);
+  return query;
 }
 
 export function useScores() {
@@ -262,39 +309,65 @@ export function refreshBenchmarks(queryClient: QueryClient, jobId?: string): Pro
   return Promise.all(pending);
 }
 
+/**
+ * One request at a time for each key. A button is disabled only after the next render, so a
+ * double click sends two calls; the second one gets the answer of the first instead of a request
+ * of its own.
+ */
+function useSingleFlight<T>() {
+  const flights = useRef(new Map<string, Promise<T>>());
+  return (key: string, send: () => Promise<T>): Promise<T> => {
+    const held = flights.current.get(key);
+    if (held) return held;
+    const flight = send().finally(() => flights.current.delete(key));
+    flights.current.set(key, flight);
+    return flight;
+  };
+}
+
 /** Starts one job for each arm and model. */
 export function useStartRuns() {
   const queryClient = useQueryClient();
+  const once = useSingleFlight<Job[]>();
   return useMutation<Job[], Error, RunRequest>({
-    mutationFn: async (body) => {
-      const { data } = await fetchClient.POST(RUNS, { body });
-      if (!data) throw new Error("The API answered without a body.");
-      return data;
-    },
+    mutationFn: (body) =>
+      once(JSON.stringify(body), async () => {
+        const { data } = await fetchClient.POST(RUNS, { body });
+        if (!data) throw new Error("The API answered without a body.");
+        return data;
+      }),
     onSettled: () => refreshBenchmarks(queryClient),
   });
 }
 
 export function useCancelJob() {
   const queryClient = useQueryClient();
+  const once = useSingleFlight<Job>();
   return useMutation<Job, Error, string>({
-    mutationFn: async (jobId) => {
-      const { data } = await fetchClient.POST(JOB_CANCEL, { params: { path: { job_id: jobId } } });
-      if (!data) throw new Error("The API answered without a body.");
-      return data;
-    },
+    mutationFn: (jobId) =>
+      once(jobId, async () => {
+        const { data } = await fetchClient.POST(JOB_CANCEL, {
+          params: { path: { job_id: jobId } },
+        });
+        if (!data) throw new Error("The API answered without a body.");
+        return data;
+      }),
     onSettled: (_data, _error, jobId) => refreshBenchmarks(queryClient, jobId),
   });
 }
 
 export function useResumeJob() {
   const queryClient = useQueryClient();
+  const once = useSingleFlight<Job>();
   return useMutation<Job, Error, string>({
-    mutationFn: async (jobId) => {
-      const { data } = await fetchClient.POST(JOB_RESUME, { params: { path: { job_id: jobId } } });
-      if (!data) throw new Error("The API answered without a body.");
-      return data;
-    },
+    mutationFn: (jobId) =>
+      once(jobId, async () => {
+        const { data } = await fetchClient.POST(JOB_RESUME, {
+          params: { path: { job_id: jobId } },
+        });
+        if (!data) throw new Error("The API answered without a body.");
+        return data;
+      }),
     onSettled: (_data, _error, jobId) => refreshBenchmarks(queryClient, jobId),
   });
 }
@@ -302,12 +375,29 @@ export function useResumeJob() {
 /** Starts a scoring (a job of the CPU lane). Its job id is the id of the score. */
 export function useStartScore() {
   const queryClient = useQueryClient();
+  const once = useSingleFlight<Job>();
   return useMutation<Job, Error, ScoreRequest>({
-    mutationFn: async (body) => {
-      const { data } = await fetchClient.POST(SCORES, { body });
-      if (!data) throw new Error("The API answered without a body.");
-      return data;
-    },
+    mutationFn: (body) =>
+      once(JSON.stringify(body), async () => {
+        const { data } = await fetchClient.POST(SCORES, { body });
+        if (!data) throw new Error("The API answered without a body.");
+        return data;
+      }),
     onSettled: () => refreshBenchmarks(queryClient),
+  });
+}
+
+/** The jobs that made these runs, by run: what ended last tells whether a score is still current. */
+export function useRunJobs(runs: readonly RunSummary[]) {
+  return useQueries({
+    queries: runs.map((run) => ({
+      ...$api.queryOptions("get", JOB, { params: { path: { job_id: run.job_id ?? "" } } }),
+      enabled: run.job_id !== undefined && run.job_id !== null,
+      retry: false,
+    })),
+    combine: (results) => ({
+      pending: results.some((result) => result.isPending && result.fetchStatus !== "idle"),
+      jobs: results.map((result) => result.data ?? null),
+    }),
   });
 }

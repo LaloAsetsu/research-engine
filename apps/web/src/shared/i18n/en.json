@@ -446,7 +446,12 @@
       "notAScore": "This job is not a scoring.",
       "unknownScoreTitle": "No such score",
       "unknownScore": "This score does not exist.",
-      "runsNotInScore": "This score does not hold the runs named in the address."
+      "runsNotInScore": "This score does not hold the runs named in the address.",
+      "olderTitle": "This score is older than the run",
+      "older": "This score was made on {{when}}, before a run in it last changed. It does not hold the answers added since.",
+      "olderOpen": "Open it anyway",
+      "olderAgain": "Score the runs again",
+      "olderExists": "A score of these runs from {{when}} exists, but it was made before a run in it last changed, so it does not hold the answers added since."
     },
     "results": {
       "choose": {

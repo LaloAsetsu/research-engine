@@ -446,7 +446,12 @@
       "notAScore": "Este trabajo no es una puntuación.",
       "unknownScoreTitle": "No existe esa puntuación",
       "unknownScore": "Esta puntuación no existe.",
-      "runsNotInScore": "Esta puntuación no contiene las corridas de la dirección."
+      "runsNotInScore": "Esta puntuación no contiene las corridas de la dirección.",
+      "olderTitle": "Esta puntuación es anterior a la corrida",
+      "older": "Esta puntuación se hizo el {{when}}, antes de que una de sus corridas cambiara por última vez. No contiene las respuestas añadidas después.",
+      "olderOpen": "Abrirla de todos modos",
+      "olderAgain": "Puntuar las corridas de nuevo",
+      "olderExists": "Existe una puntuación de estas corridas del {{when}}, pero se hizo antes de que una de sus corridas cambiara por última vez, así que no contiene las respuestas añadidas después."
     },
     "results": {
       "choose": {

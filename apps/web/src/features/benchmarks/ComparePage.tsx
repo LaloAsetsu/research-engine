@@ -4,15 +4,18 @@ import { Link, Navigate, useSearchParams } from "react-router";
 import { PageHeader } from "@/shared/layout/PageHeader";
 import { isApiError } from "@/shared/api/errors";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
-import { Button } from "@/shared/ui/button";
+import { Button, buttonVariants } from "@/shared/ui/button";
 import { Skeleton } from "@/shared/ui/skeleton";
-import { useJob, useResumeJob, useScore, useScores } from "./api";
+import { useJob, useResumeJob, useRunJobs, useRuns, useScore, useScores } from "./api";
 import {
   canResume,
   compareAddress,
   findScore,
+  formatMoment,
   parseCompareAddress,
   progressShare,
+  runChangedAt,
+  scoreIsOlder,
   shortId,
 } from "./domain";
 import { useJobProgressText } from "./JobsTable";
@@ -21,6 +24,7 @@ import { Results } from "./Results";
 import { ScoreStarter } from "./ScoreStarter";
 import { Section } from "./Section";
 import { StateBadge } from "./StateBadge";
+import type { RunSummary } from "./types";
 
 /** A scoring that is waiting, running or has stopped: the same words and bar as a run. */
 function Scoring({ scoreId }: { scoreId: string }) {
@@ -74,6 +78,43 @@ function Scoring({ scoreId }: { scoreId: string }) {
   );
 }
 
+/**
+ * When each run of the address last changed (by run id), read from the run lists and the jobs
+ * that made them. A run resumed after it was scored ends again, later than the score.
+ */
+function useChangedAt(runs: readonly string[]) {
+  const list = useRuns(false);
+  const mine = list.data ? runs.flatMap((id) => list.data.filter((run) => run.run_id === id)) : [];
+  const jobs = useRunJobs(mine);
+  const changedAt: Record<string, number | null> = {};
+  mine.forEach((run: RunSummary, index) => {
+    changedAt[run.run_id] = runChangedAt(run, jobs.jobs[index]);
+  });
+  return { changedAt, pending: list.isPending || jobs.pending, error: list.error };
+}
+
+/** A score made before one of its runs last changed: say so, and offer to score the runs again. */
+function OlderScoreNotice({ runs, created }: { runs: readonly string[]; created: string }) {
+  const { t, i18n } = useTranslation(undefined, { keyPrefix: "benchmarks.score" });
+  return (
+    <Alert role="status">
+      <CircleAlert aria-hidden="true" />
+      <AlertTitle>{t("olderTitle")}</AlertTitle>
+      <AlertDescription>
+        <p>{t("older", { when: formatMoment(created, i18n.language) })}</p>
+        <p>
+          <Link
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            to={compareAddress(runs)}
+          >
+            {t("olderAgain")}
+          </Link>
+        </p>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 /** A score named in the address: wait for its job, then read it. A score without a job (a file dropped in) is read at once. */
 function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string[] }) {
   const { t } = useTranslation(undefined, { keyPrefix: "benchmarks.score" });
@@ -81,6 +122,7 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
   const noJob = job.isError && isApiError(job.error, 404);
   const ready = job.data?.state === "done" || noJob;
   const score = useScore(scoreId, ready);
+  const { changedAt } = useChangedAt(runs);
 
   if (job.isError && !noJob) {
     return <ProblemAlert error={job.error} onRetry={() => void job.refetch()} />;
@@ -113,19 +155,30 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
       </Alert>
     );
   }
-  return <Results score={score.data} runIds={runs} />;
+  const older = runs.some((id) => scoreIsOlder(score.data.summary, changedAt[id] ?? null));
+  return (
+    <>
+      {older ? <OlderScoreNotice runs={runs} created={score.data.summary.created} /> : null}
+      <Results score={score.data} runIds={runs} />
+    </>
+  );
 }
 
-/** Without a score in the address: use the newest one that holds these runs, or offer to make it. */
+/**
+ * Without a score in the address: use the newest one that holds these runs and was made after
+ * they last changed, or offer to make it.
+ */
 function ScoreFinder({ runs }: { runs: readonly string[] }) {
   const scores = useScores();
+  const { changedAt, pending, error } = useChangedAt(runs);
   if (scores.isError) {
     return <ProblemAlert error={scores.error} onRetry={() => void scores.refetch()} />;
   }
-  if (!scores.data) return <Skeleton className="h-24 w-full" />;
-  const found = findScore(scores.data, runs);
-  if (found) return <Navigate replace to={compareAddress(runs, found.score_id)} />;
-  return <ScoreStarter runs={runs} />;
+  if (!scores.data || pending) return <Skeleton className="h-24 w-full" />;
+  // Without the run list nothing is known about the runs: the starter says what is wrong.
+  const { current, stale } = findScore(scores.data, runs, error ? {} : changedAt);
+  if (current) return <Navigate replace to={compareAddress(runs, current.score_id)} />;
+  return <ScoreStarter runs={runs} older={stale} />;
 }
 
 export function ComparePage() {

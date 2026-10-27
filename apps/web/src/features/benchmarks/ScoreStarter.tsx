@@ -1,23 +1,31 @@
 import { ArrowLeftRight } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Alert, AlertDescription } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { Label } from "@/shared/ui/label";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { useRuns, useStartScore } from "./api";
-import { compareAddress, isScorable, runLabel, splitSetName } from "./domain";
+import { compareAddress, formatMoment, isScorable, runLabel, splitSetName } from "./domain";
 import { SELECT_CLASS } from "./fields";
 import { ProblemAlert } from "./ProblemAlert";
 import { Section } from "./Section";
+import type { ScoreSummary } from "./types";
 
 /**
  * Runs that have not been scored together yet. Scoring is a job of the CPU lane (a few seconds);
  * its result is kept, so the next visit opens at once.
  */
-export function ScoreStarter({ runs }: { runs: readonly string[] }) {
-  const { t } = useTranslation(undefined, { keyPrefix: "benchmarks.score" });
+export function ScoreStarter({
+  runs,
+  older = null,
+}: {
+  runs: readonly string[];
+  /** A score of these runs made before a run last changed: left aside, but it can still be opened. */
+  older?: ScoreSummary | null;
+}) {
+  const { t, i18n } = useTranslation(undefined, { keyPrefix: "benchmarks.score" });
   const navigate = useNavigate();
   const runsQuery = useRuns(false);
   const start = useStartScore();
@@ -106,6 +114,21 @@ export function ScoreStarter({ runs }: { runs: readonly string[] }) {
     >
       <div className="grid gap-4">
         {start.error ? <ProblemAlert error={start.error} /> : null}
+        {older ? (
+          <Alert role="status">
+            <AlertDescription>
+              <p>{t("olderExists", { when: formatMoment(older.created, i18n.language) })}</p>
+              <p>
+                <Link
+                  className="underline underline-offset-4"
+                  to={compareAddress(runs, older.score_id)}
+                >
+                  {t("olderOpen")}
+                </Link>
+              </p>
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <dl className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-0.5">
             <dt className="text-xs text-muted-foreground">{variant ? t("base") : t("run")}</dt>

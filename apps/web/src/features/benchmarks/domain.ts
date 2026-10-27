@@ -130,11 +130,46 @@ export function compareAddress(runs: readonly string[], score?: string | null): 
   return `/benchmarks/compare?${query.toString()}`;
 }
 
-/** The newest score that holds these runs, and for two runs the pair as (base, variant). */
+/** The moment of a time written by the API, or null when it is missing or does not read. */
+function moment(text: string | null | undefined): number | null {
+  if (text === null || text === undefined || text === "") return null;
+  const parsed = Date.parse(text);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/** A score writes its time to the second, so a run that ended within that second is not newer. */
+const SCORE_CLOCK_MS = 1000;
+
+/**
+ * When a run last changed: the later of the end the run file gives and the end of the job that
+ * made it. A run resumed after it was scored ends again, later than the score.
+ */
+export function runChangedAt(
+  run: Pick<RunSummary, "ended">,
+  job: Pick<Job, "ended_at"> | null | undefined,
+): number | null {
+  const times = [moment(run.ended), moment(job?.ended_at)].filter(
+    (time): time is number => time !== null,
+  );
+  return times.length === 0 ? null : Math.max(...times);
+}
+
+/** True when the score was made before the run last changed: it does not hold the run's latest answers. */
+export function scoreIsOlder(score: Pick<ScoreSummary, "created">, changedAt: number | null) {
+  const made = moment(score.created);
+  return made !== null && changedAt !== null && made + SCORE_CLOCK_MS < changedAt;
+}
+
+/**
+ * The newest score that holds these runs, and for two runs the pair as (base, variant). With
+ * `changedAt` (when each run last changed, by run id) a score made before one of its runs changed
+ * is left out: `stale` is the newest of those, so the screen can say that it exists.
+ */
 export function findScore(
   scores: readonly ScoreSummary[],
   runs: readonly string[],
-): ScoreSummary | null {
+  changedAt: Readonly<Record<string, number | null>> = {},
+): { current: ScoreSummary | null; stale: ScoreSummary | null } {
   const wanted = runs;
   const matches = scores.filter((score) => {
     const held = new Set(score.runs.map((run) => run.run_id));
@@ -144,7 +179,12 @@ export function findScore(
     return score.pairs.some((pair) => pair.base_run === base && pair.var_run === variant);
   });
   matches.sort((a, b) => b.created.localeCompare(a.created));
-  return matches[0] ?? null;
+  const older = (score: ScoreSummary) =>
+    wanted.some((id) => scoreIsOlder(score, changedAt[id] ?? null));
+  return {
+    current: matches.find((score) => !older(score)) ?? null,
+    stale: matches.find(older) ?? null,
+  };
 }
 
 /** Runs that are still being written cannot be scored. */

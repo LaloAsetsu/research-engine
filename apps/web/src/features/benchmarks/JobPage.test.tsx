@@ -1,8 +1,8 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { ANA } from "@/test/auth-mock";
-import { CAPTURE, createJobStand, problem, type JobStand } from "@/test/benchmarks-api";
+import { CAPTURE, createJobStand, logPage, problem, type JobStand } from "@/test/benchmarks-api";
 import { renderApp } from "@/test/render";
 import { authMock, server } from "@/test/server";
 import { polling } from "./api";
@@ -159,6 +159,73 @@ describe("a job that is waiting or running", () => {
     await waitFor(() => expect(Number(offsets.at(-1))).toBeGreaterThan(0));
   });
 
+  it("reads the log once more after the job settles, for the lines written as it ended", async () => {
+    const { stand, first } = twoJobs(2);
+    // the closing lines are not in the file yet while the job is seen running
+    let frozen: string | null = null;
+    server.use(
+      http.get("*/api/v1/jobs/:id/log", ({ request, params }) => {
+        const text = frozen ?? `${stand.log(String(params.id))}\n`;
+        const offset = Number(new URL(request.url).searchParams.get("offset"));
+        const page = logPage(text, offset, text.length);
+        return new HttpResponse(page.chunk, {
+          headers: { "x-log-next-offset": String(page.next), "x-log-size": String(page.size) },
+        });
+      }),
+      // they are there once the job is read as settled
+      http.get("*/api/v1/jobs/:id", ({ params }) => {
+        const job = stand.jobs.find((entry) => entry.id === params.id);
+        if (!job) return problem(404, "No such job.");
+        const body = structuredClone(job);
+        if (job.settled) frozen = null;
+        return HttpResponse.json(body);
+      }),
+    );
+    await openJob(first.id);
+    stand.tick(first.id);
+    await waitFor(() => expect(screen.getByRole("log")).toHaveTextContent("1/2 answered"));
+    frozen = `${stand.log(first.id)}\n`;
+    stand.tick(first.id);
+    await waitFor(() => expect(status()).toHaveTextContent("Done. 2 of 2 answers"));
+    await waitFor(() => expect(screen.getByRole("log")).toHaveTextContent("2/2 answered"));
+    expect(screen.getByRole("log").textContent?.trimEnd().endsWith("done")).toBe(true);
+  });
+
+  it("stops reading the log once the job is settled and a read found nothing new", async () => {
+    const { stand, first } = twoJobs(1);
+    stand.tick(first.id);
+    await openJob(first.id);
+    await waitFor(() => expect(screen.getByRole("log")).toHaveTextContent("1/1 answered"));
+    await waitFor(() => expect(stand.logReads.length).toBeGreaterThanOrEqual(2));
+    const reads = stand.logReads.length;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(stand.logReads).toHaveLength(reads);
+  });
+
+  it("follows the pages of a log longer than one read", async () => {
+    const stand = createJobStand({ total: 1, logBytes: 300 });
+    server.use(...stand.handlers);
+    const [first] = stand.start({
+      set: { name: "demo-papers", version: "v1" },
+      arms: [{ name: "bare" }],
+      models: ["fake-model"],
+      repeats: 1,
+      notes: "",
+    }) as [Job];
+    for (let line = 1; line <= 80; line += 1) stand.write(first.id, `extra line ${line}`);
+    stand.tick(first.id);
+    await openJob(first.id);
+    const log = screen.getByRole("log");
+    await waitFor(() => expect(log).toHaveTextContent("1/1 answered"));
+    expect(log.textContent?.match(/extra line \d+/g)).toHaveLength(80);
+    expect(log).toHaveTextContent("extra line 1 ");
+    expect(log).toHaveTextContent("extra line 80 ");
+    // each page starts where the one before stopped
+    const reads = stand.logReads.slice(0, stand.logReads.indexOf(0) + 20);
+    expect(reads.slice(0, 4)).toEqual([...reads.slice(0, 4)].sort((a, b) => a - b));
+    expect(new Set(reads).size).toBeGreaterThan(3);
+  });
+
   it("starts the log again when the file got shorter", async () => {
     const { first } = twoJobs();
     let calls = 0;
@@ -228,6 +295,20 @@ describe("cancelling and resuming", () => {
     stand.tick(first.id);
     stand.tick(first.id);
     await waitFor(() => expect(status()).toHaveTextContent("Done. 3 of 3 answers"));
+  });
+
+  it("sends one resume when the button is clicked twice before the page can disable it", async () => {
+    const { stand, first } = twoJobs(3);
+    stand.jobs[0]!.state = "cancelled";
+    stand.jobs[0]!.settled = true;
+    stand.jobs[0]!.progress.done = 1;
+    await openJob(first.id);
+    const button = screen.getByRole("button", { name: "Resume" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(status()).toHaveTextContent(/Running|Queued/));
+    expect(stand.actions).toEqual([`resume:${first.id}`]);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("cancels a queued job at once", async () => {

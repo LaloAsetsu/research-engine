@@ -131,6 +131,22 @@ export interface JobStand {
   tick: (jobId?: string) => Job[];
   /** Lines the log has now. */
   log: (jobId: string) => string;
+  /** `cancel:<id>` and `resume:<id>` for each request that reached the stand, in order. */
+  actions: string[];
+  /** The offset of each log read, in order. */
+  logReads: number[];
+  /** One more line in the log of a job. */
+  write: (jobId: string, line: string) => void;
+}
+
+/** What the API's log read gives: from `offset`, at most `page` bytes, cut at the end of a line. */
+export function logPage(text: string, offset: number, page: number) {
+  let end = Math.min(text.length, offset + page);
+  if (end < text.length) {
+    const cut = text.lastIndexOf("\n", end - 1);
+    if (cut >= offset) end = cut + 1;
+  }
+  return { chunk: text.slice(offset, end), next: end, size: text.length };
 }
 
 /**
@@ -139,7 +155,14 @@ export interface JobStand {
  * answer in flight; resume queues it again. Enough to follow a run on the screen.
  */
 export function createJobStand(
-  options: { owner?: string; total?: number; models?: Model[]; mode?: "live" | "fake" } = {},
+  options: {
+    owner?: string;
+    total?: number;
+    models?: Model[];
+    mode?: "live" | "fake";
+    /** Bytes of one log read, as the API's page; the whole log when not given. */
+    logBytes?: number;
+  } = {},
 ): JobStand {
   const owner = options.owner ?? "ana";
   const total = options.total ?? 6;
@@ -147,6 +170,8 @@ export function createJobStand(
   const jobs: Job[] = [];
   const logs = new Map<string, string[]>();
   const requests: unknown[] = [];
+  const logReads: number[] = [];
+  const actions: string[] = [];
 
   const idOf = (n: number) => `${FIRST_ID.slice(0, 6)}${String(n).padStart(20, "0")}`;
   const running = () => jobs.find((job) => job.state === "running" || job.state === "cancelling");
@@ -225,15 +250,18 @@ export function createJobStand(
       if (!lines) return problem(404, "No such job.");
       const text = lines.length > 0 ? `${lines.join("\n")}\n` : "";
       const offset = Number(new URL(request.url).searchParams.get("offset") ?? "0");
-      return new HttpResponse(text.slice(offset), {
+      const page = logPage(text, offset, options.logBytes ?? Number.MAX_SAFE_INTEGER);
+      logReads.push(offset);
+      return new HttpResponse(page.chunk, {
         headers: {
           "content-type": "text/plain",
-          "x-log-next-offset": String(text.length),
-          "x-log-size": String(text.length),
+          "x-log-next-offset": String(page.next),
+          "x-log-size": String(page.size),
         },
       });
     }),
     http.post("*/api/v1/jobs/:id/cancel", ({ params }) => {
+      actions.push(`cancel:${String(params.id)}`);
       const job = find(params.id);
       if (!job) return problem(404, "No such job.");
       if (job.state === "queued") {
@@ -250,6 +278,7 @@ export function createJobStand(
       return asJson(job);
     }),
     http.post("*/api/v1/jobs/:id/resume", ({ params }) => {
+      actions.push(`resume:${String(params.id)}`);
       const job = find(params.id);
       if (!job) return problem(404, "No such job.");
       if (job.state !== "cancelled" && job.state !== "interrupted") {
@@ -301,6 +330,11 @@ export function createJobStand(
     requests,
     start,
     log: (jobId) => (logs.get(jobId) ?? []).join("\n"),
+    write: (jobId, line) => {
+      logs.get(jobId)?.push(line);
+    },
+    logReads,
+    actions,
     tick: (jobId) => {
       const job = jobId ? find(jobId) : running();
       if (!job || (job.state !== "running" && job.state !== "cancelling")) return [];

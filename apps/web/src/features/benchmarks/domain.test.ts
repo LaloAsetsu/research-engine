@@ -7,6 +7,8 @@ import {
   defaultMetrics,
   elapsedSeconds,
   findScore,
+  runChangedAt,
+  scoreIsOlder,
   formatDuration,
   formatInterval,
   formatNumber,
@@ -177,11 +179,43 @@ describe("finding a score", () => {
   ];
 
   it("takes the newest score that holds the runs, and the pair in that order", () => {
-    expect(findScore(scores, ["a", "b"])?.score_id).toBe("new");
-    expect(findScore(scores, ["b", "a"])?.score_id).toBe("swapped");
-    expect(findScore(scores, ["a"])?.score_id).toBe("swapped");
-    expect(findScore(scores, ["a", "z"])).toBeNull();
-    expect(findScore([], ["a"])).toBeNull();
+    expect(findScore(scores, ["a", "b"]).current?.score_id).toBe("new");
+    expect(findScore(scores, ["b", "a"]).current?.score_id).toBe("swapped");
+    expect(findScore(scores, ["a"]).current?.score_id).toBe("swapped");
+    expect(findScore(scores, ["a", "z"])).toEqual({ current: null, stale: null });
+    expect(findScore([], ["a"])).toEqual({ current: null, stale: null });
+  });
+
+  it("leaves out a score made before one of its runs changed, and says it exists", () => {
+    const changed = { a: Date.parse("2026-02-15T00:00:00Z"), b: null };
+    // "new" was made before a changed: the older "old" is older still, so no score is current
+    const found = findScore(scores, ["a", "b"], changed);
+    expect(found.current).toBeNull();
+    expect(found.stale?.score_id).toBe("new");
+    // a score made after the change is current again, and the stale one is still reported
+    const after = [
+      ...scores,
+      score("fresh", "2026-04-01T00:00:00+00:00", ["a", "b"], [["a", "b"]]),
+    ];
+    expect(findScore(after, ["a", "b"], changed).current?.score_id).toBe("fresh");
+  });
+
+  it("dates a run by the later of its end and the end of its job", () => {
+    const at = (text: string) => Date.parse(text);
+    expect(
+      runChangedAt({ ended: "2026-03-01T10:00:00Z" }, { ended_at: "2026-03-01T10:05:00Z" }),
+    ).toBe(at("2026-03-01T10:05:00Z"));
+    expect(runChangedAt({ ended: "2026-03-01T10:00:00Z" }, null)).toBe(at("2026-03-01T10:00:00Z"));
+    expect(runChangedAt({ ended: null }, { ended_at: null })).toBeNull();
+    expect(runChangedAt({ ended: "nonsense" }, undefined)).toBeNull();
+  });
+
+  it("allows for the second a score is written to", () => {
+    const made = { created: "2026-03-01T10:00:00+00:00" };
+    expect(scoreIsOlder(made, Date.parse("2026-03-01T10:00:00.659Z"))).toBe(false);
+    expect(scoreIsOlder(made, Date.parse("2026-03-01T10:00:02Z"))).toBe(true);
+    expect(scoreIsOlder(made, null)).toBe(false);
+    expect(scoreIsOlder({ created: "" }, Date.parse("2026-03-01T10:00:02Z"))).toBe(false);
   });
 
   it("scores a run that has stopped and flags one that did not reach its end", () => {

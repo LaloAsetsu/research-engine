@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { ANA } from "@/test/auth-mock";
@@ -542,6 +542,61 @@ describe("finding or making the score", () => {
     );
   });
 
+  /** The run lists say the run of the variant ended after the recorded score was made: it was resumed. */
+  const resumedAfterScore = () =>
+    server.use(
+      http.get("*/api/v1/runs", () =>
+        HttpResponse.json(
+          CAPTURE.runs.map((run) =>
+            run.run_id === RUNS.harness ? { ...run, ended: "2026-10-27T16:00:00+00:00" } : run,
+          ),
+        ),
+      ),
+    );
+
+  it("does not open a score made before a run was resumed, and offers the older one", async () => {
+    resumedAfterScore();
+    const { user, app } = await open(address([RUNS.base, RUNS.harness], null));
+    const section = await screen.findByRole("region", { name: "Score these runs" });
+    expect(
+      within(section).getByText(/was made before a run in it last changed/),
+    ).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "Score and compare" })).toBeEnabled();
+    expect(app.router.state.location.search).not.toContain("score=");
+    // the older score can still be opened, and says that it is older
+    await user.click(within(section).getByRole("link", { name: "Open it anyway" }));
+    const notice = (
+      await screen.findByText("This score is older than the run")
+    ).closest<HTMLElement>('[role="status"]')!;
+    expect(notice).toHaveTextContent("This score is older than the run");
+    expect(notice).toHaveTextContent("It does not hold the answers added since.");
+    expect(
+      await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ }),
+    ).toBeInTheDocument();
+    // from there, score the runs again
+    await user.click(within(notice).getByRole("link", { name: "Score the runs again" }));
+    expect(await screen.findByRole("region", { name: "Score these runs" })).toBeInTheDocument();
+  });
+
+  it("dates a run by the end of the job that made it, too", async () => {
+    const job = CAPTURE.jobs.find((entry) => entry.run?.run_id === RUNS.harness)!;
+    server.use(
+      http.get(`*/api/v1/jobs/${job.id}`, () =>
+        HttpResponse.json({ ...job, ended_at: "2026-10-27T16:00:00Z" }),
+      ),
+    );
+    await open(address([RUNS.base, RUNS.harness], null));
+    const section = await screen.findByRole("region", { name: "Score these runs" });
+    expect(within(section).getByRole("link", { name: "Open it anyway" })).toBeInTheDocument();
+  });
+
+  it("opens the score when the runs have not changed since it was made", async () => {
+    const { app } = await open(address([RUNS.base, RUNS.harness], null));
+    await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });
+    expect(app.router.state.location.search).toContain(`score=${SCORE}`);
+    expect(screen.queryByText("This score is older than the run")).not.toBeInTheDocument();
+  });
+
   it("offers to score runs that no score holds, as a pair with base and variant", async () => {
     await open(address(pair, null));
     const section = await screen.findByRole("region", { name: "Score these runs" });
@@ -601,6 +656,27 @@ describe("finding or making the score", () => {
       await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Scoring" })).not.toBeInTheDocument();
+  });
+
+  it("sends one scoring when the button is clicked twice before the page can disable it", async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.post("*/api/v1/scores", async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json(
+          { ...CAPTURE.scoreJob, state: "queued", settled: false },
+          { status: 202 },
+        );
+      }),
+    );
+    const { app } = await open(address(pair, null));
+    const button = await screen.findByRole("button", { name: "Score and compare" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(app.router.state.location.search).toContain(`score=${CAPTURE.scoreId}`),
+    );
+    expect(bodies).toHaveLength(1);
   });
 
   it("swaps base and variant before scoring", async () => {
@@ -731,6 +807,27 @@ describe("a scoring that does not finish", () => {
     expect(
       await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ }),
     ).toBeInTheDocument();
+  });
+
+  it("sends one resume when the button of a stopped scoring is clicked twice", async () => {
+    let current = job("interrupted");
+    let resumes = 0;
+    serve(() => current);
+    server.use(
+      http.post(`*/api/v1/jobs/${CAPTURE.scoreId}/resume`, () => {
+        resumes += 1;
+        current = job("done", { progress: { done: 1, total: 1 } });
+        return HttpResponse.json(current);
+      }),
+    );
+    await open(address([RUNS.base, RUNS.harness]));
+    const scoring = await screen.findByRole("region", { name: "Scoring" });
+    const button = within(scoring).getByRole("button", { name: "Resume" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });
+    expect(resumes).toBe(1);
+    expect(screen.queryByText(/cannot be resumed/)).not.toBeInTheDocument();
   });
 
   it("does not take another kind of job for a score", async () => {

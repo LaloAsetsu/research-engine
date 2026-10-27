@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { ANA } from "@/test/auth-mock";
@@ -235,6 +235,18 @@ describe("the start form", () => {
     expect(screen.getByRole("checkbox", { name: "fake-model (demo)" })).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Start" }));
     expect(stand.requests).toEqual([]);
+  });
+
+  it("sends one request when Start is clicked twice before the page can disable it", async () => {
+    const stand = createJobStand();
+    await openPage(stand);
+    await screen.findByRole("checkbox", { name: "fake-model (demo)" });
+    const button = screen.getByRole("button", { name: "Start" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(await within(form()).findByText("Started 2 jobs")).toBeInTheDocument();
+    expect(stand.requests).toHaveLength(1);
+    expect(stand.jobs).toHaveLength(2);
   });
 });
 
