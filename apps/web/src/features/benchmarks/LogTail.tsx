@@ -5,8 +5,8 @@ import { ProblemAlert } from "./ProblemAlert";
 import { Section } from "./Section";
 
 /**
- * The log of a job, read from where the last read stopped. It is a `log` region (polite live
- * region) a keyboard can scroll; it follows the end while the reader is at the end.
+ * The log of a job, read from where the last read stopped. It is a `log` region (not announced: the
+ * status line is) a keyboard can scroll; it follows the end while the reader is at the end.
  */
 export function LogTail({ jobId, settled }: { jobId: string; settled: boolean | undefined }) {
   const { t } = useTranslation(undefined, { keyPrefix: "benchmarks.log" });
@@ -26,6 +26,8 @@ export function LogTail({ jobId, settled }: { jobId: string; settled: boolean | 
       <pre
         ref={box}
         role="log"
+        // The status line above says how far the job is; the log would speak every 2 s.
+        aria-live="off"
         aria-label={t("label")}
         // The box scrolls, so a keyboard must be able to reach it.
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex

@@ -362,6 +362,10 @@ test.describe("B4 and B5: results and comparison", () => {
     api,
   }) => {
     const { bare, harness } = await twoFinishedRuns(api);
+    // a second closed-book run on the same set: with the first one it is the noise pair
+    const [again] = await startRuns(api, ["bare"], 1, "B5 noise");
+    await waitSettled(api, [again?.id ?? ""]);
+    const noise = again?.run?.run_id ?? "";
     await openBenchmarks(page);
 
     // pick the two runs: the first is the base
@@ -370,9 +374,11 @@ test.describe("B4 and B5: results and comparison", () => {
     await expect(page.getByText(`Base: ${bare}. Variant: ${harness}.`)).toBeVisible();
     await page.getByRole("link", { name: "Compare" }).click();
 
-    // these runs have not been scored: score them (the second closed-book run is the noise pair)
+    // these runs have not been scored: score them with the two closed-book runs as the noise pair
     const starter = page.getByRole("region", { name: "Score these runs" });
     await expect(starter).toBeVisible();
+    await starter.getByLabel("First run").selectOption(bare);
+    await starter.getByLabel("Second run").selectOption(noise);
     await expectNoAxeViolations(page);
     // a double click scores once: one score holds this pair
     const scorings: string[] = [];
@@ -424,6 +430,7 @@ test.describe("B4 and B5: results and comparison", () => {
       const record = recorded.find((entry) => entry.group === group && entry.metric === metric);
       if (!record) throw new Error(`no ${group} ${metric}`);
       const cells = await row(compare, group, metric).getByRole("cell").allTextContents();
+      expect(record.floor ?? null).not.toBeNull();
       expect(cells.slice(0, 8)).toEqual([
         metric,
         String(record.n),
@@ -434,6 +441,9 @@ test.describe("B4 and B5: results and comparison", () => {
         String(record.up),
         String(record.down),
       ]);
+      // the noise floor and whether the difference counts, as the scorer returned them
+      expect(cells[8]).toBe(plain(record.floor ?? 0));
+      expect(cells[9]).toMatch(record.counts ? /^Yes/ : /^No$/);
     }
     expect(scorings).toHaveLength(1);
     await expectNoAxeViolations(page);

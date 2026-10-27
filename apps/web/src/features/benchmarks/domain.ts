@@ -37,7 +37,7 @@ export function canResume(job: Pick<Job, "state">): boolean {
   return job.state === "cancelled" || job.state === "interrupted";
 }
 
-/** Whole seconds a job has taken, up to `nowMs` while it runs. Null before it starts. */
+/** Whole seconds a job has taken, up to `nowMs` while it runs. Null before it starts and while it waits. */
 export function elapsedSeconds(
   job: Pick<Job, "started_at" | "ended_at" | "state">,
   nowMs: number,
@@ -45,10 +45,9 @@ export function elapsedSeconds(
   if (job.started_at === null) return null;
   const start = Date.parse(job.started_at);
   if (Number.isNaN(start)) return null;
-  const stop =
-    job.ended_at !== null && job.state !== "queued" && job.state !== "running"
-      ? Date.parse(job.ended_at)
-      : nowMs;
+  const live = job.state === "running" || job.state === "cancelling";
+  if (!live && (job.ended_at === null || job.state === "queued")) return null;
+  const stop = live ? nowMs : Date.parse(job.ended_at ?? "");
   if (Number.isNaN(stop)) return null;
   return Math.max(0, Math.floor((stop - start) / 1000));
 }
@@ -436,6 +435,9 @@ export function keyOutcomes(
   });
 }
 
+/** The shortest citation id that stands for a paper: the 16 hex of the short form. */
+const MIN_CITED_ID = 16;
+
 /** Which gold papers an answer cites. A short (16 hex) id of a citation matches the long one. */
 export function goldCited(
   gold: readonly GoldPaper[],
@@ -444,7 +446,10 @@ export function goldCited(
   const ids = cited.map((citation) => citation.doc_id);
   const hit = (paper: GoldPaper) =>
     ids.some(
-      (id) => id === paper.docId || paper.docId.startsWith(id) || id.startsWith(paper.docId),
+      (id) =>
+        id === paper.docId ||
+        (Math.min(id.length, paper.docId.length) >= MIN_CITED_ID &&
+          (paper.docId.startsWith(id) || id.startsWith(paper.docId))),
     );
   return { cited: gold.filter(hit), missing: gold.filter((paper) => !hit(paper)) };
 }

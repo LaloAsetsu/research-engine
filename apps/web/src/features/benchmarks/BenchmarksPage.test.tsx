@@ -232,8 +232,13 @@ describe("the start form", () => {
     await waitFor(() =>
       expect(screen.getByRole("checkbox", { name: "fake-model (demo)" })).toBeDisabled(),
     );
-    expect(screen.getByRole("checkbox", { name: "fake-model (demo)" })).toBeChecked();
+    // it is not chosen any more, and the count does not include it
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "fake-model (demo)" })).not.toBeChecked(),
+    );
+    expect(within(form()).getByText("Pick at least one arm and one model.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Start" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Pick at least one model.");
     expect(stand.requests).toEqual([]);
   });
 
@@ -247,6 +252,31 @@ describe("the start form", () => {
     expect(await within(form()).findByText("Started 2 jobs")).toBeInTheDocument();
     expect(stand.requests).toHaveLength(1);
     expect(stand.jobs).toHaveLength(2);
+  });
+
+  it("follows the state of the started jobs", async () => {
+    const stand = createJobStand();
+    const user = await openPage(stand);
+    await screen.findByRole("checkbox", { name: "fake-model (demo)" });
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    await within(form()).findByText("Started 2 jobs");
+    const started = () => within(form()).getAllByRole("listitem");
+    expect(started().map((item) => item.textContent)).toEqual([
+      "bare on fake-modelRunning",
+      "harness on fake-modelQueued1 job ahead",
+    ]);
+    stand.tick();
+    stand.tick();
+    stand.tick();
+    stand.tick();
+    stand.tick();
+    stand.tick();
+    await waitFor(() =>
+      expect(started().map((item) => item.textContent)).toEqual([
+        "bare on fake-modelDone",
+        "harness on fake-modelRunning",
+      ]),
+    );
   });
 });
 

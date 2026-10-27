@@ -65,6 +65,13 @@ describe("jobs", () => {
         now,
       ),
     ).toBe(72);
+    // a job that waits, or has no end, does not count
+    expect(
+      elapsedSeconds({ state: "queued", started_at: start, ended_at: "2026-10-27T10:00:30Z" }, now),
+    ).toBeNull();
+    expect(
+      elapsedSeconds({ state: "cancelled", started_at: start, ended_at: null }, now),
+    ).toBeNull();
     // a clock that is behind never gives a negative time
     expect(elapsedSeconds({ state: "running", started_at: start, ended_at: null }, 0)).toBe(0);
     expect(
@@ -405,6 +412,9 @@ describe("questions", () => {
     });
     expect(goldCited(gold, [{ doc_id: "b".repeat(16) }]).cited).toEqual([gold[1]]);
     expect(goldCited(gold, []).missing).toHaveLength(2);
+    // an empty or short id is no citation: it would otherwise match every paper
+    expect(goldCited(gold, [{ doc_id: "" }]).cited).toEqual([]);
+    expect(goldCited(gold, [{ doc_id: "a".repeat(8) }]).cited).toEqual([]);
     expect(goldCited([], [{ doc_id: "x" }])).toEqual({ cited: [], missing: [] });
   });
 

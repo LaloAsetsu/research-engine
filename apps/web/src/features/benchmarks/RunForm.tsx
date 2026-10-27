@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
-import { useModels, useServiceStatus, useSets, useStartRuns } from "./api";
+import { useJobs, useModels, useServiceStatus, useSets, useStartRuns } from "./api";
 import { frozenVersions, oracleUnavailable, shortHash, versionKey } from "./domain";
 import { CHECKBOX_CLASS, SELECT_CLASS } from "./fields";
 import { ProblemAlert } from "./ProblemAlert";
@@ -33,6 +33,7 @@ export function RunForm() {
   const modelsQuery = useModels();
   const status = useServiceStatus();
   const start = useStartRuns();
+  const jobsQuery = useJobs();
   const [started, setStarted] = useState<Job[] | null>(null);
   const [refused, setRefused] = useState(0);
   const ids = useId();
@@ -47,6 +48,7 @@ export function RunForm() {
     handleSubmit,
     getValues,
     setValue,
+    setError,
     formState: { errors, isSubmitted },
   } = useForm<RunFormValues>({
     resolver: zodResolver(runFormSchema),
@@ -74,7 +76,17 @@ export function RunForm() {
 
   const chosenArms = useWatch({ control, name: "arms" });
   const chosenModels = useWatch({ control, name: "models" });
-  const jobCount = chosenArms.length * chosenModels.length;
+  // A model whose server went down after it was chosen is not chosen any more, and not counted.
+  const down = models.filter((model) => !model.available).map((model) => model.name);
+  const downChosen = chosenModels.filter((name) => down.includes(name));
+  const modelList = modelsQuery.data;
+  useEffect(() => {
+    const gone = (modelList ?? []).filter((model) => !model.available).map((model) => model.name);
+    const chosen = getValues("models");
+    const kept = chosen.filter((name) => !gone.includes(name));
+    if (kept.length !== chosen.length) setValue("models", kept);
+  }, [modelList, getValues, setValue]);
+  const jobCount = chosenArms.length * (chosenModels.length - downChosen.length);
 
   const submit = handleSubmit(
     (values) => {
@@ -82,7 +94,11 @@ export function RunForm() {
       const usable = values.models.filter(
         (name) => models.find((model) => model.name === name)?.available === true,
       );
-      if (usable.length === 0) return;
+      if (usable.length === 0) {
+        setError("models", { message: "benchmarks.form.errors.models" });
+        setRefused((count) => count + 1);
+        return;
+      }
       setStarted(null);
       start.mutate(
         {
@@ -296,30 +312,34 @@ export function RunForm() {
 
       <div aria-live="polite">
         {started ? (
-          <Alert>
+          <Alert role="none">
             <CircleCheck aria-hidden="true" />
             <AlertTitle>{t("startedTitle", { count: started.length })}</AlertTitle>
             <AlertDescription>
               <ul className="grid gap-1">
-                {started.map((job) => (
-                  <li key={job.id} className="flex flex-wrap items-center gap-2">
-                    <Link
-                      className="underline underline-offset-4"
-                      to={`/benchmarks/jobs/${job.id}`}
-                    >
-                      {t("startedJob", {
-                        arm: job.run?.arm.name ?? "",
-                        model: job.run?.model ?? "",
-                      })}
-                    </Link>
-                    <StateBadge state={job.state} />
-                    {job.position !== null && job.position !== undefined ? (
-                      <span className="text-muted-foreground">
-                        {job.position === 0 ? t("next") : t("ahead", { count: job.position })}
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
+                {started.map((first) => {
+                  // the state and the place in line as the list of jobs has them now
+                  const job = jobsQuery.data?.find((entry) => entry.id === first.id) ?? first;
+                  return (
+                    <li key={job.id} className="flex flex-wrap items-center gap-2">
+                      <Link
+                        className="underline underline-offset-4"
+                        to={`/benchmarks/jobs/${job.id}`}
+                      >
+                        {t("startedJob", {
+                          arm: job.run?.arm.name ?? "",
+                          model: job.run?.model ?? "",
+                        })}
+                      </Link>
+                      <StateBadge state={job.state} />
+                      {job.position !== null && job.position !== undefined ? (
+                        <span className="text-muted-foreground">
+                          {job.position === 0 ? t("next") : t("ahead", { count: job.position })}
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </AlertDescription>
           </Alert>
