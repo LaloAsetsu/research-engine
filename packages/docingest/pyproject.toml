@@ -1,6 +1,6 @@
 [project]
 name = "docingest"
-version = "0.4.1"
+version = "0.4.3"
 description = "Normalize any research document (PDF, scanned PDF, images, office) into Markdown + provenance manifest, with local Qwen-VL OCR on MLX"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -35,6 +35,9 @@ qa = [
 ]
 office = [
     "docling>=2.130",
+]
+rag-anything = [
+    "raganything>=1.2,<2",
 ]
 
 [build-system]

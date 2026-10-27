@@ -29,6 +29,7 @@ flowchart TD
 | Document | Content | Maintained |
 |---|---|---|
 | [architecture.md](architecture.md) | The architecture reference: design goals, vocabulary, layers and the import contracts that enforce them, every port and its adapters, the composition root and plugins, how a document flows through the pipeline, caching and fingerprints, the manifest, error handling, the crawl, ask and benchmark subsystems, extension points and testing | By hand |
+| [../../../docs/rag-multimodal-upgrade.md](../../../docs/rag-multimodal-upgrade.md) | RAG audit, optional `rag-anything` integration boundary, Linux path-based operation, and circuit/PQC/PSF extraction specification | By hand |
 | [adr/0001-hexagonal-architecture.md](adr/0001-hexagonal-architecture.md) | Why the code uses ports and adapters with a plugin registry, adapter fingerprints in the cache key, and import-linter contracts in CI | By hand |
 | [adr/0002-per-page-routing-and-content-addressed-cache.md](adr/0002-per-page-routing-and-content-addressed-cache.md) | Why each PDF page is routed on its own between the text layer and OCR, with the reason recorded, and why outputs are addressed by the SHA-256 of the input | By hand |
 | [adr/0003-latex-first-for-arxiv.md](adr/0003-latex-first-for-arxiv.md) | Why arXiv papers are fetched as LaTeX source first with a PDF fallback, and the steps of the pandoc LaTeX converter | By hand |

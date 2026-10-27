@@ -73,6 +73,7 @@ uv run docingest ask "What limits T1 in transmons?" -c config/examples/lab-serve
 | Score runs against a question set and compare two runs | [run guide](docs/run-guide.md#score-runs-with-qa-bench), [packages/qa-bench/README.md](packages/qa-bench/README.md#the-scorer) |
 | Change the code and open a pull request | [packages/docingest/CONTRIBUTING.md](packages/docingest/CONTRIBUTING.md) |
 | Find any other document of docingest | [packages/docingest/docs/README.md](packages/docingest/docs/README.md) |
+| Read the RAG/multimodal audit and circuit extraction specification | [docs/rag-multimodal-upgrade.md](docs/rag-multimodal-upgrade.md) |
 
 ## Development
 

@@ -106,6 +106,14 @@ class FilesystemStore:
             json.dumps({"format": "circuits/1", "artifacts": artifacts}, indent=2),
         )
 
+    def save_raw_output(self, doc: StoredDocument, raw_output: object) -> None:
+        """Persist parser output separately from answerable Markdown."""
+        try:
+            content = json.dumps(raw_output, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"raw parser output is not JSON serializable: {error}") from error
+        _atomic_write(Path(doc.location) / "rag-anything.json", content)
+
     def circuits(self, doc: StoredDocument) -> list[dict[str, object]]:
         """Load persisted circuit readings, returning an empty list for older documents."""
         path = Path(doc.location) / "circuits.json"

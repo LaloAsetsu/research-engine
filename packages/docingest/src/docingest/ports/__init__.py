@@ -11,7 +11,7 @@ type, accepted as a pragmatic exception to "no third-party types in ports" (ADR 
 
 from ..domain.chunking import Chunk
 from .benchmark import BenchmarkSuite, CandidateSpec, Estimate, Sample, SuiteScore
-from .converters import Conversion, DocumentConverter, Segment
+from .converters import AsyncDocumentConverter, Conversion, DocumentConverter, Segment
 from .detection import TypeDetector
 from .embedding import Embedder, Vector
 from .images import ImageSource
@@ -24,6 +24,7 @@ from .sources import FetchedSource, SourceCrawler, SourceRecord
 from .store import DocumentStore, StoredDocument
 
 __all__ = [
+    "AsyncDocumentConverter",
     "BenchmarkSuite",
     "CandidateSpec",
     "Chunk",

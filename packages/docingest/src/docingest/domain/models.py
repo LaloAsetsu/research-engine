@@ -17,6 +17,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from .artifacts import LayoutArtifact
+
 
 class SourceKind(StrEnum):
     PDF = "pdf"
@@ -31,6 +33,7 @@ class PageMethod(StrEnum):
     BLANK = "blank"  # no text and no ink: an empty page, never sent to OCR
     VLM_OCR = "vlm_ocr"  # rasterized page -> vision-language model
     DOCLING = "docling"  # office/html converter
+    RAG_ANYTHING = "rag_anything"  # optional multimodal parser
     LATEX = "latex"  # LaTeX source -> Markdown (one segment per section)
     LATEX_PLAINTEXT = "latex_plaintext"  # fallback when the LaTeX converter fails
     PASSTHROUGH = "passthrough"
@@ -116,6 +119,8 @@ class DocumentManifest(BaseModel):
     max_pages: int | None = None  # run options, recorded for provenance
     ocr_all: bool = False
     pages: list[PageRecord]
+    artifacts: list[LayoutArtifact] = Field(default_factory=list)
+    raw_artifacts: list[str] = Field(default_factory=list)
     pipeline_version: str
     config_hash: str  # hash of pipeline version + policy + adapter fingerprints
     ocr_model: ModelRef | None = None

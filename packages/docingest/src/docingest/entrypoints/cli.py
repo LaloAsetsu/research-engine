@@ -174,6 +174,38 @@ def ingest(
         raise typer.Exit(1)
 
 
+@app.command("ingest-async")
+def ingest_async(
+    paths: Annotated[list[Path], typer.Argument(help="Files or directories")],
+    config: ConfigOpt = None,
+) -> None:
+    """Ingest with the configured asynchronous multimodal adapter."""
+    container = _container(config)
+    service = container.ingest
+
+    async def run() -> tuple[list[StoredDocument], list[tuple[str, str]]]:
+        semaphore = asyncio.Semaphore(container.cfg.rag_anything.max_concurrency)
+        stored: list[StoredDocument] = []
+        failures: list[tuple[str, str]] = []
+
+        async def one(path: Path) -> None:
+            async with semaphore:
+                try:
+                    stored.append(await service.ingest_async(path))
+                except Exception as error:
+                    failures.append((path.name, f"{type(error).__name__}: {error}"))
+
+        await asyncio.gather(*(one(path) for path in iter_inputs(paths)))
+        return stored, failures
+
+    stored, failures = asyncio.run(run())
+    if stored:
+        _summary(stored)
+    if failures:
+        _failures(failures)
+        raise typer.Exit(1)
+
+
 @app.command()
 def crawl(
     query: Annotated[str, typer.Argument(help='arXiv query, e.g. "cat:cs.CL AND ti:retrieval"')],

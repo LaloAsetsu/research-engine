@@ -11,6 +11,7 @@ from pathlib import Path
 
 from PIL.Image import Image
 
+from ..domain.artifacts import ArtifactKind, LayoutArtifact, extract_layout_artifacts
 from ..domain.circuits import extract_circuit_artifacts
 from ..domain.errors import UnsupportedInputError
 from ..domain.layout import PageLayout
@@ -46,6 +47,7 @@ from ..domain.text import (
     text_vocabulary,
 )
 from ..ports import (
+    AsyncDocumentConverter,
     DocumentConverter,
     DocumentStore,
     ImageSource,
@@ -57,7 +59,7 @@ from ..ports import (
 )
 from .ink import ink_ratio
 
-PIPELINE_VERSION = "0.4.2"
+PIPELINE_VERSION = "0.4.3"
 SIDECAR_SUFFIX = ".meta.json"  # optional SourceMetadata next to an input file
 
 Log = Callable[[str], None]
@@ -119,6 +121,7 @@ class IngestService:
         policy: RoutingPolicy,
         log: Log = print,
         guards: OcrGuards | None = None,
+        multimodal: AsyncDocumentConverter | None = None,
     ):
         self.detector = detector
         self.pdf = pdf
@@ -129,7 +132,107 @@ class IngestService:
         self.policy = policy
         self.log = log
         self.guards = guards or OcrGuards()
+        self.multimodal = multimodal
         self._ocr_checked = False
+
+    async def ingest_async(
+        self,
+        path: Path,
+        metadata: SourceMetadata | None = None,
+    ) -> StoredDocument:
+        """Ingest with the configured asynchronous multimodal converter.
+
+        The regular ``ingest`` method remains the compatibility path for the existing adapters.
+        This method does not call ``asyncio.run`` and is safe for API servers with a running loop.
+        """
+        converter = self.multimodal
+        if converter is None:
+            raise UnsupportedInputError(
+                "No asynchronous multimodal converter is configured; set "
+                "[adapters].multimodal = 'rag-anything'."
+            )
+        path = path.resolve()
+        kind, mime = self.detector.detect(path)
+        doc_id = sha256_file(path)
+        config_hash = self.config_hash(kind)
+        metadata = metadata or read_sidecar(path)
+        cached = self.store.lookup(doc_id, config_hash, max_pages=None, ocr_all=False)
+        if cached and (metadata is None or metadata == cached.manifest.metadata):
+            return cached
+        started = time.perf_counter()
+        conversion = await converter.convert_async(path)
+        records = [
+            PageRecord(
+                index=index,
+                method=conversion.method,
+                n_chars=len(segment.text),
+                seconds=0.0,
+                engine=conversion.engine,
+                title=segment.title,
+                warnings=list(segment.warnings),
+            )
+            for index, segment in enumerate(conversion.segments)
+        ]
+        manifest = DocumentManifest(
+            doc_id=doc_id,
+            source_path=str(path),
+            source_name=path.name,
+            source_kind=kind,
+            mime=mime,
+            size_bytes=path.stat().st_size,
+            n_pages=len(records),
+            source_pages=len(records),
+            pages=records,
+            pipeline_version=PIPELINE_VERSION,
+            config_hash=config_hash,
+            metadata=metadata,
+            title=(metadata.title if metadata and metadata.title else None) or path.stem,
+            total_seconds=round(time.perf_counter() - started, 2),
+            artifacts=self._conversion_artifacts(conversion.artifacts),
+            raw_artifacts=["rag-anything.json"] if conversion.raw_output is not None else [],
+        )
+        markdown = render_markdown(manifest, [segment.text for segment in conversion.segments])
+        manifest = manifest.model_copy(
+            update={"artifacts": self._conversion_artifacts(conversion.artifacts)}
+        )
+        stored = self.store.save(manifest, markdown)
+        persist_raw = getattr(self.store, "save_raw_output", None)
+        if conversion.raw_output is not None and callable(persist_raw):
+            persist_raw(stored, conversion.raw_output)
+        return stored
+
+    @staticmethod
+    def _conversion_artifacts(values: list[dict[str, object]]) -> list[LayoutArtifact]:
+        artifacts: list[LayoutArtifact] = []
+        valid = {kind.value for kind in ArtifactKind}
+        for index, value in enumerate(values, start=1):
+            raw_kind = value.get("kind")
+            kind = (
+                ArtifactKind(raw_kind)
+                if isinstance(raw_kind, str) and raw_kind in valid
+                else ArtifactKind.REGION
+            )
+            raw_page = value.get("page")
+            raw_confidence = value.get("confidence")
+            raw_metadata = value.get("metadata")
+            artifacts.append(
+                LayoutArtifact(
+                    id=str(value.get("id", f"artifact-{index}")),
+                    kind=kind,
+                    page=raw_page if isinstance(raw_page, int) else None,
+                    source=str(value.get("source", "rag-anything")),
+                    confidence=float(raw_confidence)
+                    if isinstance(raw_confidence, (int, float))
+                    else None,
+                    metadata={
+                        str(key): str(item)
+                        for key, item in raw_metadata.items()
+                    }
+                    if isinstance(raw_metadata, dict)
+                    else {},
+                )
+            )
+        return artifacts
 
     # ----------------------------------------------------------------- public
     def config_hash(self, kind: SourceKind, *, ocr_all: bool = False) -> str:
@@ -150,6 +253,8 @@ class IngestService:
                 ]
             case _:
                 parts = [self._converter(kind).fingerprint]
+        if self.multimodal is not None:
+            parts.append(getattr(self.multimodal, "fingerprint", "multimodal"))
         key = json.dumps([PIPELINE_VERSION, kind.value, ocr_all, *parts])
         return hashlib.sha256(key.encode()).hexdigest()[:12]
 
@@ -220,6 +325,7 @@ class IngestService:
                 " cache, the next run retries the converter"
             )
         markdown = render_markdown(manifest, texts)
+        manifest = manifest.model_copy(update={"artifacts": extract_layout_artifacts(markdown)})
         stored = self.store.save(manifest, markdown, degraded=degraded)
         save_circuits = getattr(self.store, "save_circuits", None)
         if callable(save_circuits):

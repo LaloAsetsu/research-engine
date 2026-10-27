@@ -14,6 +14,9 @@ images = "pillow"
 office = "docling"
 latex = "pandoc"
 text = "passthrough"
+# Optional asynchronous PDF/Office/image parsing via rag-anything + MinerU.
+# Select it with `docingest ingest-async`; the normal `ingest` command remains unchanged.
+# multimodal = "rag-anything"
 store = "filesystem"
 qa = "paperqa"
 crawler = "arxiv"
@@ -22,9 +25,17 @@ crawler = "arxiv"
 # described in config/README.md. With index set, `docingest ask` retrieves from the index
 # (embedder is then required; reranker "none" keeps the first stage's order); with "none"
 # it asks PaperQA2 to retrieve, as before. See config/examples/lab-server.toml.
-# embedder = "openai-compatible"
-# index = "local"
-# reranker = "vllm"
+# embedder = "none"
+# index = "none"
+# reranker = "none"
+
+[rag_anything]
+# parser = "mineru"
+# method = "auto"
+# output_dir = "/srv/research/rag-anything"
+# raw_output = true
+# max_raw_bytes = 268435456
+# max_concurrency = 1
 
 [routing]
 min_chars = 50                  # page with fewer embedded chars -> OCR

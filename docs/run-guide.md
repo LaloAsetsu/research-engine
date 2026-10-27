@@ -2,6 +2,65 @@
 
 This guide takes you from a clone of the repository to a cited answer from your own corpus, on a Linux machine with NVIDIA GPUs. It runs every step of the research engine: install, the three model servers, papers in, the chunk index, and `docingest ask`. Each step says what it prints and how long it took in the measurements.
 
+## Use downloaded documents from an explicit Linux path
+
+The paper corpus does not need to be inside the repository. Set the input, normalized-output,
+database, and configuration paths explicitly:
+
+```bash
+export RESEARCH_ENGINE_ROOT=/opt/research-engine
+export RESEARCH_ENGINE_INPUT=/srv/research/papers
+export RESEARCH_ENGINE_OUTPUT=/srv/research/normalized
+export RESEARCH_ENGINE_DB=/srv/research/api/research.sqlite3
+export RESEARCH_ENGINE_CONFIG=/srv/research/pipeline.toml
+
+mkdir -p "$RESEARCH_ENGINE_OUTPUT" "$(dirname "$RESEARCH_ENGINE_DB")"
+test -r "$RESEARCH_ENGINE_INPUT" || {
+  echo "Input directory is not readable: $RESEARCH_ENGINE_INPUT" >&2
+  exit 1
+}
+```
+
+In the external TOML configuration, set `raw_dir` and `output_dir` to these paths. The ingestion
+account needs read permission on the input directory and read/write permission on normalized
+output, index files, the API database, and model caches. Linux installations without Apple
+Silicon MLX should select `ocr = "openai-compatible"` and point it at a local vLLM/LM Studio or
+remote OCR service.
+
+```bash
+cd "$RESEARCH_ENGINE_ROOT"
+uv run docingest ingest "$RESEARCH_ENGINE_INPUT" \
+  --config "$RESEARCH_ENGINE_CONFIG" --index
+uv run docingest index build --config "$RESEARCH_ENGINE_CONFIG"
+uv run docingest ask "What phase factors are used in the circuit?" \
+  --config "$RESEARCH_ENGINE_CONFIG"
+```
+
+For containers, mount the input directory read-only and normalized output, database, index, and
+model-cache directories read-write; use the same paths in the mounted configuration.
+
+### Optional rag-anything ingestion
+
+The multimodal adapter is intentionally separate from the default page router:
+
+```bash
+uv sync --locked --extra rag-anything
+```
+
+In the external configuration, select `multimodal = "rag-anything"` and set `[rag_anything]
+output_dir` to persistent storage. Then run:
+
+```bash
+uv run docingest ingest-async "$RESEARCH_ENGINE_INPUT" \
+  --config "$RESEARCH_ENGINE_CONFIG"
+```
+
+This command supports PDF, Office, and image inputs, writes canonical Markdown and a manifest,
+and stores bounded raw parser blocks as `rag-anything.json` beside the result. The raw parser
+output is provenance/debug data and is not indexed independently. MinerU may require additional
+system tools or GPU runtime support; a missing parser dependency or failed external tool is
+reported as an ingestion failure rather than silently falling back to guessed text.
+
 The guide links to the reference for each part instead of repeating it:
 
 | For | Read |

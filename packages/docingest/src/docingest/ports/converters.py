@@ -33,6 +33,8 @@ class Conversion:
     # True when a fallback ran because of the environment (timeout, crash, missing tool),
     # not because the input is unconvertible: the result must not be cached as canonical.
     degraded: bool = False
+    artifacts: list[dict[str, object]] = field(default_factory=list)
+    raw_output: object | None = None
 
 
 @runtime_checkable
@@ -41,4 +43,13 @@ class DocumentConverter(Protocol):
 
     def convert(self, path: Path) -> Conversion:
         """Raise ``ConversionError`` when the document cannot be converted."""
+        ...
+
+
+@runtime_checkable
+class AsyncDocumentConverter(Protocol):
+    fingerprint: str
+
+    async def convert_async(self, path: Path) -> Conversion:
+        """Convert without blocking the caller's event loop."""
         ...

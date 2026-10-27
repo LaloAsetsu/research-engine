@@ -25,6 +25,7 @@ Related reading: [package map](../README.md), [ports](../ports/README.md), [appl
 
 | Module | Contains | Used by |
 |---|---|---|
+| `artifacts.py` | `ArtifactKind`, `LayoutArtifact`, `extract_layout_artifacts` for parser-neutral equations, tables, circuits, figures and regions | `IngestService`, optional multimodal adapters, manifest consumers |
 | `models.py` | `SourceKind`, `PageMethod`, `PageSignals`, `PageProbe`, `ModelRef`, `SourceMetadata`, `PageRecord`, `DocumentManifest` (pydantic models and `StrEnum`s) | every layer |
 | `routing.py` | `RoutingPolicy` (thresholds, the `[routing]` config section), `decide()`, and the blank-page rule (`could_be_blank`, `is_blank`, `blank_probe`) | `IngestService` for every PDF page, `config.AppConfig.routing` |
 | `ocr_guards.py` | `OcrGuards` (thresholds), `OutputProblem`, `find_problem`, `is_looping`, `retry_max_tokens`, `duplicate_pages` | the OCR adapters' retry ladder, `IngestService` |
@@ -66,7 +67,7 @@ flowchart LR
 
 ## models.py
 
-`models.py` defines the canonical intermediate representation. Whatever the input, the pipeline emits the same two artifacts: `document.md` (normalized Markdown with page markers) and `manifest.json` (a serialized `DocumentManifest`). Downstream consumers only ever see these.
+`models.py` defines the canonical intermediate representation. Whatever the input, the pipeline emits the same two artifacts: `document.md` (normalized Markdown with page markers) and `manifest.json` (a serialized `DocumentManifest`). The manifest's optional `artifacts` list carries parser-neutral layout records, while `raw_artifacts` names separately persisted parser output; downstream consumers can use the layout records without importing a multimodal parser.
 
 ```mermaid
 classDiagram

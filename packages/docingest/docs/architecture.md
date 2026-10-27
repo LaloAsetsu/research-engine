@@ -34,7 +34,7 @@ It is a design document. For the exact API of a package, follow the links to the
 
 ## 1. Design goals
 
-docingest turns research documents into one canonical representation: a Markdown file with page markers (`document.md`) plus a JSON manifest (`manifest.json`) with the provenance of every page. Accepted inputs are born-digital and scanned PDFs, images, office and HTML files, LaTeX sources and arXiv source archives, and Markdown or plain text. Downstream consumers (PaperQA2, the `ask` command, a vector database, an agent) only ever read those two files.
+docingest turns research documents into one canonical representation: a Markdown file with page markers (`document.md`) plus a JSON manifest (`manifest.json`) with the provenance of every page. Accepted inputs are born-digital and scanned PDFs, images, office and HTML files, LaTeX sources and arXiv source archives, and Markdown or plain text. Downstream consumers (PaperQA2, the `ask` command, a vector database, an agent) read those two files plus the optional layout `artifacts` list in the manifest. Artifacts identify equations, tables, circuits and other regions without coupling the core to a particular multimodal parser.
 
 The architecture follows from four goals:
 

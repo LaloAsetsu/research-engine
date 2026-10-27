@@ -48,6 +48,24 @@ Each part of the repository also has its own reference:
 
 ## 1. Environment setup
 
+### Linux document paths
+
+Contributors should test ingestion with an explicit directory of downloaded documents, not with
+paths that only exist on a laptop or inside the repository. Use temporary or mounted paths such
+as `/srv/research/papers` and set `output_dir`/`raw_dir` in a configuration outside the checkout.
+Tests must use fixtures or temporary directories and must not require a contributor's private
+paper corpus.
+
+Linux does not provide the Apple Silicon MLX OCR adapter. Use the `openai-compatible` OCR adapter
+against a local or remote model server, or mark model-dependent tests as opt-in. Document the
+model endpoint, pinned revision, cache path, and required filesystem permissions in any new
+workflow.
+
+The optional `rag-anything` extra is exercised through the asynchronous
+`docingest ingest-async` command. Keep its parser output behind the `AsyncDocumentConverter`
+port, preserve raw blocks separately from answerable Markdown, and test missing dependencies and
+parser failures explicitly. Do not import rag-anything from domain or application modules.
+
 ### Requirements
 
 | Requirement | Where it is defined | Value |

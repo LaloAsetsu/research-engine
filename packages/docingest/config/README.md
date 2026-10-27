@@ -159,6 +159,7 @@ Selects the implementation plugged into each port. A value is either a built-in 
 | `office` | string | `"docling"` | `docling` | `DocumentConverter` | the first DOCX, PPTX, XLSX or HTML input |
 | `latex` | string | `"pandoc"` | `pandoc` | `DocumentConverter` | the first LaTeX input |
 | `text` | string | `"passthrough"` | `passthrough` | `DocumentConverter` | the first Markdown or text input |
+| `multimodal` | string | `"none"` | `none`, `rag-anything` | `AsyncDocumentConverter` | `docingest ingest-async` |
 | `store` | string | `"filesystem"` | `filesystem` | `DocumentStore` | the ingestion service or `ask` is first used |
 | `qa` | string | `"paperqa"` | `paperqa` | `QuestionAnswerer` | `docingest ask` |
 | `crawler` | string | `"arxiv"` | `arxiv` | `SourceCrawler` | `docingest crawl` |
@@ -167,6 +168,22 @@ Selects the implementation plugged into each port. A value is either a built-in 
 | `reranker` | string | `"none"` | `none` (plugin `docingest-index`: `vllm`) | `Reranker` | `docingest ask` with an index; `none` keeps the first stage's order |
 
 The three retrieval ports have only the `none` built-in, which refuses to work (`NotConfiguredError`). **`index` decides how `ask` answers:** with `index = "none"` (the default) `ask` behaves exactly as before, PaperQA2 retrieving its own evidence; with a real index it retrieves from the index and needs an `embedder` too (an index without one is an error that names the key). Selecting only an `embedder` or a `reranker` changes nothing for `ask`. The `docingest-index` package brings the real adapters (`openai-compatible`, `local`, `vllm`) and reads its own tables, [`[index]`, `[embedder]` and `[reranker]`](#index-embedder-and-reranker-docingest-index).
+
+Set `multimodal = "rag-anything"` only after installing the optional extra. It is used by the
+asynchronous `ingest-async` command for PDF, Office, and image inputs; the regular `ingest`
+command continues to use the page router and synchronous converters.
+
+### `[rag_anything]`
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `parser` | string | `"mineru"` | rag-anything parser name. |
+| `method` | string | `"auto"` | Parser method, such as `auto`, `txt`, or `ocr`. |
+| `output_dir` | path | `"data/rag-anything"` | Parser intermediates; use persistent Linux storage. |
+| `raw_output` | bool | `true` | Retain parser blocks in `rag-anything.json` beside the normalized result. |
+| `max_raw_bytes` | int | `268435456` | Maximum serialized raw parser output per document. |
+| `lang` | string or null | `null` | Optional parser language hint. |
+| `max_concurrency` | int | `1` | Maximum concurrent async conversions (`1` to `16`). |
 
 ### `[routing]`
 

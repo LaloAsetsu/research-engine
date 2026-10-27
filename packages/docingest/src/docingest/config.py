@@ -33,6 +33,7 @@ class AdapterSelection(BaseModel):
     office: str = "docling"
     latex: str = "pandoc"
     text: str = "passthrough"
+    multimodal: str = "none"
     store: str = "filesystem"
     qa: str = "paperqa"
     crawler: str = "arxiv"
@@ -118,6 +119,20 @@ class LatexConfig(BaseModel):
     fallback: bool = True  # pylatexenc plain-text fallback when pandoc fails
 
 
+class RagAnythingConfig(BaseModel):
+    """Optional multimodal parser configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parser: str = "mineru"
+    method: str = "auto"
+    output_dir: str = "data/rag-anything"
+    raw_output: bool = True
+    max_raw_bytes: int = Field(default=256 * 1024 * 1024, ge=1)
+    lang: str | None = None
+    max_concurrency: int = Field(default=1, ge=1, le=16)
+
+
 class ArxivConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -168,6 +183,7 @@ class AppConfig(BaseModel):
     ocr: OcrConfig = OcrConfig()
     qa: QaConfig = QaConfig()
     latex: LatexConfig = LatexConfig()
+    rag_anything: RagAnythingConfig = RagAnythingConfig()
     arxiv: ArxivConfig = ArxivConfig()
 
 
