@@ -58,14 +58,14 @@ With `web_dir` set, the service also answers every path outside `/api` with the 
 
 | Request | Answer |
 |---|---|
-| A path that names a file in the folder | That file, with its type, `ETag` and `Last-Modified` (`304` for a request that already holds it). Files under `/assets/` carry a content hash in their names and are cached for a year; everything else (`index.html`, `theme-init.js`, `version.json`) must be revalidated. |
-| Any other path without an extension (`/login`, `/sets/x`) | `index.html`: these are routes of the single-page app. |
-| A path with an extension and no such file (`/assets/app-old.js`) | `404` problem. A page from an older release asking for a script that no longer exists must fail, not receive HTML. |
+| A path that names a file in the folder | That file, with its type, `ETag` and `Last-Modified` (`304` for a request that already holds it). Files under `/assets/` carry a content hash in their names and are cached for a year; everything else (`index.html`, `theme-init.js`, `version.json`) must be revalidated. The file served decides, not the path asked for: `index.html` reached through `/assets/` or `/assets/%2e%2e/index.html` is revalidated too. |
+| Any other path (`/login`, `/sets/x`, `/sets/demo/v1/items/q1.2`) | `index.html`: these are routes of the single-page app, whatever the last segment looks like. An item id may hold dots, and reloading its page must show the app. |
+| A path under `/assets/` with no such file (`/assets/app-old.js`) | `404` problem. A page from an older release asking for a script that no longer exists must fail, not receive HTML. A missing file outside `/assets/` (`/missing.css`) is a route of the app and gets `index.html`. |
 | Anything under `/api` that no route matched | `404` problem, never the home page. |
 | A wrong method on a route of the API (`DELETE /api/v1/health`) | `405` with `Allow`, the same answer as without a web app: the web app is the router's fallback and sees only paths no route matched. |
 | A method other than `GET` and `HEAD` outside `/api` | `405` problem with `Allow`. |
 | The folder or its `index.html` is missing | `503` problem: "The web app is not installed on this server." |
-| A path that leaves the folder (`..`, a backslash, a NUL, a symbolic link that points out) | `404` problem. |
+| A path that leaves the folder (`..`, a backslash, a NUL, a symbolic link that points out), or a segment longer than 255 bytes | `404` problem. |
 
 Every answer of the web app carries `Content-Security-Policy` (`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`), `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin`. Only styles may be inline (the UI libraries set style attributes); scripts and connections are limited to the origin itself.
 

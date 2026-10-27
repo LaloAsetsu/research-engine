@@ -9,12 +9,16 @@ Rules:
 
 * only ``GET`` and ``HEAD`` (``405`` with ``Allow`` otherwise);
 * a path under ``/api`` that no route matched stays a ``404`` problem, never the home page;
-* a path that names a file is that file; a missing file with an extension is a ``404`` (a page
+* a path that names a file is that file; a missing file under ``assets/`` is a ``404`` (a page
   from an old release asking for a script that no longer exists must fail, not get HTML);
-* any other path is a route of the single-page app and gets ``index.html``;
-* a path that leaves the folder (``..``, a symlink pointing out, a NUL) is a ``404``;
+* any other path is a route of the single-page app and gets ``index.html``, whatever its last
+  segment looks like: an item id may hold dots (``/sets/demo/v1/items/q1.2``) and reloading that
+  page must show the app;
+* a path that leaves the folder (``..``, a symlink pointing out, a NUL) or that the system cannot
+  look up (a segment over 255 bytes) is a ``404``;
 * every answer carries a strict Content-Security-Policy and ``nosniff``; hashed files under
-  ``/assets/`` are cached for a year, everything else must be revalidated.
+  ``assets/`` are cached for a year, everything else, ``index.html`` included, must be revalidated
+  (the file served decides, not the path asked for).
 """
 
 from __future__ import annotations
@@ -33,7 +37,7 @@ from .problems import problem
 ALLOWED_METHODS = ("GET", "HEAD")
 INDEX = "index.html"
 API_PREFIX = "/api"
-ASSET_PREFIX = "/assets/"
+ASSET_DIR = "assets"
 
 # Scripts and connections only from this origin. KaTeX and the UI libraries set style attributes,
 # which `style-src 'self'` would block, hence 'unsafe-inline' for styles only.
@@ -145,7 +149,8 @@ class WebApp:
         target = self._file_for(root, path)
         if target is None:
             return problem(request, status=404, slug=NotFoundError.slug, detail="No such file.")
-        return _file_answer(request, target, immutable=path.startswith(ASSET_PREFIX))
+        immutable = target.is_relative_to(self._assets(root))
+        return _file_answer(request, target, immutable=immutable)
 
     def _root(self) -> Path | None:
         """The folder with its links resolved, if it holds a home page."""
@@ -156,19 +161,30 @@ class WebApp:
         return root if (root / INDEX).is_file() else None
 
     @staticmethod
-    def _file_for(root: Path, path: str) -> Path | None:
+    def _assets(root: Path) -> Path:
+        """The assets folder with its links resolved, like ``root``, so the two compare fairly."""
+        try:
+            return (root / ASSET_DIR).resolve()
+        except (OSError, RuntimeError):
+            return root / ASSET_DIR
+
+    @classmethod
+    def _file_for(cls, root: Path, path: str) -> Path | None:
         if "\x00" in path or "\\" in path:
             return None
         relative = path.lstrip("/")
-        if relative:
-            try:
-                candidate = (root / relative).resolve()
-            except (OSError, RuntimeError, ValueError):  # a symlink loop is RuntimeError on 3.12
-                return None
+        if not relative:
+            return root / INDEX
+        try:
+            candidate = (root / relative).resolve()
             if not candidate.is_relative_to(root):
                 return None
             if candidate.is_file():
                 return candidate
-            if "." in candidate.name:  # looks like a file, and there is none
-                return None
-        return root / INDEX
+            assets = cls._assets(root)
+            inside = candidate != assets and candidate.is_relative_to(assets)
+            gone = inside and not candidate.is_dir()
+        except (OSError, RuntimeError, ValueError):
+            # a symlink loop is RuntimeError on 3.12; a segment over 255 bytes is OSError
+            return None
+        return None if gone else root / INDEX  # a built file that is gone is no route of the app

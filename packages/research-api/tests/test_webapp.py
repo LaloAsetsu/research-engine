@@ -68,6 +68,26 @@ def test_a_route_of_the_single_page_app_gets_the_home_page(web: TestClient) -> N
         assert "<title>one</title>" in done.text
 
 
+def test_a_deep_link_whose_last_segment_has_a_dot_gets_the_home_page(web: TestClient) -> None:
+    """An item id may hold dots (``ITEM_ID_PATTERN``); reloading its page must not be a 404."""
+    paths = (
+        "/sets/demo/v1/items/q1.2",
+        "/sets/demo/v1/items/a.json",
+        "/sets/demo/v1/items/EX-001.v2.css",
+        "/sets/demo/v1/items/x.js",
+        "/missing.css",
+        "/some.dir/page.html",
+    )
+    for path in paths:
+        done = web.get(path)
+        assert done.status_code == 200, path
+        assert "<title>one</title>" in done.text, path
+        assert done.headers["content-type"] == "text/html; charset=utf-8", path
+        assert done.headers["content-security-policy"] == CSP, path
+    assert web.head("/sets/demo/v1/items/q1.2").status_code == 200
+    assert web.post("/sets/demo/v1/items/q1.2").status_code == 405
+
+
 def test_files_have_the_right_type_and_hashed_ones_are_cached_for_good(web: TestClient) -> None:
     js = web.get("/assets/app-3f2a9c.js")
     assert js.headers["content-type"] == "text/javascript; charset=utf-8"
@@ -78,14 +98,63 @@ def test_files_have_the_right_type_and_hashed_ones_are_cached_for_good(web: Test
     assert web.get("/version.json").json() == {"commit": "abc"}
 
 
-def test_a_missing_file_is_not_answered_with_the_home_page(web: TestClient) -> None:
-    for path in ("/assets/app-old.js", "/missing.css", "/assets/"):
+def test_a_missing_built_file_is_not_answered_with_the_home_page(web: TestClient) -> None:
+    for path in ("/assets/app-old.js", "/assets/app-old.css", "/assets/old", "/assets/a/b.js"):
         done = web.get(path)
-        if path == "/assets/":
-            assert done.status_code == 200  # a folder path is a route of the app
-            continue
         assert done.status_code == 404, path
+        assert done.headers["content-type"] == PROBLEM, path
+        assert "text/html" not in done.headers["content-type"]
+    for path in ("/assets", "/assets/"):
+        assert web.get(path).status_code == 200, path  # the folder itself is a route of the app
+
+
+def test_the_index_is_never_cached_for_good_whatever_path_reached_it(
+    build: Path, seed: list[SeedUser]
+) -> None:
+    """The immutable flag follows the file served, not the path asked for."""
+    (build / "assets" / "sub").mkdir()
+    app = app_serving(build, seed)
+    for path in ("/assets", "/assets/", "/assets/sub", "/assets/../index.html", "/assets/sub/.."):
+        sent = call(app, {**http_scope(headers=HOST), "path": path})
+        start = next(m for m in sent if m["type"] == "http.response.start")
+        headers = {k.decode(): v.decode() for k, v in start["headers"]}
+        assert start["status"] == 200, path
+        assert headers["cache-control"] == REVALIDATE, path
+        assert headers["content-type"] == "text/html; charset=utf-8", path
+
+
+def test_a_segment_too_long_for_the_file_system_is_a_404(web: TestClient) -> None:
+    for path in ("/" + "a" * 300, "/assets/" + "a" * 300):
+        done = web.get(path)
+        assert done.status_code == 404, path[:20]
         assert done.headers["content-type"] == PROBLEM
+
+
+def test_an_assets_folder_that_is_a_link_still_answers_404_for_a_missing_file(
+    build: Path, seed: list[SeedUser], client_for: ClientFor
+) -> None:
+    (build / "assets").rename(build / "static")
+    (build / "assets").symlink_to("static")
+    web = client_for(app_serving(build, seed))
+    hashed = web.get("/assets/app-3f2a9c.js")
+    assert hashed.status_code == 200
+    assert hashed.headers["cache-control"] == IMMUTABLE
+    missing = web.get("/assets/app-old.js")
+    assert missing.status_code == 404
+    assert missing.headers["content-type"] == PROBLEM
+    assert web.get("/assets/").status_code == 200
+
+
+def test_a_path_that_only_looks_like_the_assets_folder_is_a_route(web: TestClient) -> None:
+    for path in ("/sets/assets/x.js", "/assets.v2/app.js", "/assetsx/app.js"):
+        done = web.get(path)
+        assert done.status_code == 200, path
+        assert "<title>one</title>" in done.text, path
+
+
+def test_a_dotted_path_that_names_a_real_file_is_still_that_file(web: TestClient) -> None:
+    assert web.get("/version.json").json() == {"commit": "abc"}
+    assert web.get("/assets/app-3f2a9c.css").headers["content-type"].startswith("text/css")
 
 
 def test_the_api_keeps_its_own_routes_and_its_own_errors(web: TestClient) -> None:
