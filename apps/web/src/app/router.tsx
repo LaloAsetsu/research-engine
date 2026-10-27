@@ -29,6 +29,10 @@ export function appRoutes(queryClient: QueryClient): RouteObject[] {
             { index: true, element: <Navigate to="/ask" replace /> },
             { path: "ask", lazy: () => import("@/features/ask/AskPage") },
             { path: "benchmarks", lazy: () => import("@/features/benchmarks/BenchmarksPage") },
+            {
+              path: "benchmarks/jobs/:jobId",
+              lazy: () => import("@/features/benchmarks/JobPage"),
+            },
             { path: "sets", lazy: () => import("@/features/qsets/SetsPage") },
             { path: "sets/:name/:version", lazy: () => import("@/features/qsets/VersionPage") },
             {

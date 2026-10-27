@@ -272,13 +272,12 @@ describe("the layout", () => {
     expect(document.title).toBe("Question sets | Research engine");
   });
 
-  it("offers a skip link and shows the screens as coming soon", async () => {
+  it("offers a skip link", async () => {
     renderApp("/benchmarks");
     expect(await screen.findByRole("link", { name: "Skip to content" })).toHaveAttribute(
       "href",
       "#main",
     );
-    expect(screen.getByText("Coming soon")).toBeInTheDocument();
   });
 
   it("shows a not-found screen inside the layout", async () => {
