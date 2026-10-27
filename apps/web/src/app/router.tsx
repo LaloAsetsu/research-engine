@@ -33,6 +33,10 @@ export function appRoutes(queryClient: QueryClient): RouteObject[] {
               path: "benchmarks/jobs/:jobId",
               lazy: () => import("@/features/benchmarks/JobPage"),
             },
+            {
+              path: "benchmarks/compare",
+              lazy: () => import("@/features/benchmarks/ComparePage"),
+            },
             { path: "sets", lazy: () => import("@/features/qsets/SetsPage") },
             { path: "sets/:name/:version", lazy: () => import("@/features/qsets/VersionPage") },
             {
