@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import LOOPBACK, call, http_scope
+from helpers import LOOPBACK, call, http_scope, sign_in_as_member
 from starlette.websockets import WebSocketDisconnect
 
 from research_api.bootstrap import Settings, SettingsError, build_container, load_settings
@@ -187,21 +187,43 @@ def test_a_wrong_method_on_an_api_route_stays_a_405_with_the_web_app(
         assert served.headers["content-type"] == PROBLEM
 
 
+@pytest.mark.parametrize("signed_in", [False, True], ids=["anonymous", "signed in"])
 def test_every_route_of_the_contract_answers_the_same_with_and_without_the_web_app(
-    web: TestClient, client: TestClient, build: Path, seed: list[SeedUser]
+    signed_in: bool,
+    build: Path,
+    seed: list[SeedUser],
+    client_for: ClientFor,
 ) -> None:
-    """Sets, jobs, runs, scores and models included: the page is only for what no route matched."""
+    """Sets, jobs, runs, scores and models included: the page is only for what no route matched.
+
+    Signed in (with the CSRF header on every request), the routes get past the 401 and answer
+    their own 404, 405 or 422, which must also be the same with the web app mounted.
+    """
+    plain = client_for(
+        build_app(build_container(Settings.defaults(), fake=True, seed=seed, cheap_hashing=True))
+    )
+    served = client_for(app_serving(build, seed))
     paths = app_serving(build, seed).openapi()["paths"]
     assert any(p.startswith("/api/v1/sets") for p in paths)
     assert any(p.startswith("/api/v1/jobs") for p in paths)
+    answers: list[int] = []
     for template in paths:
         path = "/".join("x" if part.startswith("{") else part for part in template.split("/"))
+        if signed_in:  # again for each path: logout, for one, ends the session
+            sign_in_as_member(plain)
+            sign_in_as_member(served)
         for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
-            plain = client.request(method, path)
-            served = web.request(method, path)
-            assert served.status_code == plain.status_code, (method, template)
-            assert served.headers.get("allow") == plain.headers.get("allow"), (method, template)
-            assert "text/html" not in served.headers.get("content-type", ""), (method, template)
+            before = plain.request(method, path)
+            after = served.request(method, path)
+            assert after.status_code == before.status_code, (method, template)
+            assert after.headers.get("allow") == before.headers.get("allow"), (method, template)
+            content_type = after.headers.get("content-type")
+            assert content_type == before.headers.get("content-type"), (method, template)
+            answers.append(after.status_code)
+    if signed_in:
+        # past the sign-in check, so the walk also compares the routes' own 404, 405 and 422
+        assert 401 not in answers
+        assert {404, 405, 422} <= set(answers)
 
 
 def test_a_websocket_is_closed_not_answered_with_the_page(web: TestClient) -> None:
