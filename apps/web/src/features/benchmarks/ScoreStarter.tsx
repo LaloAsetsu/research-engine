@@ -34,7 +34,7 @@ export function ScoreStarter({
   const [noiseA, setNoiseA] = useState("");
   const [noiseB, setNoiseB] = useState("");
 
-  if (runsQuery.isError) {
+  if (runsQuery.isError && !runsQuery.data) {
     return <ProblemAlert error={runsQuery.error} onRetry={() => void runsQuery.refetch()} />;
   }
   if (!runsQuery.data) return <Skeleton className="h-32 w-full" />;

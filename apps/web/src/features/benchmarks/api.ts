@@ -397,9 +397,15 @@ export function useStartScore() {
   });
 }
 
-/** The jobs that made these runs, by run: what ended last tells whether a score is still current. */
+/**
+ * The jobs that made these runs, by run: what ended last tells whether a score is still current.
+ * A job that settles while it is watched changes what the run list and the scores say, so both
+ * are read again at once instead of at their own pace.
+ */
 export function useRunJobs(runs: readonly RunSummary[]) {
-  return useQueries({
+  const queryClient = useQueryClient();
+  const settledBefore = useRef(new Map<string, boolean>());
+  const result = useQueries({
     queries: runs.map((run) => ({
       ...$api.queryOptions("get", JOB, { params: { path: { job_id: run.job_id ?? "" } } }),
       enabled: run.job_id !== undefined && run.job_id !== null,
@@ -412,4 +418,18 @@ export function useRunJobs(runs: readonly RunSummary[]) {
       jobs: results.map((result) => result.data ?? null),
     }),
   });
+  const { jobs } = result;
+  useEffect(() => {
+    let settledNow = false;
+    for (const job of jobs) {
+      if (!job) continue;
+      if (settledBefore.current.get(job.id) === false && job.settled) settledNow = true;
+      settledBefore.current.set(job.id, job.settled);
+    }
+    if (settledNow) {
+      void queryClient.invalidateQueries({ queryKey: keyOf(RUNS) });
+      void queryClient.invalidateQueries({ queryKey: keyOf(SCORES) });
+    }
+  }, [jobs, queryClient]);
+  return result;
 }

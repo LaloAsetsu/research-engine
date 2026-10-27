@@ -451,7 +451,8 @@
       "older": "Esta puntuación se hizo el {{when}}, antes de que una de sus corridas cambiara por última vez. No contiene las respuestas añadidas después.",
       "olderOpen": "Abrirla de todos modos",
       "olderAgain": "Puntuar las corridas de nuevo",
-      "olderExists": "Existe una puntuación de estas corridas del {{when}}, pero se hizo antes de que una de sus corridas cambiara por última vez, así que no contiene las respuestas añadidas después."
+      "olderExists": "Existe una puntuación de estas corridas del {{when}}, pero se hizo antes de que una de sus corridas cambiara por última vez, así que no contiene las respuestas añadidas después.",
+      "cannotCheck": "Se muestra esta puntuación, pero no se pudo comprobar si está al día: no se pudo leer la lista de corridas."
     },
     "results": {
       "choose": {

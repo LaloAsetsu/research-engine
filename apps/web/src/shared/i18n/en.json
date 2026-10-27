@@ -451,7 +451,8 @@
       "older": "This score was made on {{when}}, before a run in it last changed. It does not hold the answers added since.",
       "olderOpen": "Open it anyway",
       "olderAgain": "Score the runs again",
-      "olderExists": "A score of these runs from {{when}} exists, but it was made before a run in it last changed, so it does not hold the answers added since."
+      "olderExists": "A score of these runs from {{when}} exists, but it was made before a run in it last changed, so it does not hold the answers added since.",
+      "cannotCheck": "This score is shown, but it could not be checked whether it is current: the list of runs could not be read."
     },
     "results": {
       "choose": {

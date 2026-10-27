@@ -93,7 +93,8 @@ function useChangedAt(runs: readonly string[]) {
   return {
     changedAt,
     pending: list.isPending || jobs.pending,
-    error: list.error,
+    // a failed background read keeps the list it had: only a list never read is a problem
+    error: list.data ? null : list.error,
     retry: () => void list.refetch(),
   };
 }
@@ -127,7 +128,7 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
   const noJob = job.isError && isApiError(job.error, 404);
   const ready = job.data?.state === "done" || noJob;
   const score = useScore(scoreId, ready);
-  const { changedAt } = useChangedAt(runs);
+  const { changedAt, error: checkError } = useChangedAt(runs);
 
   if (job.isError && !noJob) {
     return <ProblemAlert error={job.error} onRetry={() => void job.refetch()} />;
@@ -164,6 +165,12 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
   return (
     <>
       {older ? <OlderScoreNotice runs={runs} created={score.data.summary.created} /> : null}
+      {checkError ? (
+        <Alert role="status">
+          <CircleAlert aria-hidden="true" />
+          <AlertDescription>{t("cannotCheck")}</AlertDescription>
+        </Alert>
+      ) : null}
       <Results score={score.data} runIds={runs} />
     </>
   );
@@ -176,7 +183,7 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
 function ScoreFinder({ runs }: { runs: readonly string[] }) {
   const scores = useScores();
   const { changedAt, pending, error, retry } = useChangedAt(runs);
-  if (scores.isError) {
+  if (scores.isError && !scores.data) {
     return <ProblemAlert error={scores.error} onRetry={() => void scores.refetch()} />;
   }
   // Without the run list it cannot be told whether a score holds the latest answers of the runs.

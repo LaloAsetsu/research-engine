@@ -697,6 +697,72 @@ describe("finding or making the score", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens the score at once when a watched job settles, without waiting for the run list", async () => {
+    polling.idleMs = 60_000;
+    const job = CAPTURE.jobs.find((entry) => entry.run?.run_id === RUNS.harness)!;
+    let jobReads = 0;
+    server.use(
+      http.get("*/api/v1/runs", () => {
+        // the run list says the run is going until the job has been read as settled
+        return HttpResponse.json(
+          CAPTURE.runs.map((run) =>
+            run.run_id === RUNS.harness && jobReads < 2
+              ? { ...run, ended: null, state: "running" }
+              : run,
+          ),
+        );
+      }),
+      http.get(`*/api/v1/jobs/${job.id}`, () => {
+        jobReads += 1;
+        return HttpResponse.json(
+          jobReads < 2
+            ? { ...job, state: "running", settled: false, ended_at: null }
+            : { ...job, ended_at: "2020-01-01T00:00:00Z" },
+        );
+      }),
+    );
+    const { app } = await open(address([RUNS.base, RUNS.harness], null));
+    await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });
+    expect(app.router.state.location.search).toContain(`score=${SCORE}`);
+  });
+
+  it("keeps the starter and its choices when a background read of the run list fails", async () => {
+    let fail = false;
+    let reads = 0;
+    server.use(
+      http.get("*/api/v1/runs", () => {
+        reads += 1;
+        return fail
+          ? problem(403, "The runs are closed to you.")
+          : HttpResponse.json(
+              CAPTURE.runs.map((run) =>
+                run.run_id === RUNS.harness ? { ...run, ended: "2026-10-27T16:00:00+00:00" } : run,
+              ),
+            );
+      }),
+    );
+    const { user } = await open(address(pair, null));
+    const section = await screen.findByRole("region", { name: "Score these runs" });
+    await user.click(within(section).getByRole("button", { name: "Swap base and variant" }));
+    expect(within(section).getByText("Base").nextSibling).toHaveTextContent(RUNS.oracle);
+    fail = true;
+    const before = reads;
+    await waitFor(() => expect(reads).toBeGreaterThanOrEqual(before + 2));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(section).getByText("Base").nextSibling).toHaveTextContent(RUNS.oracle);
+  });
+
+  it("says when it could not be checked that a score from its address is current", async () => {
+    server.use(http.get("*/api/v1/runs", () => problem(403, "The runs are closed to you.")));
+    await open(address([RUNS.base, RUNS.harness]));
+    expect(
+      await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/it could not be checked whether it is current/).closest('[role="status"]'),
+    ).toHaveTextContent("it could not be checked whether it is current");
+  });
+
   it("opens the score when the runs have not changed since it was made", async () => {
     const { app } = await open(address([RUNS.base, RUNS.harness], null));
     await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });
