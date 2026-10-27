@@ -4,6 +4,7 @@ import { createAuthMock, type AuthMock } from "./auth-mock";
 import { circuitHandlers } from "./circuits-api";
 import { askHandlers } from "./ask-api";
 import { setsHandlers } from "./sets-api";
+import { benchHandlers } from "./benchmarks-api";
 
 export let authMock: AuthMock = createAuthMock();
 
@@ -42,4 +43,5 @@ export const server = setupServer(
       : HttpResponse.json(answer.body, { status: answer.status, headers });
   }),
   ...askHandlers,
+  ...benchHandlers,
 );
