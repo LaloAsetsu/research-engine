@@ -304,6 +304,17 @@ test.describe("B3 and B4: a run resumed after it was scored", () => {
     // resume it to its end, and ask for the results
     await page.goto(`/benchmarks/jobs/${job.id}`);
     await page.getByRole("button", { name: "Resume" }).click();
+    await expect(status(page)).toContainText(/Queued|Running/);
+
+    // while it is being resumed the partial score is not offered as the results
+    await page.goto(`/benchmarks/compare?runs=${runId}`);
+    await expect(page.getByText(/is still going/)).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("score")).toBeNull();
+    // and the score's own address says it is older
+    await page.goto(`/benchmarks/compare?runs=${runId}&score=${partial}`);
+    await expect(page.getByRole("status").filter({ hasText: "This score is older" })).toBeVisible();
+
+    await page.goto(`/benchmarks/jobs/${job.id}`);
     await expect(status(page)).toContainText("Done. 24 of 24 answers", { timeout: 90_000 });
     await page.getByRole("link", { name: "See results" }).click();
     const starter = page.getByRole("region", { name: "Score these runs" });

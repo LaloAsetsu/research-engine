@@ -90,7 +90,12 @@ function useChangedAt(runs: readonly string[]) {
   mine.forEach((run: RunSummary, index) => {
     changedAt[run.run_id] = runChangedAt(run, jobs.jobs[index]);
   });
-  return { changedAt, pending: list.isPending || jobs.pending, error: list.error };
+  return {
+    changedAt,
+    pending: list.isPending || jobs.pending,
+    error: list.error,
+    retry: () => void list.refetch(),
+  };
 }
 
 /** A score made before one of its runs last changed: say so, and offer to score the runs again. */
@@ -170,13 +175,14 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
  */
 function ScoreFinder({ runs }: { runs: readonly string[] }) {
   const scores = useScores();
-  const { changedAt, pending, error } = useChangedAt(runs);
+  const { changedAt, pending, error, retry } = useChangedAt(runs);
   if (scores.isError) {
     return <ProblemAlert error={scores.error} onRetry={() => void scores.refetch()} />;
   }
+  // Without the run list it cannot be told whether a score holds the latest answers of the runs.
+  if (error) return <ProblemAlert error={error} onRetry={retry} />;
   if (!scores.data || pending) return <Skeleton className="h-24 w-full" />;
-  // Without the run list nothing is known about the runs: the starter says what is wrong.
-  const { current, stale } = findScore(scores.data, runs, error ? {} : changedAt);
+  const { current, stale } = findScore(scores.data, runs, changedAt);
   if (current) return <Navigate replace to={compareAddress(runs, current.score_id)} />;
   return <ScoreStarter runs={runs} older={stale} />;
 }

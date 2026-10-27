@@ -209,12 +209,38 @@ describe("finding a score", () => {
 
   it("dates a run by the later of its end and the end of its job", () => {
     const at = (text: string) => Date.parse(text);
+    const ended = { ended: "2026-03-01T10:00:00Z", state: "done" } as const;
+    expect(runChangedAt(ended, { ended_at: "2026-03-01T10:05:00Z", settled: true })).toBe(
+      at("2026-03-01T10:05:00Z"),
+    );
+    expect(runChangedAt(ended, null)).toBe(at("2026-03-01T10:00:00Z"));
     expect(
-      runChangedAt({ ended: "2026-03-01T10:00:00Z" }, { ended_at: "2026-03-01T10:05:00Z" }),
-    ).toBe(at("2026-03-01T10:05:00Z"));
-    expect(runChangedAt({ ended: "2026-03-01T10:00:00Z" }, null)).toBe(at("2026-03-01T10:00:00Z"));
-    expect(runChangedAt({ ended: null }, { ended_at: null })).toBeNull();
-    expect(runChangedAt({ ended: "nonsense" }, undefined)).toBeNull();
+      runChangedAt({ ended: null, state: "cancelled" }, { ended_at: null, settled: true }),
+    ).toBeNull();
+    expect(runChangedAt({ ended: "nonsense", state: null }, undefined)).toBeNull();
+  });
+
+  it("treats a run whose job is not settled as changing now", () => {
+    // a resumed job keeps its id and has no end; the cancelled run it made has none either
+    const cancelled = { ended: null, state: "cancelled" } as const;
+    for (const state of ["queued", "running", "cancelling"] as const) {
+      expect(runChangedAt({ ended: null, state }, null)).toBe(Number.POSITIVE_INFINITY);
+      expect(runChangedAt(cancelled, { ended_at: null, settled: false })).toBe(
+        Number.POSITIVE_INFINITY,
+      );
+    }
+    const made = { created: "2026-03-01T10:00:00+00:00" };
+    const changing = runChangedAt(cancelled, { ended_at: null, settled: false });
+    expect(scoreIsOlder(made, changing)).toBe(true);
+    const found = findScore([score("partial", "2026-03-01T10:00:00+00:00", ["a"], [])], ["a"], {
+      a: changing,
+    });
+    expect(found.current).toBeNull();
+    expect(found.stale?.score_id).toBe("partial");
+    // once it settles again its own end decides
+    expect(runChangedAt(cancelled, { ended_at: "2026-03-01T09:00:00Z", settled: true })).toBe(
+      Date.parse("2026-03-01T09:00:00Z"),
+    );
   });
 
   it("allows for the second a score is written to", () => {

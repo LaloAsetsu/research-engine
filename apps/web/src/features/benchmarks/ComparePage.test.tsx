@@ -590,6 +590,113 @@ describe("finding or making the score", () => {
     expect(within(section).getByRole("link", { name: "Open it anyway" })).toBeInTheDocument();
   });
 
+  describe("while the job of a run is being resumed", () => {
+    const harnessJob = () => CAPTURE.jobs.find((entry) => entry.run?.run_id === RUNS.harness)!;
+    /** A resumed job keeps its id and has no end; the run it made was cancelled and has none either. */
+    const resuming = (state: "queued" | "running") =>
+      server.use(
+        http.get("*/api/v1/runs", () =>
+          HttpResponse.json(
+            CAPTURE.runs.map((run) =>
+              run.run_id === RUNS.harness ? { ...run, ended: null, state: "cancelled" } : run,
+            ),
+          ),
+        ),
+        http.get(`*/api/v1/jobs/${harnessJob().id}`, () =>
+          HttpResponse.json({
+            ...harnessJob(),
+            state,
+            settled: false,
+            ended_at: null,
+            position: state === "queued" ? 0 : null,
+          }),
+        ),
+      );
+
+    it.each(["queued", "running"] as const)(
+      "does not open the score of the partial run while the job is %s",
+      async (state) => {
+        resuming(state);
+        const { app } = await open(address([RUNS.base, RUNS.harness], null));
+        const section = await screen.findByRole("region", { name: "Score these runs" });
+        expect(
+          within(section).getByText(/was made before a run in it last changed/),
+        ).toBeInTheDocument();
+        expect(within(section).getByRole("link", { name: "Open it anyway" })).toBeInTheDocument();
+        expect(app.router.state.location.search).not.toContain("score=");
+      },
+    );
+
+    it("says so when the run list already reports the run as going", async () => {
+      server.use(
+        http.get("*/api/v1/runs", () =>
+          HttpResponse.json(
+            CAPTURE.runs.map((run) =>
+              run.run_id === RUNS.harness ? { ...run, ended: null, state: "running" } : run,
+            ),
+          ),
+        ),
+      );
+      const { app } = await open(address([RUNS.base, RUNS.harness], null));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        `The run ${RUNS.harness} is still going.`,
+      );
+      expect(app.router.state.location.search).not.toContain("score=");
+    });
+
+    it("puts a notice above a score opened from its own address", async () => {
+      resuming("running");
+      await open(address([RUNS.base, RUNS.harness]));
+      expect(await screen.findByText("This score is older than the run")).toBeInTheDocument();
+      expect(
+        await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("reads the job again until it settles, then goes by its end", async () => {
+      let reads = 0;
+      const job = harnessJob();
+      server.use(
+        http.get("*/api/v1/runs", () =>
+          HttpResponse.json(
+            CAPTURE.runs.map((run) =>
+              run.run_id === RUNS.harness ? { ...run, ended: null, state: "cancelled" } : run,
+            ),
+          ),
+        ),
+        http.get(`*/api/v1/jobs/${job.id}`, () => {
+          reads += 1;
+          // the second read finds the job done, long before the score was made
+          return HttpResponse.json(
+            reads < 2
+              ? { ...job, state: "running", settled: false, ended_at: null }
+              : { ...job, ended_at: "2020-01-01T00:00:00Z" },
+          );
+        }),
+      );
+      await open(address([RUNS.base, RUNS.harness], null));
+      await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });
+      expect(reads).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("does not open a score when the run list cannot be read, and tries again", async () => {
+    let fail = true;
+    server.use(
+      http.get("*/api/v1/runs", () =>
+        fail ? problem(403, "The runs are closed to you.") : HttpResponse.json(CAPTURE.runs),
+      ),
+    );
+    const { user, app } = await open(address([RUNS.base, RUNS.harness], null));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The runs are closed to you.");
+    expect(app.router.state.location.search).not.toContain("score=");
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(
+      await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ }),
+    ).toBeInTheDocument();
+  });
+
   it("opens the score when the runs have not changed since it was made", async () => {
     const { app } = await open(address([RUNS.base, RUNS.harness], null));
     await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });

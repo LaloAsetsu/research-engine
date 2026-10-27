@@ -401,3 +401,5 @@ export function useRunJobs(runs: readonly RunSummary[]) {
     }),
   });
 }
+      refetchInterval: (query: { state: { data?: Job } }) =>
+        query.state.data?.settled === false ? polling.jobMs : false,

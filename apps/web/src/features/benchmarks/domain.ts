@@ -141,12 +141,15 @@ const SCORE_CLOCK_MS = 1000;
 
 /**
  * When a run last changed: the later of the end the run file gives and the end of the job that
- * made it. A run resumed after it was scored ends again, later than the score.
+ * made it. A run resumed after it was scored ends again, later than the score. While the job
+ * behind the run is waiting, running or being cancelled the run is changing now, so no score
+ * made so far holds its latest answers: the result is `Infinity`.
  */
 export function runChangedAt(
-  run: Pick<RunSummary, "ended">,
-  job: Pick<Job, "ended_at"> | null | undefined,
+  run: Pick<RunSummary, "ended" | "state">,
+  job: Pick<Job, "ended_at" | "settled"> | null | undefined,
 ): number | null {
+  if (!isScorable(run) || (job != null && !job.settled)) return Number.POSITIVE_INFINITY;
   const times = [moment(run.ended), moment(job?.ended_at)].filter(
     (time): time is number => time !== null,
   );
