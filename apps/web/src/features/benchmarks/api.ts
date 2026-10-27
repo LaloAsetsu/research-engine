@@ -108,8 +108,8 @@ export interface LogTail {
   /** Where the next read starts: bytes of the log already read. */
   offset: number;
   /**
-   * True once the log was read to its end by a read that began after the job settled and found
-   * nothing new. Until then the closing lines may still be missing.
+   * True once the log was read to its end by a read that began a poll interval after the job
+   * settled and found nothing new. Until then the closing lines may still be missing.
    */
   closed: boolean;
 }
@@ -122,11 +122,14 @@ const MAX_LOG_PAGES = 1000;
  * query cache keeps the text. The API cuts a read at its page size, so a read follows the pages
  * until it reaches the size of the log. A log that shrank (the file was replaced) is read again
  * from 0. The runner settles a job before it writes its closing lines, so the reading goes on
- * after the job settles, until a read that began then adds nothing.
+ * after the job settles, until a read that began one poll interval after it settled adds
+ * nothing: the read made at once may still come before the runner's closing write.
  */
 export function useJobLog(jobId: string | undefined, settled: boolean | undefined) {
   const queryClient = useQueryClient();
   const key = ["bench", "log", jobId] as const;
+  // when the job was first seen settled: only a read begun a poll interval later can close the log
+  const settledAt = useRef<number | null>(null);
   const query = useQuery<LogTail>({
     queryKey: key,
     enabled: jobId !== undefined,
@@ -140,7 +143,10 @@ export function useJobLog(jobId: string | undefined, settled: boolean | undefine
         offset: 0,
         closed: false,
       };
-      const afterSettled = settled === true;
+      const afterSettled =
+        settled === true &&
+        settledAt.current !== null &&
+        Date.now() - settledAt.current >= polling.jobMs;
       const read = async (offset: number) => {
         const { data, response } = await fetchClient.GET(JOB_LOG, {
           params: { path: { job_id: jobId ?? "" }, query: { offset } },
@@ -182,7 +188,11 @@ export function useJobLog(jobId: string | undefined, settled: boolean | undefine
   // The moment the job is seen settled, read once more instead of waiting for the next tick.
   const { refetch } = query;
   useEffect(() => {
-    if (settled !== true) return;
+    if (settled !== true) {
+      settledAt.current = null;
+      return;
+    }
+    settledAt.current = Date.now();
     const current = queryClient.getQueryData<LogTail>(["bench", "log", jobId]);
     if (current !== undefined && !current.closed) void refetch();
   }, [settled, jobId, queryClient, refetch]);
@@ -394,6 +404,8 @@ export function useRunJobs(runs: readonly RunSummary[]) {
       ...$api.queryOptions("get", JOB, { params: { path: { job_id: run.job_id ?? "" } } }),
       enabled: run.job_id !== undefined && run.job_id !== null,
       retry: false,
+      refetchInterval: (query: { state: { data?: Job } }) =>
+        query.state.data?.settled === false ? polling.jobMs : false,
     })),
     combine: (results) => ({
       pending: results.some((result) => result.isPending && result.fetchStatus !== "idle"),
@@ -401,5 +413,3 @@ export function useRunJobs(runs: readonly RunSummary[]) {
     }),
   });
 }
-      refetchInterval: (query: { state: { data?: Job } }) =>
-        query.state.data?.settled === false ? polling.jobMs : false,

@@ -48,6 +48,12 @@ export async function startRuns(
   return (await response.json()) as JobView[];
 }
 
+/** A value the test cannot go on without: a missing one fails the test instead of ending it quietly. */
+export function must<T>(value: T | null | undefined, what: string): T {
+  expect(value, what).toBeTruthy();
+  return value as T;
+}
+
 export async function jobOf(api: APIRequestContext, id: string): Promise<JobView> {
   const response = await api.get(`/api/v1/jobs/${id}`);
   expect(response.ok()).toBe(true);

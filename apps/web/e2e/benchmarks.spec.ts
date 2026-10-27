@@ -4,6 +4,7 @@ import {
   getJson,
   jobOf,
   plain,
+  must,
   signed,
   startRuns,
   waitIdle,
@@ -132,9 +133,9 @@ test.describe("B1: start a run", () => {
 test.describe("B7: two runs never share the GPU", () => {
   test("the second run stays queued until the first one ends", async ({ page, api }) => {
     await openBenchmarks(page);
-    const [first, second] = await startRuns(api, ["bare", "harness"], 3, "B7");
-    expect(first && second).toBeTruthy();
-    if (!first || !second) return;
+    const started = await startRuns(api, ["bare", "harness"], 3, "B7");
+    const first = must(started[0], "the first job");
+    const second = must(started[1], "the second job");
     // watch the lane while they run: never two running, and the second queued while the first runs
     const seen: string[] = [];
     await expect
@@ -154,8 +155,9 @@ test.describe("B7: two runs never share the GPU", () => {
     expect(Date.parse(b.started_at ?? "")).toBeGreaterThanOrEqual(Date.parse(a.ended_at ?? ""));
 
     // and the screen said the same while it happened: the page of the second job
-    const [third, fourth] = await startRuns(api, ["bare", "harness"], 3, "B7 page");
-    if (!third || !fourth) return;
+    const more = await startRuns(api, ["bare", "harness"], 3, "B7 page");
+    const third = must(more[0], "the third job");
+    const fourth = must(more[1], "the fourth job");
     await page.goto(`/benchmarks/jobs/${fourth.id}`);
     await expect(status(page)).toContainText("Queued. 1 job ahead");
     await expect(status(page)).toContainText("Running");
@@ -166,8 +168,7 @@ test.describe("B7: two runs never share the GPU", () => {
 test.describe("B2: follow the progress", () => {
   test("shows the answers, the time and the log without a reload", async ({ page, api }) => {
     await openBenchmarks(page);
-    const [job] = await startRuns(api, ["harness"], 4, "B2");
-    if (!job) return;
+    const job = must((await startRuns(api, ["harness"], 4, "B2"))[0], "the job");
     await page.goto(`/benchmarks/jobs/${job.id}`);
     await page.evaluate(() => {
       (window as unknown as { __kept: boolean }).__kept = true;
@@ -204,9 +205,8 @@ test.describe("B3: cancel and resume", () => {
     api,
   }) => {
     await openBenchmarks(page);
-    const [job] = await startRuns(api, ["bare"], 10, "B3");
-    if (!job?.run) return;
-    const runId = job.run.run_id;
+    const job = must((await startRuns(api, ["bare"], 10, "B3"))[0], "the job");
+    const runId = must(job.run, "the run of the job").run_id;
     await page.goto(`/benchmarks/jobs/${job.id}`);
     await expect(status(page)).toContainText(
       /Running\. [3-9]\d* of 60 answers|Running\. [1-9]\d+ of 60/,
@@ -261,8 +261,9 @@ test.describe("B3: cancel and resume", () => {
 
   test("cancels a queued job at once", async ({ page, api }) => {
     await openBenchmarks(page);
-    const [first, second] = await startRuns(api, ["bare", "harness"], 2, "B3 queued");
-    if (!first || !second) return;
+    const queuedJobs = await startRuns(api, ["bare", "harness"], 2, "B3 queued");
+    const first = must(queuedJobs[0], "the first job");
+    const second = must(queuedJobs[1], "the second job");
     await page.goto(`/benchmarks/jobs/${second.id}`);
     await expect(status(page)).toContainText("Queued");
     await page.getByRole("button", { name: "Cancel job" }).click();
@@ -280,9 +281,8 @@ test.describe("B3 and B4: a run resumed after it was scored", () => {
     api,
   }) => {
     await openBenchmarks(page);
-    const [job] = await startRuns(api, ["bare"], 4, "B3 stale score");
-    if (!job?.run) return;
-    const runId = job.run.run_id;
+    const job = must((await startRuns(api, ["bare"], 4, "B3 stale score"))[0], "the job");
+    const runId = must(job.run, "the run of the job").run_id;
     await expect
       .poll(async () => (await jobOf(api, job.id)).progress.done, { intervals: [100] })
       .toBeGreaterThan(0);
