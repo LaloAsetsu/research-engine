@@ -168,6 +168,11 @@ make_folders() {
 # Any group or other permission. A path that is gone (a lock another start just removed) has none.
 loose() { local m; m=$(mode_text "$1") || return 1; [ "${m:4:6}" != "------" ]; }
 
+# A start running at the same time makes and removes its lock while find walks the folder, so the
+# messages about a path that is gone are dropped. Any other message of find, such as Permission
+# denied, reaches the terminal (LC_ALL=C keeps both in English, so the grep and the tests do not
+# depend on the locale), and the loop names the folder and refuses it. No comments inside
+# the process substitution below: bash 3.2 on macOS misread a longer one there.
 check_private() {
   local bad=0 p
   while IFS= read -r p; do
@@ -177,12 +182,16 @@ check_private() {
       echo "research-api: $p belongs to another account." >&2; bad=1
     elif loose "$p"; then
       echo "research-api: $p can be read by other accounts; run: chmod go-rwx '$p'" >&2; bad=1
+    elif [ -d "$p" ] && { [ ! -r "$p" ] || [ ! -x "$p" ]; }; then
+      # find lists a folder before it fails to open it, so a folder this account cannot enter is
+      # named here, with what is inside it left unchecked, instead of being skipped silently.
+      echo "research-api: permission denied on folder $p, so what is inside it was not checked; run: chmod u+rwx '$p'" >&2; bad=1
     fi
   done < <({
     echo "$ROOT"; echo "$CONFIG"; echo "$ENV_LOCAL"
     # incoming and web hold the public build only; everything else is private
-    # A start running at the same time makes and removes its lock while find walks the folder.
-    find "$ROOT" -mindepth 1 \( -path "$ROOT/web" -o -path "$ROOT/incoming" \) -prune -o ! -type l -print 2> /dev/null
+    { LC_ALL=C find "$ROOT" -mindepth 1 \( -path "$ROOT/web" -o -path "$ROOT/incoming" \) -prune -o ! -type l -print 2>&1 1>&3 3>&- \
+        | grep -v 'No such file or directory' >&2 || true; } 3>&1
   } | sort -u)
   [ "$bad" = 0 ] || die "refusing to run with files open to other accounts."
 }

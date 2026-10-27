@@ -609,6 +609,7 @@ To also sign in from a browser, open `http://<tailscale-address>:8091/` in a pri
 | You see | Cause and fix |
 |---|---|
 | `... can be read by other accounts; run: chmod go-rwx '...'` | A private file or folder is open. Run the `chmod` it names (use `chmod -R` for a folder tree). |
+| `permission denied on folder ...` | The account cannot enter a folder inside the data folder, so what is in it was not checked. Run the `chmod u+rwx` it names. |
 | `no settings file at ...` | Do step 1 of [First start](#first-start). |
 | `something already listens on ...:8090` | Another process holds the port: pick another with `port` in `config.toml` (and `public_origin`), or, in fake mode only, `start --fake --port N` for a trial. In live mode the sign-in compares the whole origin, port included, so `start --port N` alone would answer 403 at sign-in: change `port` and `public_origin` together. |
 | `the service exited; last lines of ...` | Read what follows it. A bind error means `bind_host` is not an address of this machine (is Tailscale up?); a settings error names the key. |

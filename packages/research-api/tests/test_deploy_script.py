@@ -805,6 +805,34 @@ def test_start_needs_a_settings_file(deploy: Deploy) -> None:
     assert "config.example.toml" in done.stderr
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can enter any folder")
+def test_start_names_a_private_folder_it_cannot_enter(deploy: Deploy) -> None:
+    """A folder the account cannot read is reported, not skipped: what is inside is unchecked."""
+    deploy.write_config()
+    hidden = deploy.home / "notes"
+    (hidden / "inner").mkdir(parents=True, mode=0o700)
+    hidden.chmod(0o000)
+    try:
+        done = deploy.run("start")
+        assert done.returncode == 1
+        assert f"permission denied on folder {hidden}" in done.stderr
+        assert f"chmod u+rwx '{hidden}'" in done.stderr
+        assert "Permission denied" in done.stderr  # find's own words are not hidden either
+        assert not (deploy.home / "run" / "research-api.pid").exists()
+    finally:
+        hidden.chmod(0o700)
+    assert deploy.run("start").returncode == 0
+
+
+def test_a_start_with_nothing_wrong_prints_no_message_of_find(deploy: Deploy) -> None:
+    """Only the messages about a path that is gone are dropped from find, not all of them."""
+    deploy.write_config()
+    done = deploy.run("start")
+    assert done.returncode == 0, done.stderr
+    assert "No such file" not in done.stderr
+    assert "Permission denied" not in done.stderr
+
+
 def test_the_public_build_folders_may_be_open(deploy: Deploy) -> None:
     deploy.write_config()
     (deploy.home / "incoming").mkdir(mode=0o755)
