@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
-from ...domain.ask import AskAnswer, AskQuestion, Phase
+from ...domain.ask import AskAnswer, AskQuestion, GoldPassage, Phase
 from ...domain.documents import DocumentDetail, DocumentList, DocumentPage
 from ...domain.errors import NotFoundError, UnavailableError
 from ...domain.runs import ModelFacts
@@ -23,6 +23,9 @@ class OfflineAskEngine:
         return None
 
     async def ask(self, question: AskQuestion, on_phase: Callable[[Phase], None]) -> AskAnswer:
+        raise UnavailableError(REASON)
+
+    async def answer_from(self, question: str, passages: Sequence[GoldPassage]) -> AskAnswer:
         raise UnavailableError(REASON)
 
     def answer_model(self) -> ModelFacts:

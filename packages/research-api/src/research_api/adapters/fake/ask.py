@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from ...domain.ask import (
+    SHORT_ID,
     AskAnswer,
     AskContext,
     AskQuestion,
     AskTimings,
+    Citation,
+    GoldPassage,
     Phase,
     read_formatted_answer,
 )
@@ -31,7 +34,7 @@ from ...domain.documents import (
     resolve_doc_id,
 )
 from ...domain.errors import NotFoundError, UnavailableError, UpstreamError
-from ...domain.runs import ModelFacts
+from ...domain.runs import CANNOT_ANSWER_PHRASE, ModelFacts
 from ...ports.ask import EngineHealth
 from .answers import (
     NO_EVIDENCE_EN,
@@ -45,6 +48,7 @@ from .bench import ONLINE
 from .corpus import PAPERS, FakePaper
 
 GENERATION = "fake-0001"
+NO_PAPERS = f"{CANNOT_ANSWER_PHRASE} this question due to having no papers."
 CHUNK_CHARS = 900
 
 
@@ -66,6 +70,31 @@ class FakeAskEngine:
 
     async def warm_up(self) -> None:
         return None
+
+    async def answer_from(self, question: str, passages: Sequence[GoldPassage]) -> AskAnswer:
+        """Echoes the passages: the answer is their text, cited from page 1. With none it
+        refuses, in the words of PaperQA2 for a question with no papers."""
+        started = time.perf_counter()
+        await self._pause(2.0)
+        contexts = tuple(
+            AskContext(p.doc_id, f"{p.doc_id[:SHORT_ID]} pages 1-1", 0, 1, 1, False, p.text)
+            for p in passages
+        )
+        sources = tuple(dict.fromkeys(p.doc_id for p in passages))
+        citations = tuple(
+            Citation(f"{doc_id[:SHORT_ID]} pages 1-1", doc_id, 1, 1) for doc_id in sources
+        )
+        wall = round(time.perf_counter() - started, 4)
+        return AskAnswer(
+            answer="\n\n".join(p.text for p in passages) or NO_PAPERS,
+            references_text="",
+            citations=citations,
+            contexts=contexts,
+            sources=sources,
+            warnings=(),
+            index_generation=None,
+            timings=AskTimings(0.0, wall, wall),
+        )
 
     def answer_model(self) -> ModelFacts:
         return ModelFacts(ONLINE)

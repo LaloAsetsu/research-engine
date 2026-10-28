@@ -17,6 +17,7 @@ from bench_helpers import (
     DEMO_REF,
     TOTAL,
     ScriptedArms,
+    add_quotes_set,
     container_with,
     every_pair,
     finished,
@@ -31,9 +32,11 @@ from bench_helpers import (
 from helpers import MovableClock, arun
 from qa_bench.formats import QA_RUN, check_against_set, load_bytes
 
-from research_api.application.jobs import JobDesk, RunRequest, ScoreRequest
+from research_api.adapters.fake import FakeModelServer
+from research_api.application.arms import LiveArms
+from research_api.application.jobs import JobDesk, JobView, RunRequest, ScoreRequest
 from research_api.bootstrap import Container
-from research_api.domain.ask import AskAnswer, AskQuestion, Phase
+from research_api.domain.ask import UNPLACED_WARNING, AskAnswer, AskQuestion, Phase
 from research_api.domain.errors import (
     ConflictError,
     ForbiddenError,
@@ -1050,3 +1053,119 @@ async def test_a_resumed_engine_run_on_the_same_model_goes_on(
     desk.resume(ANA_ACTOR, view.job.id)
     assert (await finished(desk, view)).job.state is JobState.DONE
     assert pairs(run_file(desk, view)[1]) == every_pair(1)
+
+
+# --- the oracle arm on the live arms ----------------------------------------------------------
+
+
+@pytest.fixture
+def oracle_box(engine: ScriptedEngine) -> Container:
+    arms = LiveArms(engine=engine, models=FakeModelServer())
+    box = container_with(arms, ask_engine=engine, bench_recheck_s=0.02)
+    yield box
+    box.close()
+
+
+async def oracle_run(box: Container) -> tuple[JobView, list[dict[str, Any]]]:
+    desk = box.bench.jobs
+    (view,) = await desk.start_runs(ANA_ACTOR, request("oracle"))
+    done = await finished(desk, view)
+    assert done.job.state is JobState.DONE, done.job.error
+    return done, run_file(desk, view)[1]
+
+
+def question_of_item(box: Container, item_id: str) -> str:
+    _, set_bytes = box.sets.manage.export(DEMO_REF)
+    qset = load_bytes(set_bytes).file
+    assert qset is not None
+    return next(r["question"] for r in qset.records if r["id"] == item_id)
+
+
+@arun
+async def test_an_oracle_run_hands_the_engine_the_gold_texts_and_passes_the_qa_bench_check(
+    oracle_box: Container, engine: ScriptedEngine
+) -> None:
+    done, items = await oracle_run(oracle_box)
+    assert pairs(items) == [(i, 1) for i in DEMO_IDS]
+    assert engine.asked == []  # nothing was retrieved
+    given = dict(engine.given)
+    assert len(given) == len(DEMO_IDS)
+    desk = oracle_box.bench.jobs
+    run = load_bytes(desk._files.read_run(done.job.artifact_id or "") or b"", QA_RUN)
+    _, set_bytes = oracle_box.sets.manage.export(DEMO_REF)
+    qset = load_bytes(set_bytes).file
+    assert run.ok and run.file is not None and qset is not None
+    assert run.file.header["arm"]["name"] == "oracle"
+    assert check_against_set(run.file, qset) == []  # contexts == md_text, in set order
+    by_id = {i["id"]: i for i in items}
+    chain = by_id["DP-002"]  # two gold papers, one passage each
+    assert len(chain["contexts"]) == 2
+    texts = [p.text for p in given[question_of_item(oracle_box, "DP-002")]]
+    assert [c["text"] for c in chain["contexts"]] == texts
+    assert all(i["usage"] == {"truncated": False} for i in items)
+    assert all("not a retrieval time" in i["ext"]["timings_note"] for i in items)
+    assert all("warnings" not in i["ext"] for i in items)
+
+
+@arun
+async def test_a_question_with_no_gold_paper_is_asked_with_no_passage_and_written_with_no_context(
+    oracle_box: Container, engine: ScriptedEngine
+) -> None:
+    done, items = await oracle_run(oracle_box)
+    by_id = {i["id"]: i for i in items}
+    unanswerable = by_id["DP-003"]  # an unanswerable question: no gold paper
+    assert dict(engine.given)[question_of_item(oracle_box, "DP-003")] == ()
+    assert unanswerable["contexts"] == [] and unanswerable["answer"] and "error" not in unanswerable
+    # qa-bench accepts it: the contexts equal the gold texts, and there are none
+    run = load_bytes(oracle_box.bench.jobs._files.read_run(done.job.artifact_id or "") or b"")
+    _, set_bytes = oracle_box.sets.manage.export(DEMO_REF)
+    assert run.file is not None and check_against_set(run.file, load_bytes(set_bytes).file) == []
+
+
+@arun
+async def test_an_oracle_item_with_an_unplaced_passage_and_a_cut_says_so_in_the_file(
+    oracle_box: Container, engine: ScriptedEngine
+) -> None:
+    unplaced = f"{UNPLACED_WARNING} {'b2' * 8}; cited with pages 1-1"
+    engine.warnings, engine.truncated = ("a note about the corpus", unplaced), True
+    _, items = await oracle_run(oracle_box)
+    assert all(i["ext"]["warnings"] == [unplaced] for i in items)
+    assert all(i["usage"] == {"truncated": True} for i in items)
+    assert all(i["answer"] and not i.get("error") for i in items)  # still answered
+
+
+@arun
+async def test_a_question_the_engine_refuses_is_an_error_line_and_the_run_goes_on(
+    oracle_box: Container, engine: ScriptedEngine
+) -> None:
+    engine.errors[question_of_item(oracle_box, "DP-002")] = InvalidInputError(
+        "Paper b2b2b2b2b2b2b2b2 is not in the corpus."
+    )
+    done, items = await oracle_run(oracle_box)
+    by_id = {i["id"]: i for i in items}
+    run = load_bytes(oracle_box.bench.jobs._files.read_run(done.job.artifact_id or "") or b"")
+    _, set_bytes = oracle_box.sets.manage.export(DEMO_REF)
+    # the error line has no contexts and no answer, and qa-bench does not check it
+    assert run.file is not None and check_against_set(run.file, load_bytes(set_bytes).file) == []
+    assert by_id["DP-002"]["contexts"] == [] and by_id["DP-002"]["answer"] is None
+    assert by_id["DP-002"]["error"]["kind"] == "other"
+    assert "not in the corpus" in by_id["DP-002"]["error"]["message"]
+    assert by_id["DP-004"]["answer"]
+
+
+@arun
+async def test_the_refusal_counts_the_questions_and_names_the_first_five(
+    desk: JobDesk, container: Container
+) -> None:
+    ref = add_quotes_set(container)
+    with pytest.raises(InvalidInputError) as caught:
+        await desk.start_runs(ANA_ACTOR, request("bare", "oracle", ref=ref))
+    (error,) = caught.value.errors
+    assert error.path == "/arms/1"
+    assert "7 of 9 questions of quotes-only/v1 have a gold passage without one" in error.message
+    assert "T-0, T-1, T-2, T-3, T-4, ..." in error.message
+    assert "T-5" not in error.message and "T-8" not in error.message
+    assert caught.value.detail == error.message  # a client may show only the detail
+    assert desk.list() == []  # not even the closed-book job was made
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare", ref=ref))  # only the oracle minds
+    assert (await finished(desk, view)).job.state is JobState.DONE

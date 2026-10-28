@@ -12,6 +12,7 @@ from typing import Any
 from ask_helpers import ANA, post, sign_in
 from fastapi.testclient import TestClient
 from helpers import LOOPBACK, SEED_FILE, live_settings, prepare_live
+from sets_helpers import DOC_A, item, qset_bytes
 
 from research_api.application.jobs import JobDesk, JobView, RunRequest
 from research_api.bootstrap import Container, Settings, build_container
@@ -26,7 +27,7 @@ from research_api.domain.runs import (
     header_record,
     item_record,
 )
-from research_api.domain.sets import Actor, SetRef
+from research_api.domain.sets import Actor, SetRef, etag_of
 from research_api.entrypoints.http import build_app
 from research_api.ports.jobs import ArmCall
 
@@ -86,6 +87,26 @@ class ScriptedArms:
             return RunAnswer(answer=text, timings=AskTimings(0.0, 0.01, 0.01))
         finally:
             self.active -= 1
+
+
+QUOTES_REF = SetRef("quotes-only", "v1")
+QUOTES_GAPS = [f"T-{n}" for n in range(7)]
+
+
+def add_quotes_set(container: Container) -> SetRef:
+    """``quotes-only/v1``, frozen: seven questions whose gold passage has only a quote (no
+    ``md_text``), one with a text, and one with no gold paper (allowed)."""
+    quote = {"doc_id": DOC_A, "passages": [{"source_text": "q"}]}
+    text = {"doc_id": DOC_A, "passages": [{"md_text": "a text"}]}
+    items = [item(n, gold_papers=[quote]) for n in QUOTES_GAPS]
+    items += [item("T-7", gold_papers=[text]), item("T-8", gold_papers=[])]
+    sets = container.sets
+    sets.manage.import_set(
+        ANA_ACTOR, qset_bytes(items, "quotes-only/v1"), name="quotes-only", version="v1"
+    )
+    _, plan = sets.freeze.plan(QUOTES_REF)
+    sets.freeze.freeze(ANA_ACTOR, QUOTES_REF, etag_of(plan.token))
+    return QUOTES_REF
 
 
 def container_with(arms: Any = None, **kwargs: Any) -> Container:
@@ -171,9 +192,13 @@ def run_lines(container: Container, run_id: str) -> list[dict[str, Any]]:
 
 
 def request(
-    *arms: str, models: tuple[str, ...] = ("fake-model",), repeats: int = 1, **kw: Any
+    *arms: str,
+    models: tuple[str, ...] = ("fake-model",),
+    repeats: int = 1,
+    ref: SetRef = DEMO_REF,
+    **kw: Any,
 ) -> RunRequest:
-    return RunRequest(DEMO_REF, tuple(ArmSpec(a) for a in arms or ("bare",)), models, repeats, **kw)
+    return RunRequest(ref, tuple(ArmSpec(a) for a in arms or ("bare",)), models, repeats, **kw)
 
 
 async def until(check: Callable[[], bool], seconds: float = 10.0) -> None:

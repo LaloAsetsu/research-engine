@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
@@ -22,6 +22,7 @@ from research_api.domain.ask import (
     AskContext,
     AskQuestion,
     AskTimings,
+    GoldPassage,
     Phase,
 )
 from research_api.domain.runs import ModelFacts
@@ -39,6 +40,7 @@ def engine_over(
     **kwargs: Any,
 ) -> DocingestAskEngine:
     """The docingest engine over a stand-in session, naming ``model`` as its answer model."""
+    kwargs.setdefault("answer_max_sources", 3)
     return DocingestAskEngine(open_session, read_answer_model=lambda: model, **kwargs)
 
 
@@ -66,6 +68,9 @@ class ScriptedEngine:
         self.reason: str | None = None
         self.asked: list[str] = []
         self.options: list[AskQuestion] = []
+        self.given: list[tuple[str, tuple[GoldPassage, ...]]] = []
+        self.truncated = False
+        self.warnings: tuple[str, ...] = ()
         self.gates: dict[str, threading.Event] = {}
         self.errors: dict[str, Exception] = {}
         self.warmed = 0
@@ -101,6 +106,26 @@ class ScriptedEngine:
         if question.text in self.errors:
             raise self.errors[question.text]
         return answer_for(question.text)
+
+    async def answer_from(self, question: str, passages: Sequence[GoldPassage]) -> AskAnswer:
+        self.given.append((question, tuple(passages)))
+        if question in self.errors:
+            raise self.errors[question]
+        contexts = tuple(
+            AskContext(p.doc_id, f"{p.doc_id[:16]} pages 1-1", 0, 1, 1, False, p.text)
+            for p in passages
+        )
+        return AskAnswer(
+            answer=f"Answer from the passages to: {question}",
+            references_text="",
+            citations=(),
+            contexts=contexts,
+            sources=tuple(dict.fromkeys(p.doc_id for p in passages)),
+            warnings=self.warnings,
+            index_generation=None,
+            timings=AskTimings(0.01, 0.2, 0.21),
+            truncated=self.truncated,
+        )
 
     def close(self) -> None:
         self.closed += 1

@@ -20,7 +20,13 @@ from research_api.adapters.fake.answers import (
     render,
 )
 from research_api.adapters.fake.corpus import PAPERS, TELEPORT, TRANSMON
-from research_api.domain.ask import AskAnswer, AskOptions, AskQuestion, read_formatted_answer
+from research_api.domain.ask import (
+    AskAnswer,
+    AskOptions,
+    AskQuestion,
+    GoldPassage,
+    read_formatted_answer,
+)
 from research_api.domain.errors import UnavailableError, UpstreamError
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -204,3 +210,24 @@ def test_the_engine_is_ready_at_once_and_counts_its_questions() -> None:
 
 def test_the_fake_engine_answers_with_the_demo_model_that_answers() -> None:
     assert FakeAskEngine().answer_model().name == "fake-model"
+
+
+@arun
+async def test_the_fake_engine_answers_from_passages_by_echoing_them() -> None:
+    engine = FakeAskEngine()
+    passages = [GoldPassage(TRANSMON.doc_id, "first text"), GoldPassage(TELEPORT.doc_id, "second")]
+    answer = await engine.answer_from("What is it?", passages)
+    assert answer.answer == "first text\n\nsecond"
+    assert [(c.doc_id, c.text, c.first_page, c.last_page) for c in answer.contexts] == [
+        (TRANSMON.doc_id, "first text", 1, 1),
+        (TELEPORT.doc_id, "second", 1, 1),
+    ]
+    assert [c.key for c in answer.citations] == [
+        f"{TRANSMON.short_id} pages 1-1",
+        f"{TELEPORT.short_id} pages 1-1",
+    ]
+    assert answer.sources == (TRANSMON.doc_id, TELEPORT.doc_id)
+    assert answer.index_generation is None and answer.truncated is False
+    nothing = await engine.answer_from("What is it?", [])
+    assert nothing.answer == "I cannot answer this question due to having no papers."
+    assert nothing.contexts == () and nothing.citations == () and nothing.sources == ()

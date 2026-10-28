@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import threading
 from pathlib import Path
 from typing import Any
 
+import docingest.application.ask as docingest_ask
 import pytest
 from ask_helpers import engine_over
 from docingest.adapters.store.filesystem import FilesystemStore
@@ -40,6 +42,7 @@ from research_api.adapters.docingest_ask import (
     open_docingest,
 )
 from research_api.adapters.docingest_ask.documents import PAGES_KEPT
+from research_api.adapters.docingest_ask.engine import SOURCES_HALVED
 from research_api.adapters.docingest_ask.errors import (
     REASON_CONFIG,
     REASON_INDEX,
@@ -48,7 +51,7 @@ from research_api.adapters.docingest_ask.errors import (
     classify,
     start_reason,
 )
-from research_api.domain.ask import AskOptions, AskQuestion
+from research_api.domain.ask import UNPLACED_WARNING, AskOptions, AskQuestion, GoldPassage
 from research_api.domain.errors import (
     ConflictError,
     InvalidInputError,
@@ -649,6 +652,183 @@ async def test_cancelling_a_question_is_not_swallowed() -> None:
         await task
 
 
+# --- answering from given passages ---------------------------------------------------------
+
+
+def passages_of(*texts: str, doc: str = ID_A) -> list[GoldPassage]:
+    return [GoldPassage(doc, text) for text in texts]
+
+
+@arun
+async def test_a_real_session_answers_from_the_given_passages_and_keeps_the_last_generation(
+    store: FilesystemStore,
+) -> None:
+    answerer = Answerer()
+    engine = engine_over(lambda: real_session(store, answerer))
+    engine._health = EngineHealth("ready", None, "gen-7")  # an ask read the index before
+    answer = await engine.answer_from(QUESTION, passages_of("alpha two", "alpha one"))
+    assert [c.text for c in answer.contexts] == ["alpha two", "alpha one"]  # as given, in order
+    assert [(c.name, c.first_page, c.last_page) for c in answer.contexts] == [
+        (f"{ID_A[:16]} pages 2-2", 2, 2),
+        (f"{ID_A[:16]} pages 1-1", 1, 1),
+    ]
+    assert answerer.seen[0][0] == QUESTION
+    assert [c.text for c in answerer.seen[0][2]] == ["alpha two", "alpha one"]
+    assert answer.answer == "Because of loss."
+    assert answer.sources == (ID_A,) and answer.citations[0].doc_id == ID_A  # full id, from sources
+    assert answer.index_generation is None and answer.truncated is False
+    assert answer.timings.retrieve_s >= 0  # listing the corpus and placing: not a retrieval time
+    assert engine.health() == EngineHealth("ready", None, "gen-7")  # not blanked
+
+
+@arun
+async def test_a_passage_that_is_not_in_its_paper_is_answered_and_the_warning_says_which(
+    store: FilesystemStore,
+) -> None:
+    answerer = Answerer()
+    engine = engine_over(lambda: real_session(store, answerer))
+    answer = await engine.answer_from(QUESTION, passages_of("text the paper never had"))
+    (warning,) = answer.warnings
+    assert warning.startswith(f"{UNPLACED_WARNING} {ID_A[:16]}")
+    assert [(c.first_page, c.last_page) for c in answer.contexts] == [(1, 2)]  # the whole paper
+    assert answer.contexts[0].text == "text the paper never had"
+    assert answer.answer and answerer.seen
+
+
+def test_the_warning_words_are_the_ones_docingest_gives() -> None:
+    assert UNPLACED_WARNING == docingest_ask.UNPLACED_WARNING
+    spec = importlib.util.find_spec("docingest.adapters.qa.paperqa")  # read, not imported
+    assert spec is not None and spec.origin is not None
+    source = Path(spec.origin).read_text(encoding="utf-8")
+    assert f'f"{SOURCES_HALVED} {{sources}}' in source
+
+
+@arun
+async def test_a_paper_that_is_not_in_the_corpus_is_the_questions_error_not_a_surprise(
+    store: FilesystemStore,
+) -> None:
+    answerer = Answerer()
+    engine = engine_over(lambda: real_session(store, answerer))
+    with pytest.raises(InvalidInputError) as raised:
+        await engine.answer_from(QUESTION, passages_of("x", doc="f" * 64))
+    assert raised.value.detail == (
+        f"Paper {'f' * 16} is not in the corpus, so a gold passage of it cannot be given "
+        "to the model."
+    )
+    assert answerer.seen == [] and engine.health().state == "warming_up"  # the engine is fine
+
+
+@arun
+async def test_no_passage_is_a_question_with_no_evidence_and_has_no_context(
+    store: FilesystemStore,
+) -> None:
+    answerer = Answerer()
+    engine = engine_over(lambda: real_session(store, answerer))
+    answer = await engine.answer_from(QUESTION, [])
+    assert answerer.seen == [(QUESTION, [], [])]  # asked with an empty list, no paper, no listing
+    assert answer.contexts == () and answer.sources == () and answer.truncated is False
+    assert (
+        answer.answer == "Because of loss."
+    )  # whatever the answerer says: nothing is made up here
+
+
+@arun
+async def test_a_paper_that_cannot_be_read_reaches_the_desk_as_it_is(
+    store: FilesystemStore,
+) -> None:
+    class Unreadable(CountingStore):
+        def markdown(self, doc):
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    answerer = Answerer()
+    engine = engine_over(lambda: real_session(Unreadable(store), answerer))  # type: ignore[arg-type]
+    with pytest.raises(UnicodeDecodeError):  # not reported as a passage that is missing
+        await engine.answer_from(QUESTION, passages_of("alpha one"))
+    assert answerer.seen == []
+
+
+class PassageSession(StubSession):
+    """A session that answers from passages: what a stand-in returns for a given result."""
+
+    async def answer_from_passages(self, question, passages, warn=None, on_phase=None):
+        self.calls.append((question, passages))
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def passage_result(*warnings: str) -> AskResult:
+    return AskResult(
+        answer=f"Question: {QUESTION}\n\nLoss.\n\nReferences\n\n1. ({ID_A[:16]} pages 1-1): Alpha.\n",
+        contexts=(Chunk(ID_A, f"{ID_A[:16]} pages 1-1", "a", 1, 1, False, 0),),
+        sources=(ID_A,),
+        warnings=warnings,
+        index_generation=None,
+        timings=AskTimings(0.2, 3.0, 3.2),
+    )
+
+
+@arun
+@pytest.mark.parametrize(
+    ("limit", "texts", "warnings", "truncated"),
+    [
+        (3, ["a", "b"], (), False),
+        (3, ["a", "b", "c"], (), False),  # the limit itself is not a cut
+        (3, ["a", "b", "c", "d"], (), True),
+        (2, ["a", "b", "c"], (), True),
+        (3, ["a", "a", "a", "b"], (), False),  # a repeated text is read once
+        (3, ["a"], ("1 of 4 documents are not in the index",), False),
+        (3, ["a"], (f"{SOURCES_HALVED} 1 source",), True),  # the prompt did not fit the model
+        (3, ["a", "b"], (f"{SOURCES_HALVED} 5 sources",), True),
+    ],
+)
+async def test_a_cut_of_the_sources_is_recorded(
+    limit: int, texts: list[str], warnings: tuple[str, ...], truncated: bool
+) -> None:
+    session = PassageSession(passage_result(*warnings))
+    engine = engine_over(lambda: session, answer_max_sources=limit)  # type: ignore[arg-type]
+    answer = await engine.answer_from(QUESTION, passages_of(*texts))
+    assert answer.truncated is truncated
+    assert answer.warnings == warnings
+    assert [p.text for p in session.calls[0][1]] == texts  # every passage was handed over
+
+
+@arun
+async def test_an_engine_that_is_not_configured_is_marked_when_answering_from_passages() -> None:
+    session = PassageSession(error=NotConfiguredError("[adapters] qa is x"))
+    engine = engine_over(lambda: session)  # type: ignore[arg-type]
+    with pytest.raises(UnavailableError):
+        await engine.answer_from(QUESTION, passages_of("a"))
+    assert engine.health() == EngineHealth("unavailable", REASON_CONFIG)
+    session.error, session.result = None, passage_result()
+    await engine.answer_from(QUESTION, passages_of("a"))
+    assert engine.health().state == "ready"
+
+
+@arun
+async def test_a_model_server_that_is_down_is_the_questions_trouble_not_the_engines() -> None:
+    session = PassageSession(error=ConnectionError("refused LEAK"))
+    engine = engine_over(lambda: session)  # type: ignore[arg-type]
+    with pytest.raises(UnavailableError) as down:
+        await engine.answer_from(QUESTION, passages_of("a"))
+    assert "LEAK" not in down.value.detail and engine.health().state == "warming_up"
+
+
+@arun
+async def test_cancelling_an_answer_from_passages_is_not_swallowed() -> None:
+    class Slow(PassageSession):
+        async def answer_from_passages(self, *args: Any, **kwargs: Any) -> AskResult:
+            await asyncio.sleep(3600)
+            raise AssertionError
+
+    engine = engine_over(Slow)  # type: ignore[arg-type]
+    task = asyncio.ensure_future(engine.answer_from(QUESTION, passages_of("a")))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 # --- what a member is told ----------------------------------------------------------------
 
 
@@ -684,6 +864,7 @@ class ContextWindowExceededError(BadRequestError):
             None,
         ),
         (ValueError("keywords applies to the index"), InvalidInputError, None),
+        (ValueError(f"paper {'a' * 16} is not in the corpus"), InvalidInputError, None),
         (ImportError("paperqa"), UnavailableError, None),
         (ConnectionError("refused LEAK"), UnavailableError, 15),
         (TimeoutError("slow LEAK"), UnavailableError, 15),
@@ -712,6 +893,9 @@ def test_each_failure_has_words_that_leave_the_library_message_out(
     [
         KeyError("x"),
         ValueError("some other value"),
+        ValueError("paper LEAK is not in the corpus"),  # not a 16 character id: not docingest's
+        ValueError(f"paper {'a' * 16} is not in the corpus LEAK"),
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
         RuntimeError("some other runtime"),
         OSError("disk"),
     ],
@@ -767,7 +951,7 @@ def test_an_engine_that_cannot_name_its_model_says_so_and_a_surprise_is_raised()
     def not_configured() -> AnswerModel:
         raise NotConfiguredError('[adapters] qa is "x"')
 
-    engine = DocingestAskEngine(StubSession, read_answer_model=not_configured)  # type: ignore[arg-type]
+    engine = DocingestAskEngine(StubSession, read_answer_model=not_configured, answer_max_sources=3)  # type: ignore[arg-type]
     with pytest.raises(UnavailableError) as raised:
         engine.answer_model()
     assert raised.value.detail == REASON_CONFIG
@@ -776,12 +960,20 @@ def test_an_engine_that_cannot_name_its_model_says_so_and_a_surprise_is_raised()
         raise KeyError("boom")
 
     with pytest.raises(KeyError):
-        DocingestAskEngine(StubSession, read_answer_model=surprise).answer_model()  # type: ignore[arg-type]
+        DocingestAskEngine(
+            StubSession, read_answer_model=surprise, answer_max_sources=3
+        ).answer_model()  # type: ignore[arg-type]
 
 
 def test_the_offline_engine_cannot_name_a_model() -> None:
     with pytest.raises(UnavailableError):
         OfflineAskEngine().answer_model()
+
+
+@arun
+async def test_the_offline_engine_cannot_answer_from_passages() -> None:
+    with pytest.raises(UnavailableError):
+        await OfflineAskEngine().answer_from(QUESTION, passages_of("a"))
 
 
 def test_the_offline_reader_has_no_papers() -> None:
@@ -800,6 +992,7 @@ def test_open_docingest_reads_the_settings_and_opens_nothing(tmp_path: Path) -> 
     assert isinstance(engine, DocingestAskEngine) and isinstance(reader, DocingestDocumentReader)
     assert engine.health().state == "warming_up" and engine._session is None
     assert reader._opened is None
+    assert engine._answer_max_sources == load_config(config).qa.answer_max_sources
     # the model is read from the settings alone: the pinned one, by the name of its repository
     assert engine.answer_model().name == load_config(config).ocr.repo_id.rsplit("/", 1)[-1]
 

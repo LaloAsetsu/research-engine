@@ -6,15 +6,24 @@ import pytest
 from ask_helpers import ScriptedEngine
 from helpers import arun
 
-from research_api.application.arms import ORACLE_REFUSAL, LiveArms
-from research_api.domain.ask import AskTimings
-from research_api.domain.errors import UnavailableError, UpstreamError
+from research_api.application.arms import LiveArms
+from research_api.domain.ask import UNPLACED_WARNING, AskTimings, GoldPassage
+from research_api.domain.errors import InvalidInputError, UnavailableError, UpstreamError
 from research_api.domain.runs import BARE_PROMPT_MD5, MODEL_MAX_TOKENS
 from research_api.domain.sets import SetRef
 from research_api.ports.jobs import ArmCall
 from research_api.ports.models import ChatReply, ModelInfo
 
-ITEM = {"id": "DP-001", "question": "  What is J?  ", "answer": "J"}
+DOC_A, DOC_B = "a1" * 32, "b2" * 32
+ITEM = {
+    "id": "DP-001",
+    "question": "  What is J?  ",
+    "answer": "J",
+    "gold_papers": [
+        {"doc_id": DOC_A, "passages": [{"md_text": "J couples the modes."}, {"source_text": "q"}]},
+        {"doc_id": DOC_B, "passages": [{"md_text": "J becomes a tuple."}]},
+    ],
+}
 
 
 class Models:
@@ -107,12 +116,58 @@ async def test_the_harness_defaults_are_the_servers() -> None:
 
 
 @arun
-async def test_the_oracle_is_refused_until_docingest_can_answer_from_passages() -> None:
+async def test_no_arm_is_refused_by_the_live_service() -> None:
     live = arms()
-    assert live.refusal("oracle") == ORACLE_REFUSAL
-    assert live.refusal("bare") is None and live.refusal("harness") is None
-    with pytest.raises(UnavailableError):
-        await live.answer(call("oracle"))
+    assert [live.refusal(name) for name in ("bare", "harness", "oracle")] == [None, None, None]
+
+
+@arun
+async def test_the_oracle_asks_the_engine_to_answer_from_the_gold_texts_in_set_order() -> None:
+    engine = ScriptedEngine()
+    answer = await arms(engine=engine).answer(call("oracle"))
+    ((question, passages),) = engine.given
+    assert question == ITEM["question"]
+    assert passages == (
+        GoldPassage(DOC_A, "J couples the modes."),
+        GoldPassage(DOC_B, "J becomes a tuple."),
+    )
+    assert engine.asked == []  # nothing was retrieved
+    assert [c.text for c in answer.contexts] == [p.text for p in passages]
+    assert answer.answer == f"Answer from the passages to: {question}"
+    assert answer.usage is not None and answer.usage.truncated is False
+    assert answer.ext["timings_note"]
+
+
+@arun
+async def test_an_oracle_question_with_no_gold_paper_is_asked_with_no_passage() -> None:
+    engine = ScriptedEngine()
+    item = {"id": "DP-003", "question": "Which paper reports X?", "gold_papers": []}
+    arm_call = ArmCall("oracle", None, {}, "m", item, 1, SetRef("demo", "v1"))
+    answer = await arms(engine=engine).answer(arm_call)
+    assert engine.given == [("Which paper reports X?", ())]
+    assert (
+        answer.contexts == () and answer.answer
+    )  # what the engine says to a question with no evidence
+
+
+@arun
+async def test_an_oracle_answer_marks_a_passage_the_engine_could_not_place_and_a_cut() -> None:
+    engine = ScriptedEngine()
+    unplaced = f"{UNPLACED_WARNING} {DOC_B[:16]}; cited with pages 1-9"
+    engine.warnings = ("1 of 4 documents are not in the index", unplaced)
+    engine.truncated = True
+    answer = await arms(engine=engine).answer(call("oracle"))
+    assert answer.ext["warnings"] == [unplaced]
+    assert answer.usage is not None and answer.usage.truncated is True
+    assert answer.answer  # it is still answered, with the paper's whole page range cited
+
+
+@arun
+async def test_an_oracle_question_the_engine_refuses_fails_with_the_engines_words() -> None:
+    engine = ScriptedEngine()
+    engine.errors[str(ITEM["question"])] = InvalidInputError("Paper aaaa is not in the corpus.")
+    with pytest.raises(InvalidInputError, match="not in the corpus"):
+        await arms(engine=engine).answer(call("oracle"))
 
 
 def test_only_the_closed_book_arm_has_a_prompt() -> None:

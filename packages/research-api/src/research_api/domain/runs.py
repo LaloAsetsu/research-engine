@@ -9,12 +9,12 @@ server and no file. Standard library only.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .ask import AskAnswer, AskContext, AskTimings, Citation
+from .ask import UNPLACED_WARNING, AskAnswer, AskContext, AskTimings, Citation, GoldPassage
 from .jobs import ArmSpec, header_notes
 
 FORMAT = "qa-run/1"
@@ -61,11 +61,20 @@ class AnswerError:
     message: str
 
 
+# What an oracle item says about its ``retrieve_s``: the arm retrieves nothing, so the number is
+# not comparable with the ``retrieve_s`` of a ``harness`` item.
+ORACLE_TIMINGS_NOTE = (
+    "retrieve_s is the time to list the corpus and place the passages in their papers, "
+    "not a retrieval time"
+)
+
+
 @dataclass(frozen=True)
 class Usage:
     llm_requests: int | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    truncated: bool | None = None  # the engine cut the sources before the model read them
 
 
 @dataclass(frozen=True)
@@ -79,6 +88,7 @@ class RunAnswer:
     usage: Usage | None = None
     error: AnswerError | None = None
     prompt_md5: str | None = None
+    ext: Mapping[str, Any] = field(default_factory=dict)  # the item's open ``ext`` object
 
     @classmethod
     def from_ask(cls, answer: AskAnswer) -> RunAnswer:
@@ -87,6 +97,24 @@ class RunAnswer:
             citations=answer.citations,
             contexts=answer.contexts,
             timings=answer.timings,
+        )
+
+    @classmethod
+    def from_oracle(cls, answer: AskAnswer) -> RunAnswer:
+        """An oracle answer. A passage the engine could not place in its paper is cited with all
+        the paper's pages, so the item says which papers (``ext.warnings``); ``usage.truncated``
+        says whether the sources were cut; ``ext.timings_note`` says what ``retrieve_s`` holds."""
+        unplaced = [w for w in answer.warnings if w.startswith(UNPLACED_WARNING)]
+        ext: dict[str, Any] = {"timings_note": ORACLE_TIMINGS_NOTE}
+        if unplaced:
+            ext["warnings"] = unplaced
+        return cls(
+            answer=answer.answer,
+            citations=answer.citations,
+            contexts=answer.contexts,
+            timings=answer.timings,
+            usage=Usage(truncated=answer.truncated),
+            ext=ext,
         )
 
     @classmethod
@@ -138,6 +166,7 @@ def item_record(item_id: str, repeat: int, answer: RunAnswer) -> dict[str, Any]:
                 ("llm_requests", answer.usage.llm_requests),
                 ("prompt_tokens", answer.usage.prompt_tokens),
                 ("completion_tokens", answer.usage.completion_tokens),
+                ("truncated", answer.usage.truncated),
             )
             if v is not None
         }
@@ -147,6 +176,8 @@ def item_record(item_id: str, repeat: int, answer: RunAnswer) -> dict[str, Any]:
         record["answer_prompt_md5"] = answer.prompt_md5
     if answer.error is not None:
         record["error"] = {"kind": answer.error.kind, "message": answer.error.message}
+    if answer.ext:
+        record["ext"] = dict(answer.ext)
     return record
 
 
@@ -225,3 +256,30 @@ def partial_text(done: int, total: int, why: str, at: datetime) -> str:
 
 def question_of(item: Mapping[str, Any]) -> str:
     return str(item["question"])
+
+
+def gold_passages(item: Mapping[str, Any]) -> tuple[GoldPassage, ...]:
+    """The ``md_text`` of every gold passage of the item, in set order: the contexts of an oracle
+    answer (the rule ``qa_bench`` checks a run against its set with). A passage without one is
+    left out. An item with no gold paper has none, and the oracle is asked with an empty list."""
+    return tuple(
+        GoldPassage(paper["doc_id"], passage["md_text"])
+        for paper in item.get("gold_papers") or []
+        for passage in paper.get("passages") or []
+        if "md_text" in passage
+    )
+
+
+def oracle_gaps(items: Iterable[Mapping[str, Any]]) -> list[str]:
+    """The ids of the items an oracle run cannot answer: those with a gold paper whose passage
+    has no ``md_text``. An item with no gold paper at all (unanswerable by design) has no gap:
+    the oracle gives it no passage."""
+    return [
+        str(item["id"])
+        for item in items
+        if any(
+            "md_text" not in passage
+            for paper in item.get("gold_papers") or []
+            for passage in paper.get("passages") or []
+        )
+    ]

@@ -76,7 +76,10 @@ class SetRefIn(_Body):
 class ArmIn(_Body):
     name: ArmName = Field(
         description="`bare`: the model alone, no papers (the closed-book prompt). `harness`: "
-        "through docingest, as an ask. `oracle`: the model gets the gold passages."
+        "through docingest, as an ask. `oracle`: the model gets the gold passages of each "
+        "question (`md_text`, in set order) and nothing else; a set with a gold passage that "
+        "has no text is a `422` at `/arms/{i}`, and a question with no gold paper gets no "
+        "passage."
     )
     variant: str | None = Field(
         default=None, min_length=1, max_length=MAX_VARIANT, description="A label for the run."

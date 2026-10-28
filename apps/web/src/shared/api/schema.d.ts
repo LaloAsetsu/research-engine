@@ -842,7 +842,7 @@ export interface components {
         ArmIn: {
             /**
              * Name
-             * @description `bare`: the model alone, no papers (the closed-book prompt). `harness`: through docingest, as an ask. `oracle`: the model gets the gold passages.
+             * @description `bare`: the model alone, no papers (the closed-book prompt). `harness`: through docingest, as an ask. `oracle`: the model gets the gold passages of each question (`md_text`, in set order) and nothing else; a set with a gold passage that has no text is a `422` at `/arms/{i}`, and a question with no gold paper gets no passage.
              * @enum {string}
              */
             name: "bare" | "harness" | "oracle";

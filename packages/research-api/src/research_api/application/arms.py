@@ -2,8 +2,9 @@
 
 ``bare`` asks the model with no papers (the closed-book prompt of R-281), through the model
 server. ``harness`` asks through the same answer engine as a person's question, so the run sees
-what an ask sees. ``oracle`` needs docingest to answer from given passages; it has no public way
-to do that yet, so the arm is refused (not faked) until it has.
+what an ask sees. ``oracle`` hands the same engine the gold passages of the question, and
+nothing else: no retrieval, and none of the additions the harness gets (whole blocks, gate lists,
+equation headers), so its contexts are exactly the ``md_text`` of the set.
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ from __future__ import annotations
 import time
 
 from ..domain.ask import AskOptions, AskQuestion, AskTimings
-from ..domain.errors import UnavailableError
 from ..domain.runs import (
     BARE_PROMPT_MD5,
     MODEL_MAX_TOKENS,
@@ -19,15 +19,12 @@ from ..domain.runs import (
     RunAnswer,
     Usage,
     bare_messages,
+    gold_passages,
     question_of,
 )
 from ..ports.ask import AskEngine
 from ..ports.jobs import ArmCall
 from ..ports.models import ModelServer
-
-ORACLE_REFUSAL = (
-    "The oracle arm needs docingest to answer from given passages, and it cannot do that yet."
-)
 
 
 class LiveArms:
@@ -36,7 +33,7 @@ class LiveArms:
         self._models = models
 
     def refusal(self, arm_name: str) -> str | None:
-        return ORACLE_REFUSAL if arm_name == "oracle" else None
+        return None
 
     def prompt_md5(self, arm_name: str) -> str | None:
         return BARE_PROMPT_MD5 if arm_name == "bare" else None
@@ -60,7 +57,7 @@ class LiveArms:
             return await self._bare(call)
         if call.arm_name == "harness":
             return await self._harness(call)
-        raise UnavailableError(ORACLE_REFUSAL)
+        return await self._oracle(call)
 
     async def _bare(self, call: ArmCall) -> RunAnswer:
         system, user = bare_messages(question_of(call.item))
@@ -93,6 +90,10 @@ class LiveArms:
         )
         answer = await self._engine.ask(question, _ignore_phase)
         return RunAnswer.from_ask(answer)
+
+    async def _oracle(self, call: ArmCall) -> RunAnswer:
+        answer = await self._engine.answer_from(question_of(call.item), gold_passages(call.item))
+        return RunAnswer.from_oracle(answer)
 
 
 def _ignore_phase(_phase: str) -> None:

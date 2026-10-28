@@ -71,6 +71,7 @@ from ..domain.runs import (
     RunHeaderInput,
     header_record,
     item_record,
+    oracle_gaps,
     partial_text,
 )
 from ..domain.sets import Actor, SetRef
@@ -101,6 +102,7 @@ MAX_PAGE = 200
 BUSY_RETRY_S = 60
 MODEL_RETRY_S = 30
 MESSAGE_CHARS = 300
+GAPS_SHOWN = 5  # question ids a refused oracle run names
 GZIP_MAGIC = b"\x1f\x8b"
 
 
@@ -259,10 +261,12 @@ class JobDesk:
                 "freeze it first, so the questions never change under a run."
             )
         items = self._set_formats.peek(data).items
-        for arm in request.arms:
+        for arm_index, arm in enumerate(request.arms):
             reason = self._arms.refusal(arm.name)
             if reason is not None:
                 raise UnavailableError(reason)
+            if arm.name == "oracle":
+                self._check_gold_texts(request.set, items, f"/arms/{arm_index}")
         served = (
             self._engine.answer_model().name
             if any(arm.name in ENGINE_ARMS for arm in request.arms)
@@ -322,6 +326,23 @@ class JobDesk:
         self._poke()
         queued = self._repo.queued("run")
         return [self._view(j, queued) for j in created]
+
+    @staticmethod
+    def _check_gold_texts(ref: SetRef, items: Sequence[Mapping[str, Any]], at: str) -> None:
+        """The oracle answers from the gold passage texts, so a question whose gold passage has
+        none has nothing to be asked with, and a run that skipped it or wrote an error line
+        for it would count against the oracle in every comparison. The set is refused, naming
+        the first such questions. The same in every mode."""
+        gaps = oracle_gaps(items)
+        if gaps:
+            shown = ", ".join(gaps[:GAPS_SHOWN]) + (", ..." if len(gaps) > GAPS_SHOWN else "")
+            message = (
+                f"The oracle arm answers from the gold passage texts (md_text), and {len(gaps)} "
+                f"of {len(items)} questions of {ref.header_name} have a gold passage without "
+                f"one: {shown}. Run it on a set whose gold passages all have it, or leave the "
+                "oracle arm out."
+            )
+            raise InvalidInputError(message, (FieldError(at, message),))
 
     @staticmethod
     def _check_request(request: RunRequest) -> None:

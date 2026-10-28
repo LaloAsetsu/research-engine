@@ -18,7 +18,15 @@ from typing import Any
 
 from ...domain.ask import AskContext, AskTimings, Citation
 from ...domain.errors import UnavailableError, UpstreamError
-from ...domain.runs import BARE_PROMPT_MD5, CANNOT_ANSWER_PHRASE, RunAnswer, Usage, question_of
+from ...domain.runs import (
+    BARE_PROMPT_MD5,
+    CANNOT_ANSWER_PHRASE,
+    ORACLE_TIMINGS_NOTE,
+    RunAnswer,
+    Usage,
+    gold_passages,
+    question_of,
+)
 from ...ports.jobs import ArmCall
 from ...ports.models import ChatReply, ModelInfo
 from .corpus import PAPERS
@@ -49,16 +57,6 @@ def _fact_text(fact: Mapping[str, Any]) -> str:
 
 def _gold_papers(item: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return list(item.get("gold_papers") or [])
-
-
-def _passages(item: Mapping[str, Any]) -> list[tuple[str, str]]:
-    """(doc id, md_text) of every gold passage that has a text, in set order."""
-    return [
-        (paper["doc_id"], p["md_text"])
-        for paper in _gold_papers(item)
-        for p in paper.get("passages", [])
-        if "md_text" in p
-    ]
 
 
 class FakeArms:
@@ -111,13 +109,15 @@ class FakeArms:
             )
         if call.arm_name == "oracle":
             contexts = tuple(
-                AskContext(doc_id, f"{doc_id[:16]} gold", 0, 1, 1, False, md_text)
-                for doc_id, md_text in _passages(item)
+                AskContext(p.doc_id, f"{p.doc_id[:16]} pages 1-1", 0, 1, 1, False, p.text)
+                for p in gold_passages(item)
             )
             return RunAnswer(
                 answer=answer,
                 contexts=contexts,
                 timings=AskTimings(0.0, wall, wall),
+                usage=Usage(truncated=False),
+                ext={"timings_note": ORACLE_TIMINGS_NOTE},
             )
         return self._harness(item, answer, hit=bool(hits), rolls=rolls, wall=wall)
 

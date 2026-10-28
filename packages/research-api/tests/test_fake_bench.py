@@ -14,7 +14,7 @@ from research_api.adapters.fake import FakeArms, FakeModelServer
 from research_api.adapters.fake.bench import OFFLINE, ONLINE
 from research_api.bootstrap.demo_sets import paper_items
 from research_api.domain.errors import UnavailableError, UpstreamError
-from research_api.domain.runs import BARE_PROMPT_MD5, item_record
+from research_api.domain.runs import BARE_PROMPT_MD5, ORACLE_TIMINGS_NOTE, item_record
 from research_api.domain.sets import SetRef
 from research_api.ports.jobs import ArmCall
 
@@ -69,6 +69,12 @@ async def test_the_oracle_gets_the_gold_passages_and_nothing_else() -> None:
     answer = await FakeArms().answer(call("oracle", "DP-002"))
     texts = [p["md_text"] for paper in ITEMS["DP-002"]["gold_papers"] for p in paper["passages"]]
     assert [c.text for c in answer.contexts] == texts and answer.citations == ()
+    # named and paged like the live arm's contexts, and marked the way its items are
+    assert [c.name for c in answer.contexts] == [
+        f"{paper['doc_id'][:16]} pages 1-1" for paper in ITEMS["DP-002"]["gold_papers"]
+    ]
+    assert answer.usage is not None and answer.usage.truncated is False
+    assert answer.ext == {"timings_note": ORACLE_TIMINGS_NOTE}
 
 
 @arun

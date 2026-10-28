@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from ..domain.ask import AskAnswer, AskQuestion, Phase
+from ..domain.ask import AskAnswer, AskQuestion, GoldPassage, Phase
 from ..domain.runs import ModelFacts
 
 EngineState = Literal["warming_up", "ready", "unavailable"]
@@ -34,6 +34,14 @@ class AskEngine(Protocol):
         """Answer one question. ``on_phase`` is called in the caller's event loop. Raises a
         ``ResearchApiError`` for a failure a member can act on (``UnavailableError``,
         ``UpstreamError``, ``InvalidInputError``); any other exception is unexpected."""
+        ...
+
+    async def answer_from(self, question: str, passages: Sequence[GoldPassage]) -> AskAnswer:
+        """Answer one question from exactly these passages, in this order, with no retrieval.
+        The answer's contexts are the passages as given. ``AskAnswer.truncated`` says the engine
+        cut them before the model read them. No passage is a question with no evidence: the
+        engine's own "cannot answer" comes back, with no contexts. Raises like ``ask``;
+        ``InvalidInputError`` for a paper that is not in the corpus."""
         ...
 
     def answer_model(self) -> ModelFacts:

@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 import pytest
-from ask_helpers import ANA, BETO, TEMP, delete, post, sign_in
+from ask_helpers import ANA, BETO, TEMP, ScriptedEngine, delete, post, sign_in
 from bench_helpers import (
     DEMO,
     DEMO_IDS,
@@ -14,6 +14,7 @@ from bench_helpers import (
     RUNS,
     SCORES,
     ScriptedArms,
+    add_quotes_set,
     bench_app,
     in_state,
     run_body,
@@ -22,6 +23,8 @@ from bench_helpers import (
     wait_for,
 )
 
+from research_api.adapters.fake import FakeModelServer
+from research_api.application.arms import LiveArms
 from research_api.domain.jobs import MAX_OPEN_PER_MEMBER
 
 PROBLEM = "application/problem+json"
@@ -219,6 +222,30 @@ def test_a_model_that_is_not_docingests_is_refused_for_the_engine_arms_with_the_
         assert "answers with the model docingest is set up with, fake-model" in error["message"]
         assert done.json()["detail"] == error["message"]  # a client may show only the detail
         assert post(client, RUNS, json=run_body("harness")).status_code == 202
+
+
+def test_the_oracle_on_a_set_with_a_gold_passage_without_text_is_a_422_that_names_the_questions() -> (
+    None
+):
+    with bench_app(ScriptedArms()) as (client, container):
+        body = run_body("bare") | {"arms": [{"name": "bare"}, {"name": "oracle"}]}
+        body["set"] = {"name": add_quotes_set(container).name, "version": "v1"}
+        done = post(client, RUNS, json=body)
+        assert done.status_code == 422 and done.headers["content-type"].startswith(PROBLEM)
+        (error,) = done.json()["errors"]
+        assert error["path"] == "/arms/1"
+        assert "7 of 9 questions of quotes-only/v1" in error["message"]
+        assert done.json()["detail"] == error["message"]  # a client may show only the detail
+        assert client.get(JOBS).json() == []  # not even the closed-book job was made
+
+
+def test_the_oracle_runs_on_the_demo_set_whose_unanswerable_question_has_no_gold_paper() -> None:
+    engine = ScriptedEngine()
+    arms = LiveArms(engine=engine, models=FakeModelServer())
+    with bench_app(arms, ask_engine=engine) as (client, _):
+        done = post(client, RUNS, json=run_body("oracle"))
+        assert done.status_code == 202, done.text
+        assert settled(client, done.json()[0]["id"])["state"] == "done"
 
 
 def test_a_draft_is_refused_with_the_way_out() -> None:

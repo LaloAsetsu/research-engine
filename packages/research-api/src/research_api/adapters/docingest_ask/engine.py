@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
-from docingest.application.ask import AskOptions, AskSession
+from docingest.application.ask import AskOptions, AskResult, AskSession, GivenPassage
 from docingest.domain.errors import IndexMismatchError, IndexNotReadyError, NotConfiguredError
 from docingest.domain.models import AnswerModel
 
@@ -16,6 +16,7 @@ from ...domain.ask import (
     AskContext,
     AskQuestion,
     AskTimings,
+    GoldPassage,
     Phase,
     read_formatted_answer,
 )
@@ -30,6 +31,10 @@ log = logging.getLogger("research_api.ask")
 # for as long as docingest's own timeout; past this it is `unavailable`, with a reason.
 WARM_UP_LIMIT_S = 90.0
 
+# The start of the warning docingest's PaperQA2 adapter gives when the answer prompt was too long
+# for the model and it asked again with fewer sources (``adapters/qa/paperqa.py``).
+SOURCES_HALVED = "answer prompt too long for the model; retried with"
+
 
 def served_name(model: AnswerModel) -> str:
     """The name a ``[[models]]`` entry gives this model: the last ``/`` part of docingest's name.
@@ -42,20 +47,58 @@ def served_name(model: AnswerModel) -> str:
     return model.name.rsplit("/", 1)[-1]
 
 
+def _answer_of(result: AskResult, question: str, *, truncated: bool = False) -> AskAnswer:
+    """The result of docingest's session, split the way a ``qa-run/1`` item holds it."""
+    contexts = tuple(
+        AskContext(
+            doc_id=c.doc_id,
+            name=c.name,
+            start=c.start,
+            first_page=c.first_page,
+            last_page=c.last_page,
+            is_reference=c.is_reference,
+            text=c.text,
+        )
+        for c in result.contexts
+    )
+    read = read_formatted_answer(
+        result.answer,
+        question=question,
+        full_ids=[*result.sources, *(c.doc_id for c in contexts)],
+    )
+    return AskAnswer(
+        answer=read.answer,
+        references_text=read.references_text,
+        citations=read.citations,
+        contexts=contexts,
+        sources=tuple(result.sources),
+        warnings=tuple(result.warnings),
+        index_generation=result.index_generation,
+        timings=AskTimings(
+            result.timings.retrieve_s, result.timings.answer_s, result.timings.wall_s
+        ),
+        truncated=truncated,
+    )
+
+
 class DocingestAskEngine:
     def __init__(
         self,
         open_session: Callable[[], AskSession],
         *,
         read_answer_model: Callable[[], AnswerModel],
+        answer_max_sources: int,
         warm_up_limit_s: float = WARM_UP_LIMIT_S,
     ) -> None:
         """``open_session`` builds the session (its adapters, which may fail to import or to
         read their settings); it runs in a worker thread on the first use. Warming up that takes
         longer than ``warm_up_limit_s`` leaves the engine ``unavailable`` until a question works.
-        ``read_answer_model`` names the model docingest answers with (settings only)."""
+        ``read_answer_model`` names the model docingest answers with (settings only).
+        ``answer_max_sources`` is docingest's ``[qa] answer_max_sources``: the most sources its
+        answer model reads, which cuts the passages of ``answer_from`` without a warning."""
         self._open_session = open_session
         self._read_answer_model = read_answer_model
+        self._answer_max_sources = answer_max_sources
         self._warm_up_limit_s = warm_up_limit_s
         self._session: AskSession | None = None
         self._lock = threading.Lock()
@@ -107,35 +150,27 @@ class DocingestAskEngine:
                 self._health = EngineHealth("unavailable", start_reason(error))
             raise translated from None
         self._health = EngineHealth("ready", None, result.index_generation)
-        contexts = tuple(
-            AskContext(
-                doc_id=c.doc_id,
-                name=c.name,
-                start=c.start,
-                first_page=c.first_page,
-                last_page=c.last_page,
-                is_reference=c.is_reference,
-                text=c.text,
-            )
-            for c in result.contexts
-        )
-        read = read_formatted_answer(
-            result.answer,
-            question=question.text,
-            full_ids=[*result.sources, *(c.doc_id for c in contexts)],
-        )
-        return AskAnswer(
-            answer=read.answer,
-            references_text=read.references_text,
-            citations=read.citations,
-            contexts=contexts,
-            sources=tuple(result.sources),
-            warnings=tuple(result.warnings),
-            index_generation=result.index_generation,
-            timings=AskTimings(
-                result.timings.retrieve_s, result.timings.answer_s, result.timings.wall_s
-            ),
-        )
+        return _answer_of(result, question.text)
+
+    async def answer_from(self, question: str, passages: Sequence[GoldPassage]) -> AskAnswer:
+        given = [GivenPassage(p.doc_id, p.text) for p in passages]
+        try:
+            session = await asyncio.to_thread(self._opened)
+            result = await session.answer_from_passages(question, given)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            translated = classify(error)
+            if translated is None:
+                raise
+            if isinstance(error, NotConfiguredError):
+                self._health = EngineHealth("unavailable", start_reason(error))
+            raise translated from None
+        # No index is read on this path, so the result has no generation: keep the last one
+        self._health = EngineHealth("ready", None, self._health.index_generation)
+        halved = any(w.startswith(SOURCES_HALVED) for w in result.warnings)
+        distinct = len({p.text for p in passages})
+        return _answer_of(result, question, truncated=halved or distinct > self._answer_max_sources)
 
     def answer_model(self) -> ModelFacts:
         try:
