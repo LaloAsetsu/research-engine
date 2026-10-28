@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import glob
 import json
 import os
 import subprocess
@@ -218,10 +217,12 @@ def test_serve_live_with_a_loose_data_folder_exits_1(
     assert served == []
 
 
-def test_the_openapi_command_does_not_leave_a_database_behind() -> None:
-    before = set(glob.glob(f"{tempfile.gettempdir()}/research-api-fake-*"))
+def test_the_openapi_command_does_not_leave_a_database_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     cli.openapi_document()
-    assert set(glob.glob(f"{tempfile.gettempdir()}/research-api-fake-*")) <= before
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_fake_mode_without_a_seed_file_says_there_are_no_accounts(
