@@ -1,6 +1,6 @@
 [project]
 name = "qa-bench"
-version = "0.1.0"
+version = "0.2.0"
 description = "The question-answer benchmark: the formats (question sets, runs, scores, reviews), converters of older sets, a validator and the scorer"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

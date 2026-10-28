@@ -94,7 +94,7 @@ def test_version_names_the_package(capsys):
     with pytest.raises(SystemExit) as raised:
         main(["--version"])
     assert raised.value.code == 0
-    assert capsys.readouterr().out.startswith("0.1.0")
+    assert capsys.readouterr().out.startswith("0.2.0")
 
 
 @pytest.mark.parametrize(
