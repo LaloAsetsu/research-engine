@@ -178,7 +178,7 @@ command continues to use the page router and synchronous converters.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `parser` | string | `"mineru"` | rag-anything parser name. |
-| `method` | string | `"auto"` | Parser method, such as `auto`, `txt`, or `ocr`. |
+| `method` | string | `"auto"` | Parser method. `auto` selects MinerU `flash`/`txt` when a PDF has a text layer and the configured OCR tier/mode otherwise; `txt` forces `flash`/`txt`. |
 | `tier` | string | `"standard"` | MinerU 4 tier. Use `flash` for text-layer extraction or `standard` for local OCR/layout parsing. |
 | `ocr_mode` | string | `"ocr"` | MinerU 4 OCR mode. `txt` reads only an existing PDF text layer; `ocr` processes scanned pages and images. |
 | `output_dir` | path | `"data/rag-anything"` | Parser intermediates; use persistent Linux storage. |

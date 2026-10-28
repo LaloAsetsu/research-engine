@@ -13,6 +13,8 @@ import subprocess
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import pypdfium2 as pdfium
+
 from ...config import RagAnythingConfig
 from ...domain.errors import ConversionError
 from ...domain.models import PageMethod
@@ -147,15 +149,17 @@ class RagAnythingConverter:
         document_dir = output_dir / path.stem
         document_dir.mkdir(parents=True, exist_ok=True)
         markdown_path = document_dir / f"{path.stem}.md"
-        ocr_mode = "txt" if self.config.method == "txt" else self.config.ocr_mode
+        tier, ocr_mode = self._mineru4_mode(path)
         command = [
             "mineru-kit",
             "parse",
             str(path),
             "-o",
             str(markdown_path),
+            "--format",
+            "markdown",
             "--tier",
-            self.config.tier,
+            tier,
             "--ocr-mode",
             ocr_mode,
         ]
@@ -197,7 +201,7 @@ class RagAnythingConverter:
         if self.config.raw_output:
             raw_output = {
                 "backend": "mineru-kit",
-                "tier": self.config.tier,
+                "tier": tier,
                 "ocr_mode": ocr_mode,
                 "markdown": text,
                 "layout": layout,
@@ -220,6 +224,26 @@ class RagAnythingConverter:
             artifacts=artifacts,
             raw_output=raw_output,
         )
+
+    def _mineru4_mode(self, path: Path) -> tuple[str, str]:
+        if self.config.method == "txt":
+            return "flash", "txt"
+        if self.config.method != "auto":
+            return self.config.tier, self.config.ocr_mode
+        if path.suffix.lower() != ".pdf":
+            return self.config.tier, self.config.ocr_mode
+        try:
+            document = pdfium.PdfDocument(path)
+            has_text = any(
+                bool(document[index].get_textpage().get_text_bounded().strip())
+                for index in range(len(document))
+            )
+            document.close()
+        except (OSError, pdfium.PdfiumError) as error:
+            raise ConversionError(
+                f"MinerU 4 could not inspect the PDF text layer for {path.name}: {error}"
+            ) from error
+        return ("flash", "txt") if has_text else (self.config.tier, self.config.ocr_mode)
 
     def _read_layout_output(self, document_dir: Path, path: Path) -> object | None:
         candidates = (

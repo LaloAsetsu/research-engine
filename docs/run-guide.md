@@ -151,6 +151,9 @@ ollama pull qwen2.5vl:7b
 ```
 
 Keep `mineru-kit parse --tier standard --ocr-mode ocr` for local scanned-document extraction.
+With `[rag_anything] method = "auto"` (the default), the adapter inspects PDF text layers and
+uses `flash`/`txt` for text-bearing PDFs such as normal arXiv papers, while retaining the
+configured `standard`/`ocr` path for scans. This avoids OCR inference when it is unnecessary.
 For layout-aware ingestion, verify that the output directory contains structured JSON (normally
 `middle_json.json`); the adapter maps page blocks into manifest layout artifacts. A successful
 Markdown parse without structured JSON remains valid by default, but is rejected when
@@ -178,6 +181,7 @@ The guide links to the reference for each part instead of repeating it:
 
 | For | Read |
 |---|---|
+| Legacy OCR versus RAG-Anything/MinerU, measured speed, output differences, and recommendation | [docingest OCR implementation comparison](../packages/docingest/docs/ocr-implementation-comparison.md) |
 | GPU memory, disk, the vLLM install, start times, default folders | [serving/README.md](../serving/README.md) |
 | Every configuration key | [packages/docingest/config/README.md](../packages/docingest/config/README.md) |
 | Every command and option | [packages/docingest/README.md](../packages/docingest/README.md#cli-overview) |

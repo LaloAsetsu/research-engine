@@ -91,7 +91,12 @@ def test_mineru4_preserves_middle_json_layout(monkeypatch, tmp_path):
         run,
     )
     converter = RagAnythingConverter(
-        RagAnythingConfig(output_dir=str(output), raw_output=True, require_layout=True)
+        RagAnythingConfig(
+            output_dir=str(output),
+            raw_output=True,
+            require_layout=True,
+            method="ocr",
+        )
     )
 
     result = asyncio.run(converter.convert_async(source))
@@ -118,7 +123,11 @@ def test_mineru4_requires_structured_layout_when_configured(monkeypatch, tmp_pat
         lambda *args, **kwargs: types.SimpleNamespace(returncode=0, stdout="", stderr=""),
     )
     converter = RagAnythingConverter(
-        RagAnythingConfig(output_dir=str(tmp_path / "output"), require_layout=True)
+        RagAnythingConfig(
+            output_dir=str(tmp_path / "output"),
+            require_layout=True,
+            method="ocr",
+        )
     )
 
     with pytest.raises(ConversionError, match="no usable structured layout JSON"):
@@ -141,7 +150,44 @@ def test_mineru4_surfaces_subprocess_failure(monkeypatch, tmp_path):
             stderr="engine unavailable",
         ),
     )
-    converter = RagAnythingConverter(RagAnythingConfig(output_dir=str(tmp_path)))
+    converter = RagAnythingConverter(
+        RagAnythingConfig(output_dir=str(tmp_path), method="ocr")
+    )
 
     with pytest.raises(ConversionError, match="engine unavailable"):
         asyncio.run(converter.convert_async(source))
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("An arXiv text layer", ("flash", "txt")), ("", ("standard", "ocr"))],
+)
+def test_mineru4_auto_selects_text_or_ocr_mode(monkeypatch, tmp_path, text, expected):
+    source = tmp_path / "paper.pdf"
+    source.write_bytes(b"%PDF")
+
+    class TextPage:
+        def get_text_bounded(self):
+            return text
+
+    class Page:
+        def get_textpage(self):
+            return TextPage()
+
+    class Document:
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, index):
+            return Page()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "docingest.adapters.converters.rag_anything.pdfium.PdfDocument",
+        lambda path: Document(),
+    )
+    converter = RagAnythingConverter(RagAnythingConfig())
+
+    assert converter._mineru4_mode(source) == expected
