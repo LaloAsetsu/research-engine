@@ -183,6 +183,7 @@ command continues to use the page router and synchronous converters.
 | `ocr_mode` | string | `"ocr"` | MinerU 4 OCR mode. `txt` reads only an existing PDF text layer; `ocr` processes scanned pages and images. |
 | `output_dir` | path | `"data/rag-anything"` | Parser intermediates; use persistent Linux storage. |
 | `raw_output` | bool | `true` | Retain parser blocks in `rag-anything.json` beside the normalized result. |
+| `require_layout` | bool | `false` | Reject MinerU 4 output when structured layout JSON is missing. |
 | `max_raw_bytes` | int | `268435456` | Maximum serialized raw parser output per document. |
 | `lang` | string or null | `null` | Optional parser language hint. |
 | `max_concurrency` | int | `1` | Maximum concurrent async conversions (`1` to `16`). |

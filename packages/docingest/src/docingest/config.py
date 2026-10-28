@@ -130,6 +130,7 @@ class RagAnythingConfig(BaseModel):
     ocr_mode: str = "ocr"
     output_dir: str = "data/rag-anything"
     raw_output: bool = True
+    require_layout: bool = False
     max_raw_bytes: int = Field(default=256 * 1024 * 1024, ge=1)
     lang: str | None = None
     max_concurrency: int = Field(default=1, ge=1, le=16)

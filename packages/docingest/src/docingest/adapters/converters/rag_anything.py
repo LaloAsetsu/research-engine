@@ -69,7 +69,7 @@ class RagAnythingConverter:
         self.fingerprint = (
             f"rag-anything {_version()} parser={config.parser} method={config.method} "
             f"tier={config.tier} ocr={config.ocr_mode} lang={config.lang or '-'} "
-            f"raw={config.raw_output}"
+            f"raw={config.raw_output} layout={config.require_layout}"
         )
 
     async def convert_async(self, path: Path) -> Conversion:
@@ -184,20 +184,86 @@ class RagAnythingConverter:
             ) from error
         if not text.strip():
             raise ConversionError(f"MinerU 4 produced no textual content for {path.name}")
-        raw_output = (
-            {
+        layout = self._read_layout_output(document_dir, path)
+        if self.config.require_layout and (
+            not isinstance(layout, dict) or not isinstance(layout.get("pages"), list)
+        ):
+            raise ConversionError(
+                f"MinerU 4 produced no usable structured layout JSON for {path.name}; "
+                "disable [rag_anything] require_layout only when text-only output is intentional"
+            )
+        artifacts = _artifacts(self._layout_blocks(layout)) if layout is not None else []
+        raw_output = None
+        if self.config.raw_output:
+            raw_output = {
                 "backend": "mineru-kit",
                 "tier": self.config.tier,
                 "ocr_mode": ocr_mode,
                 "markdown": text,
+                "layout": layout,
             }
-            if self.config.raw_output
-            else None
-        )
+            try:
+                raw_size = len(json.dumps(raw_output, ensure_ascii=False).encode())
+            except (TypeError, ValueError) as error:
+                raise ConversionError(
+                    f"MinerU 4 returned non-serializable output for {path.name}: {error}"
+                ) from error
+            if raw_size > self.config.max_raw_bytes:
+                raise ConversionError(
+                    f"MinerU 4 raw output for {path.name} is {raw_size} bytes, above "
+                    f"[rag_anything] max_raw_bytes={self.config.max_raw_bytes}"
+                )
         return Conversion(
             segments=[Segment(text)],
             method=PageMethod.RAG_ANYTHING,
             engine=self.fingerprint,
-            artifacts=[],
+            artifacts=artifacts,
             raw_output=raw_output,
         )
+
+    def _read_layout_output(self, document_dir: Path, path: Path) -> object | None:
+        candidates = (
+            "middle_json.json",
+            "structured_content.json",
+            "model_output.json",
+            f"{path.stem}.json",
+        )
+        paths = {candidate: document_dir / candidate for candidate in candidates}
+        discovered = next(
+            (candidate for candidate in candidates if paths[candidate].is_file()),
+            None,
+        )
+        if discovered is None:
+            json_files = sorted(document_dir.rglob("*.json"))
+            if len(json_files) == 1:
+                layout_path = json_files[0]
+            else:
+                return None
+        else:
+            layout_path = paths[discovered]
+        try:
+            return json.loads(layout_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ConversionError(
+                f"MinerU 4 produced unreadable structured layout output for {path.name}: {error}"
+            ) from error
+
+    @staticmethod
+    def _layout_blocks(layout: object) -> list[object]:
+        if not isinstance(layout, dict):
+            return []
+        pages = layout.get("pages")
+        if not isinstance(pages, list):
+            return []
+        blocks: list[object] = []
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            page_index = page.get("page_idx", page.get("page"))
+            page_blocks = page.get("blocks")
+            if not isinstance(page_blocks, list):
+                continue
+            for block in page_blocks:
+                if isinstance(block, dict):
+                    blocks.append({**block, "page_idx": page_index})
+        return blocks

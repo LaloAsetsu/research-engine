@@ -120,9 +120,11 @@ uv run docingest ingest-async \
 ```
 
 The command supports PDF, Office, and image inputs, writes canonical Markdown and a manifest,
-and stores bounded parser output as `rag-anything.json` beside the normalized result. The raw
-output is provenance/debug data and is not indexed independently. Office inputs may require
-LibreOffice:
+stores bounded parser output as `rag-anything.json` beside the normalized result, and preserves
+MinerU's `middle_json.json` or `structured_content.json` when the CLI emits it. Set
+`[rag_anything] require_layout = true` when a pipeline must reject Markdown-only output instead of
+accepting a text-only result. The raw output is provenance/debug data and is not indexed
+independently. Office inputs may require LibreOffice:
 
 ```bash
 sudo apt-get update
@@ -131,6 +133,46 @@ sudo apt-get install -y libreoffice poppler-utils ghostscript
 
 `flash`/`txt` validates born-digital documents but does not OCR scanned pages. Do not process the
 full corpus until the `standard`/`ocr` smoke test succeeds.
+
+### Using Ollama locally
+
+Ollama can be used for the research engine's answering model, but it is not the VLM engine used
+by MinerU 4's local `standard` parser. MinerU 4 selects its own local VLM runtime (normally
+llama.cpp on Linux) and its parser expects structured layout/OCR behavior. A text-only Ollama
+model cannot replace that parser. An Ollama model must support vision to answer questions about
+figures or extracted images.
+
+Install Ollama separately, start its local server, and pull a vision-capable model:
+
+```bash
+ollama serve
+ollama list
+ollama pull qwen2.5vl:7b
+```
+
+Keep `mineru-kit parse --tier standard --ocr-mode ocr` for local scanned-document extraction.
+For layout-aware ingestion, verify that the output directory contains structured JSON (normally
+`middle_json.json`); the adapter maps page blocks into manifest layout artifacts. A successful
+Markdown parse without structured JSON remains valid by default, but is rejected when
+`require_layout` is enabled.
+Use Ollama for `docingest ask` by configuring the QA adapter according to the PaperQA/LiteLLM
+settings in this repository. A typical local endpoint is:
+
+```toml
+[qa]
+llm = "ollama/qwen2.5vl:7b"
+llm_base = "http://127.0.0.1:11434"
+```
+
+Verify the Ollama endpoint before asking questions:
+
+```bash
+curl http://127.0.0.1:11434/api/tags
+```
+
+Using Ollama as MinerU's parser VLM would require a separate compatibility adapter that translates
+MinerU's layout prompts and image payloads to Ollama's API. It is not enabled by
+`raganything==1.4.3` or by the current MinerU 4 CLI integration.
 
 The guide links to the reference for each part instead of repeating it:
 

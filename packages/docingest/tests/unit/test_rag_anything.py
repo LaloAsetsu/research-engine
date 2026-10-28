@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import types
 from pathlib import Path
@@ -49,3 +50,98 @@ def test_async_converter_rejects_empty_parser_output(monkeypatch, tmp_path):
 
     with pytest.raises(ConversionError, match="no textual content"):
         asyncio.run(converter.convert_async(tmp_path / "paper.pdf"))
+
+
+def test_mineru4_preserves_middle_json_layout(monkeypatch, tmp_path):
+    source = tmp_path / "paper.pdf"
+    source.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    document_dir = output / source.stem
+    document_dir.mkdir(parents=True)
+    (document_dir / "paper.md").write_text("# Paper\n\nText", encoding="utf-8")
+    (document_dir / "middle_json.json").write_text(
+        json.dumps(
+            {
+                "schema": "docvortex.middle",
+                "pages": [
+                    {
+                        "page_idx": 0,
+                        "blocks": [
+                            {"type": "equation", "latex": "x^2", "confidence": 0.8}
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        RagAnythingConverter,
+        "_mineru4_installed",
+        staticmethod(lambda: True),
+    )
+    commands = []
+
+    def run(*args, **kwargs):
+        commands.append(args[0])
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "docingest.adapters.converters.rag_anything.subprocess.run",
+        run,
+    )
+    converter = RagAnythingConverter(
+        RagAnythingConfig(output_dir=str(output), raw_output=True, require_layout=True)
+    )
+
+    result = asyncio.run(converter.convert_async(source))
+
+    assert result.artifacts[0]["kind"] == "equation"
+    assert result.artifacts[0]["page"] == 0
+    assert result.raw_output["layout"]["schema"] == "docvortex.middle"
+    assert commands[0][-4:] == ["--tier", "standard", "--ocr-mode", "ocr"]
+
+
+def test_mineru4_requires_structured_layout_when_configured(monkeypatch, tmp_path):
+    source = tmp_path / "paper.pdf"
+    source.write_bytes(b"%PDF")
+    document_dir = tmp_path / "output" / source.stem
+    document_dir.mkdir(parents=True)
+    (document_dir / "paper.md").write_text("Text", encoding="utf-8")
+    monkeypatch.setattr(
+        RagAnythingConverter,
+        "_mineru4_installed",
+        staticmethod(lambda: True),
+    )
+    monkeypatch.setattr(
+        "docingest.adapters.converters.rag_anything.subprocess.run",
+        lambda *args, **kwargs: types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    converter = RagAnythingConverter(
+        RagAnythingConfig(output_dir=str(tmp_path / "output"), require_layout=True)
+    )
+
+    with pytest.raises(ConversionError, match="no usable structured layout JSON"):
+        asyncio.run(converter.convert_async(source))
+
+
+def test_mineru4_surfaces_subprocess_failure(monkeypatch, tmp_path):
+    source = tmp_path / "paper.pdf"
+    source.write_bytes(b"%PDF")
+    monkeypatch.setattr(
+        RagAnythingConverter,
+        "_mineru4_installed",
+        staticmethod(lambda: True),
+    )
+    monkeypatch.setattr(
+        "docingest.adapters.converters.rag_anything.subprocess.run",
+        lambda *args, **kwargs: types.SimpleNamespace(
+            returncode=2,
+            stdout="",
+            stderr="engine unavailable",
+        ),
+    )
+    converter = RagAnythingConverter(RagAnythingConfig(output_dir=str(tmp_path)))
+
+    with pytest.raises(ConversionError, match="engine unavailable"):
+        asyncio.run(converter.convert_async(source))
