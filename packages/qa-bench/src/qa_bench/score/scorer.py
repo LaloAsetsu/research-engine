@@ -282,8 +282,10 @@ def _notes(engine: bootstrap.Engine, options: Options, warnings: Sequence[str]) 
     )
     text = (
         f"mathnorm v2 (md5 of its code {MATHNORM_CODE_MD5}). {number_words} "
-        "Lenient hits of category f count only when the answer cites a gold paper "
-        "(flag unchecked). "
+        "A lenient hit of category f does not count (flag unchecked). Citation keys "
+        "'(<16 hex> pages a-b)' are cut from the text before a number key is matched. A text "
+        "key may be followed by '^'. A text alternative that is one Greek letter name is "
+        "ignored. "
         f"Bootstrap engine '{engine.name}': {engine.description}. "
         "Groups: 'field=v1|v2' means any of the listed values. Metric names: refused = 'cannot "
         "answer' in the long answer (QASPER); cannot_answer = the cannot-answer pattern for "

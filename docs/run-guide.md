@@ -412,7 +412,7 @@ What the options do:
 Limits:
 
 - The questions are always taken in the order of the set file, never the order of a run file, because the bootstrap resamples positions. A run written in another order gives the same numbers.
-- Number words (two, ocho) do not count for a number key unless you ask: they count wherever they stand, and a hand check found about half of them wrong. A lenient hit in a category `f` question counts only when the answer cites a gold paper.
+- Number words (two, ocho) do not count for a number key unless you ask: they count wherever they stand, and a hand check found about half of them wrong. A lenient hit (an expression key matched by symbol recall only) in a category `f` question does not count, so for `f` the lenient columns equal the exact ones, and the key record says `unchecked`. The digits of a citation key (`(<id> pages 3-4)`) are not read as numbers, and a text key's alternative that is only a Greek letter name is ignored. [The scorer](../packages/qa-bench/README.md#the-scorer) lists the rules.
 - Not scored: reviews, multiple choice, circuit tasks and the multi-paper metrics. A run made for another set, an answer to a question the set does not have, or a pair that names an unknown run is refused with exit status 1.
 
 ## Run the web app on a shared server

@@ -1,8 +1,8 @@
 """Key facts: which keys of a question an answer contains, and the metrics built from them.
 
 A key fact is an expression (``expr``), a phrase (``text``) or a number (``num``). The matching is
-that of the vendored matcher (:mod:`qa_bench.score.mathnorm`, version 2), with two decisions of
-this scorer:
+that of the vendored matcher (:mod:`qa_bench.score.mathnorm`, version 2), with these decisions of
+this scorer, all made here so that the matcher stays untouched:
 
 * **Number words are off.** An integer key from 2 to 20 matches the digits in the answer only.
   The matcher can also read ``eight`` or ``ocho``, but a number word counts wherever it stands,
@@ -10,10 +10,21 @@ this scorer:
   would match is flagged ``word_only`` on the key and counts in the ``num_word_only`` metric, and
   the columns ending in ``_words`` give the same four metrics with the word route on, so a table
   shows both. ``number_words=True`` makes the word hits count in the main columns (flagged).
-* **Lenient hits of category f need the gold paper.** A key of an item tagged ``category`` ``f``
-  that only the lenient rule (symbol recall of at least 0.8) matches counts only when the answer
-  cites a gold paper (its 16-hex id in the text or in a citation); otherwise the key is flagged
-  ``unchecked`` and the lenient columns leave it out.
+  The details of the word route (a non-breaking hyphen or an en dash in a compound, "hundred and
+  two") are the matcher's and only touch the ``_words`` columns.
+* **Citation keys are not numbers.** ``(<16 hex> pages a-b)`` is cut from the text (the answer,
+  and the chunks and the prompt for ``chunks`` and ``evidence``) before a number key is matched,
+  so the digits of a page range do not make a hit. Text and expression keys see the text as it is.
+* **Lenient hits of category f are exact hits.** A key of an item tagged ``category`` ``f`` that
+  only the lenient rule (symbol recall of at least 0.8) matches does not count: the letters of a
+  short equation occur in any prose, a refusal included. The key is flagged ``unchecked`` and the
+  lenient columns leave it out, so for category ``f`` lenient equals exact.
+* **A text key may be followed by ``^``.** The phrase must still end at a word boundary, and a
+  ``^`` after it counts as one, so ``U_k`` is found in ``U_k^\\dagger``.
+* **A lone Greek name does not count as an alternative.** An alternative of a text key that
+  normalizes to one word that is the name of a Greek letter (``ψ+`` becomes ``psi``) is ignored:
+  it would match that word anywhere in the answer. Other alternatives, short ones included, are
+  used, and so is the key's own value.
 
 The metrics also give what the funnel needs: the share of keys found in the chunks the model was
 given (``chunks``) and in its prompt (``evidence``), the math spans of the answer that appear in
@@ -40,7 +51,17 @@ CANNOT_RE = re.compile(
     r"specify|state|give|list|contain|include)",
     re.IGNORECASE,
 )
-DOC16 = re.compile(r"\b([0-9a-f]{16})\b")
+_CITATION_KEY = r"[0-9a-f]{16}\s+pages?\s+\d+(?:\s*[-\u2013]\s*\d+)?"
+# "(<16 hex> pages a-b)", and several keys in one pair of parentheses
+CITATION = re.compile(rf"\(\s*{_CITATION_KEY}(?:\s*[,;]\s*{_CITATION_KEY})*\s*\)", re.IGNORECASE)
+# the matcher's names for Greek letters, and the "var" variants it does not list
+GREEK_NAMES = frozenset(name.lower() for name in mn.GREEK.values()) | {
+    "varphi",
+    "varepsilon",
+    "varpi",
+    "varrho",
+    "varsigma",
+}
 
 
 @dataclass(frozen=True)
@@ -52,17 +73,44 @@ class Match:
     word_only: bool = False  # a number key that the text gives only as a number word
 
 
+def strip_citations(text: str) -> str:
+    """``text`` without its citation keys ``(<16 hex> pages a-b)``."""
+    return CITATION.sub(" ", text)
+
+
+def is_generic_alt(alt: str) -> bool:
+    """Whether an alternative normalizes to one word that is the name of a Greek letter."""
+    word = mn.norm_text(alt).strip()
+    if not word or " " in word:
+        return False
+    return word in GREEK_NAMES
+
+
+def match_text(key: dict[str, Any], text: str) -> bool:
+    """A text key: the matcher's rule, ``^`` ends a phrase like a space, generic alts skipped."""
+    flat = mn.norm_text(text)
+    for i, phrase in enumerate([key["value"], *key.get("alts", [])]):
+        if i > 0 and is_generic_alt(phrase):
+            continue
+        norm = mn.norm_text(phrase)
+        word = norm.strip()
+        if word and (norm in flat or f" {word}^" in flat):
+            return True
+    return False
+
+
 def match_key(key: dict[str, Any], text: str, *, number_words: bool) -> Match:
-    """Whether ``text`` holds the key; see the module docstring for the number-word rule."""
+    """Whether ``text`` holds the key; see the module docstring for the rules of this scorer."""
     if key["type"] == "expr":
         r = mn.match_expr(key, text)
         return Match(r["exact"], r["exact"] or r["symbol_recall"] >= LENIENT_RECALL)
     if key["type"] == "num":
-        digits = mn.match_num_digits(key, text)
-        word = not digits and mn.match_num_word(key, text)
+        read = strip_citations(text)
+        digits = mn.match_num_digits(key, read)
+        word = not digits and mn.match_num_word(key, read)
         counted = digits or (number_words and word)
         return Match(counted, counted, word)
-    hit = mn.match_text(key, text)
+    hit = match_text(key, text)
     return Match(hit, hit)
 
 
@@ -75,13 +123,6 @@ def math_spans(text: str) -> list[str]:
         if len(canon) >= MIN_SPAN:
             out.append(canon)
     return out
-
-
-def gold_cited(question: dict[str, Any], item: dict[str, Any], answer: str) -> bool:
-    """Whether the answer cites a gold paper: its 16-hex id in the text or in a citation."""
-    cited = set(DOC16.findall(answer))
-    cited |= {c["doc_id"][:16] for c in item.get("citations") or []}
-    return any(g["doc_id"][:16] in cited for g in question["gold_papers"])
 
 
 def text_of(chunks: list[dict[str, Any]] | None) -> str | None:
@@ -111,7 +152,6 @@ def key_scores(
     chunks = text_of(ext.get("given"))
     evidence = evidence_of(ext)
     is_f = (question.get("tags") or {}).get("category") == "f"
-    cited = gold_cited(question, item, answer)
     rows: list[dict[str, Any]] = []
     in_evidence: list[bool] = []
     # per key: exact, lenient, exact with number words, lenient with number words
@@ -119,9 +159,9 @@ def key_scores(
     for i, key in enumerate(keys):
         found = match_key(key, answer, number_words=number_words)
         with_words = match_key(key, answer, number_words=True)
-        unchecked = is_f and found.lenient and not found.exact and not cited
+        unchecked = is_f and found.lenient and not found.exact
         lenient = found.lenient and not unchecked
-        lenient_words = with_words.lenient and not (is_f and not with_words.exact and not cited)
+        lenient_words = with_words.exact if is_f else with_words.lenient
         hits.append((found.exact, lenient, with_words.exact, lenient_words))
         row: dict[str, Any] = {"i": i, "exact": found.exact, "lenient": lenient}
         if unchecked:

@@ -313,15 +313,17 @@ def test_number_words_stay_out_of_the_main_columns_by_default():
     assert "Number words count" in words.file.header["notes"]
 
 
-def test_a_lenient_f_hit_needs_the_gold_paper_in_the_scores_too():
+def test_a_lenient_only_f_hit_is_left_out_of_the_scores_even_with_the_gold_paper():
     keys = [expr_key("a+b+c+d+e")]
     q = make_qset([question("S-1", keys, category="f"), question("S-2", keys, category="f")])
     cited = f"relation among a b c d e ({DOC_A[:16]} pages 1-1)"
     r = make_run("r1", q, [answer("S-1", "relation among a b c d e"), answer("S-2", cited)])
     result = scored(q, [r])
-    assert one(result, "group", group="all", metric="all_keys_lenient")["mean"] == 0.5
-    assert one(result, "group", group="all", metric="lenient_unchecked")["mean"] == 0.5
+    assert one(result, "group", group="all", metric="all_keys_lenient")["mean"] == 0.0
+    assert one(result, "group", group="all", metric="lenient_unchecked")["mean"] == 1.0
     assert records(result, "item", id="S-1")[0]["keys"][0]["unchecked"] is True
+    assert records(result, "item", id="S-2")[0]["keys"][0]["unchecked"] is True
+    assert "unchecked" in result.file.header["notes"]
 
 
 def test_the_two_engines_can_be_chosen_and_are_named_in_the_header():
