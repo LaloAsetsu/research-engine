@@ -1,7 +1,9 @@
 """Who is calling: the dependencies every protected route takes.
 
 ``signed_in`` reads the session cookie and, on a write, checks the CSRF header against the token
-stored with the session. ``member`` and ``admin`` build on it. A new router protects itself with
+stored with the session, once per request: it keeps the caller in ``request.state.caller``, so a
+route class that checks the caller before the body and the dependency of its router share one
+session lookup. ``member`` and ``admin`` build on it. A new router protects itself with
 ``APIRouter(dependencies=[Depends(member)])`` or a ``Depends(member)`` parameter.
 """
 
@@ -61,6 +63,9 @@ def signed_in(
     request: Request, token: Annotated[str | None, Security(session_cookie)] = None
 ) -> Authenticated:
     """The caller, even before the first password change (so they can change it or sign out)."""
+    known: Authenticated | None = getattr(request.state, "caller", None)
+    if known is not None:
+        return known
     try:
         who = container_of(request).auth.authenticate(token)
     except UnauthenticatedError as e:
@@ -74,6 +79,7 @@ def signed_in(
             sent.encode("utf-8"), who.session.csrf_token.encode("utf-8")
         ):
             raise ForbiddenError("The CSRF token is missing or wrong.")
+    request.state.caller = who
     request.state.username = who.user.username  # read by the access log
     return who
 

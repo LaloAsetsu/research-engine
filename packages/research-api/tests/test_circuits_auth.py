@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from helpers import BELL, MEMBER, sign_in_as_member
 
+from research_api.application.auth import Authenticate, Authenticated
 from research_api.entrypoints.cli import openapi_document
 from research_api.entrypoints.http.security import CSRF_HEADER, SESSION_COOKIE
 
@@ -96,6 +97,27 @@ def test_a_caller_with_no_session_gets_the_401_before_the_body_is_read(
             "/api/v1/circuits/parse", content=body, headers={"content-type": "application/json"}
         )
         assert response.status_code == 401
+
+
+@pytest.mark.parametrize(("method", "path", "body"), ROUTES)
+def test_the_session_is_read_once_per_request(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path: str,
+    body: Any,
+) -> None:
+    sign_in_as_member(client)
+    reads: list[str | None] = []
+    original = Authenticate.__call__
+
+    def counting(self: Authenticate, token: str | None) -> Authenticated:
+        reads.append(token)
+        return original(self, token)
+
+    monkeypatch.setattr(Authenticate, "__call__", counting)
+    assert send(client, method, path, body).status_code == 200
+    assert len(reads) == 1
 
 
 def test_the_contract_lists_the_session_cookie_on_the_circuit_operations() -> None:

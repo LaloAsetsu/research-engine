@@ -59,8 +59,9 @@ class CircuitRoute(APIRoute):
     """Checks the caller, caps the body before FastAPI reads it and refuses a key written twice.
 
     The caller is checked first, so a request with no session is a 401 whatever its body holds and
-    costs no body read. The router's ``member`` dependency checks again and puts the session
-    cookie in the OpenAPI contract.
+    costs no body read. The router's ``member`` dependency finds the caller already resolved on
+    the request, so the session is read once, and puts the session cookie in the OpenAPI
+    contract.
 
     FastAPI would parse the body with ``json.loads``, which keeps the last value of a repeated
     key without a word. Reading the raw bytes first makes the refusal come before the model.

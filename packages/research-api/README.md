@@ -220,7 +220,7 @@ router = APIRouter(dependencies=[Depends(member)])      # every route of the rou
 def x(who: Authenticated = Depends(admin)): ...         # one route that needs an admin
 ```
 
-`member` and `admin` answer `401` without a session, `403` when the CSRF header is missing on a write, and `403` ("Change your password first.") while `must_change_password` is true. `signed_in` is the same without that last rule; only `/auth/me`, `/auth/password` and `/auth/logout` use it. The contract lists the cookie as the `sessionCookie` security scheme.
+`member` and `admin` answer `401` without a session, `403` when the CSRF header is missing on a write, and `403` ("Change your password first.") while `must_change_password` is true. `signed_in` is the same without that last rule; only `/auth/me`, `/auth/password` and `/auth/logout` use it. `signed_in` keeps the caller on the request, so a route class that checks the caller before it reads the body shares the session lookup with the router's dependency: one lookup per request. The contract lists the cookie as the `sessionCookie` security scheme.
 
 ### Host and Origin checks
 
