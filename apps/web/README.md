@@ -121,7 +121,7 @@ src/
   shared/
     api/          generated types, the client, ApiError
     i18n/         es.json, en.json, language detection
-    layout/       page heading, placeholder page
+    layout/       page heading
     markdown/     Markdown with math for answers and papers
     forms/        labelled text field
     lib/          storage, theme, class-name helper
