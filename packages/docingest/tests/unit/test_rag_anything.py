@@ -33,6 +33,11 @@ def test_async_converter_normalizes_blocks_and_keeps_raw_output(monkeypatch, tmp
         {"type": "equation", "latex": r"E=mc^2", "confidence": 0.9},
     ]
     _install_parser(monkeypatch, blocks)
+    monkeypatch.setattr(
+        RagAnythingConverter,
+        "_mineru4_installed",
+        staticmethod(lambda: False),
+    )
     converter = RagAnythingConverter(
         RagAnythingConfig(output_dir=str(tmp_path), raw_output=True)
     )
@@ -46,6 +51,11 @@ def test_async_converter_normalizes_blocks_and_keeps_raw_output(monkeypatch, tmp
 
 def test_async_converter_rejects_empty_parser_output(monkeypatch, tmp_path):
     _install_parser(monkeypatch, [])
+    monkeypatch.setattr(
+        RagAnythingConverter,
+        "_mineru4_installed",
+        staticmethod(lambda: False),
+    )
     converter = RagAnythingConverter(RagAnythingConfig(output_dir=str(tmp_path)))
 
     with pytest.raises(ConversionError, match="no textual content"):
