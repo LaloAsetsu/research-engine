@@ -1,5 +1,6 @@
 """AskSession with fakes: the index stays open between questions and is reloaded when, and only
-when, it has a new commit; the structured result; one retrieval at a time."""
+when, it has a new commit; the structured result; one retrieval at a time; the answer from
+passages the caller gives."""
 
 import asyncio
 import itertools
@@ -9,7 +10,14 @@ import pytest
 import test_ask_whole_blocks as blocks
 from fakes import FakeEmbedder, FakeIndex, FakeQA, FakeReranker, InMemoryStore, add_doc
 
-from docingest.application.ask import AskOptions, AskService, AskSession, Retrieval
+from docingest.application.ask import (
+    UNPLACED_WARNING,
+    AskOptions,
+    AskService,
+    AskSession,
+    GivenPassage,
+    Retrieval,
+)
 from docingest.application.index import IndexService
 from docingest.domain.errors import IndexNotReadyError
 
@@ -551,3 +559,300 @@ def test_a_commit_that_lands_during_a_question_is_seen_by_the_next_one():
     after = run(session.ask(question))
     assert after.index_generation == "g2" and PAPER_C in after.sources
     assert index.closed == 1 and store.listings == 1  # one reload, at the next question
+
+
+# ------------------------------------------------------------------ answer from given passages
+
+OPENS = "Qubits decohere when they couple to the environment."
+ENDS = "Gates act on the qubits one at a time."
+LAST = "The proof uses two lemmas."
+PAGES_B = [(f"{OPENS}\n{ENDS}", "Intro"), ("The second page opens here.\n" + LAST, "Proof")]
+CUT = "one at a time.\n\nThe second page opens"  # the end of page 1, the break, the start of page 2
+
+
+class WarningQA(FakeQA):
+    async def ask(self, question, documents, warn, contexts=None):
+        warn("the answerer cut the sources")
+        return await super().ask(question, documents, warn, contexts)
+
+
+def no_retrieval():
+    raise AssertionError("the index must not be opened to answer from given passages")
+
+
+def passage_store(store=None):
+    store = store or InMemoryStore()
+    add_doc(store, PAPER_A, TEXT_A, name="a.txt")
+    add_doc(store, PAPER_B, PAGES_B, name="b.txt")
+    return store
+
+
+def given(qa=None, store=None, **kw):
+    store = passage_store() if store is None else store
+    qa = qa or FakeQA()
+    return AskSession(AskService(store=store, qa=qa, retrieval=no_retrieval), **kw), qa, store
+
+
+def test_given_passages_reach_the_answerer_in_order_and_unchanged():
+    session, qa, _ = given()
+    passages = [
+        GivenPassage(PAPER_B, LAST),
+        GivenPassage(PAPER_A, TEXT_A[0][0][:50]),
+        GivenPassage(PAPER_B, OPENS),
+    ]
+    result = run(session.answer_from_passages("what is it", passages))
+    assert [(c.doc_id, c.text) for c in qa.contexts] == [(p.doc_id, p.text) for p in passages]
+    assert result.contexts == tuple(qa.contexts)
+    assert result.sources == (PAPER_B, PAPER_A)  # by first appearance
+    assert result.answer == "answer to 'what is it' from 2 docs"
+    assert result.index_generation is None and result.warnings == ()
+    assert qa.seen == ["b.txt", "a.txt"] and qa.markdown == ["", ""]  # manifests only
+
+
+def test_a_given_passage_gets_the_pages_the_name_and_the_offset_of_its_text():
+    session, _, _ = given()
+    document = "".join(f"{t}\n\n" for t, _ in PAGES_B)
+    result = run(
+        session.answer_from_passages(
+            "q",
+            [
+                GivenPassage(PAPER_B, ENDS),
+                GivenPassage(PAPER_B, CUT),
+                GivenPassage(PAPER_B, LAST),
+            ],
+        )
+    )
+    one, across, two = result.contexts
+    assert (one.first_page, one.last_page, one.name) == (1, 1, f"{PAPER_B[:16]} pages 1-1")
+    assert (across.first_page, across.last_page) == (1, 2)
+    assert across.name == f"{PAPER_B[:16]} pages 1-2"
+    assert (two.first_page, two.last_page, two.name) == (2, 2, f"{PAPER_B[:16]} pages 2-2")
+    for chunk in result.contexts:
+        assert document[chunk.start : chunk.start + len(chunk.text)] == chunk.text
+        assert not chunk.is_reference
+
+
+def test_white_space_may_differ_between_the_given_text_and_the_paper():
+    session, qa, _ = given()
+    spaced = "Qubits   decohere when they\ncouple  to the environment.\nGates act on"
+    result = run(session.answer_from_passages("q", [GivenPassage(PAPER_B, spaced)]))
+    (chunk,) = result.contexts
+    assert chunk.text == spaced and qa.contexts[0].text == spaced  # kept as given
+    assert (chunk.first_page, chunk.last_page, chunk.start) == (1, 1, 0)
+    assert run(session.answer_from_passages("q", [GivenPassage(PAPER_B, f" {LAST}\n")])).contexts
+
+
+def pages_of(passage, *pages):
+    """The first and last page a passage is placed on in a paper of ``pages``."""
+    store = InMemoryStore()
+    add_doc(store, PAPER_B, [(text, "T") for text in pages], name="b.txt")
+    session, _, _ = given(store=store)
+    (chunk,) = run(session.answer_from_passages("q", [GivenPassage(PAPER_B, passage)])).contexts
+    return chunk.first_page, chunk.last_page
+
+
+def test_each_tier_is_tried_before_the_looser_ones():
+    # tier 1 (as it is) before tier 2: the double space of page 1 would match "a  b" loosely
+    assert pages_of("a b", "a  b first.", "a b second.") == (2, 2)
+    # tier 2 (any white space) before tier 3: without the space, page 1's "alone" matches "al one"
+    assert pages_of("al  one", "alone here.", "al one there.") == (2, 2)
+    # and tier 3 when the first two find nothing
+    assert pages_of("a_b", "a b first.", "a_b second.") == (2, 2)
+    assert pages_of("a $b$", "a b first.", "ab second.") == (1, 1)
+
+
+def test_the_white_space_tier_and_the_markup_tier_find_a_passage_across_a_page_break():
+    loose = "one  at   a time.\n \nThe second page"
+    assert pages_of(loose, *(t for t, _ in PAGES_B)) == (1, 2)
+    pages = ("Before.\n$$\\begin{equation}\nE = m", "c^2\n\\tag{1}\n\\end{equation}$$ After.")
+    assert pages_of("\\begin{equation} E=mc^2 \\end{equation}", *pages) == (1, 2)
+
+
+def test_unicode_quotes_dashes_ligatures_and_page_markers_do_not_keep_a_passage_from_being_found():
+    document_text = "Then \ufb01nal x \u2212 y = \u201cz\u201d \u2014 done.\nNext page begins."
+    store = InMemoryStore()
+    add_doc(store, PAPER_B, [(document_text, "T"), ("Second page.", "U")], name="b.txt")
+    session, qa, _ = given(store=store)
+    document = "".join(f"{t}\n\n" for t in (document_text, "Second page."))
+    passages = [
+        GivenPassage(PAPER_B, 'final x - y = "z" - done.'),
+        GivenPassage(
+            PAPER_B, "Next page begins.\n<!-- page 2 | method=text_layer -->\nSecond page"
+        ),
+    ]
+    result = run(session.answer_from_passages("q", passages))
+    assert result.warnings == ()
+    assert [c.text for c in qa.contexts] == [p.text for p in passages]  # as given
+    one, two = result.contexts
+    assert document[one.start : one.start + 7] == "\ufb01nal x " and one.start == 5
+    assert (one.first_page, one.last_page, two.first_page, two.last_page) == (1, 1, 1, 2)
+    assert document[two.start :].startswith("Next page begins.")
+
+
+def test_the_first_occurrence_of_a_text_is_the_one_placed():
+    store = InMemoryStore()
+    add_doc(store, PAPER_B, [("same words here", "A"), ("same words here", "B")], name="b.txt")
+    session, _, _ = given(store=store)
+    result = run(session.answer_from_passages("q", [GivenPassage(PAPER_B, "same words")]))
+    assert (result.contexts[0].first_page, result.contexts[0].start) == (1, 0)
+
+
+EQUATION_PAGES = [
+    ("Page one has no equation.", "Intro"),
+    ("Before it.\n\n$$\\begin{equation}\nE = m c^2\n\\tag{1}\n\\end{equation}$$After it.", "Body"),
+]
+
+
+def test_a_passage_is_found_without_the_markup_a_display_equation_carries():
+    store = InMemoryStore()
+    add_doc(store, PAPER_B, EQUATION_PAGES, name="b.txt")
+    session, _, _ = given(store=store)
+    bare = "\\begin{equation} E = m c^2 \\end{equation}"  # no $$, no \\tag{1}, other line breaks
+    truncated = "E=mc^2 \\end{equation"  # a gold text may cut the closing brace
+    result = run(
+        session.answer_from_passages(
+            "q", [GivenPassage(PAPER_B, bare), GivenPassage(PAPER_B, truncated)]
+        )
+    )
+    document = "".join(f"{t}\n\n" for t, _ in EQUATION_PAGES)
+    for chunk, given_text in zip(result.contexts, (bare, truncated), strict=True):
+        assert chunk.text == given_text  # the given text, not the paper's
+        assert (chunk.first_page, chunk.last_page) == (2, 2) and chunk.start >= len(document) // 3
+    first = result.contexts[0]
+    assert document[first.start :].startswith("E = m c^2\n")  # the first character matched
+    assert result.warnings == ()
+
+
+def test_the_markup_tier_does_not_match_other_text():
+    store = InMemoryStore()
+    add_doc(store, PAPER_B, EQUATION_PAGES, name="b.txt")
+    session, _, _ = given(store=store)
+    other = "\\begin{equation} E = m c^3 \\end{equation}"
+    result = run(session.answer_from_passages("q", [GivenPassage(PAPER_B, other)]))
+    assert len(result.warnings) == 1  # not found
+
+
+def test_a_passage_that_no_tier_finds_cites_all_the_pages_of_its_paper_and_warns_once():
+    session, qa, _ = given()
+    seen: list[str] = []
+    missing = GivenPassage(PAPER_B, "words no paper holds")
+    blank = GivenPassage(PAPER_B, " \n ")
+    found = GivenPassage(PAPER_B, LAST)
+    result = run(session.answer_from_passages("q", [missing, found, blank], seen.append))
+    assert [(c.first_page, c.last_page, c.name) for c in result.contexts] == [
+        (1, 2, f"{PAPER_B[:16]} pages 1-2"),
+        (2, 2, f"{PAPER_B[:16]} pages 2-2"),
+        (1, 2, f"{PAPER_B[:16]} pages 1-2"),
+    ]
+    assert [c.text for c in qa.contexts] == [missing.text, found.text, blank.text]  # unchanged
+    assert len(result.warnings) == 2 and list(result.warnings) == seen
+    assert all(w.startswith(f"{UNPLACED_WARNING} {PAPER_B[:16]};") for w in seen)
+    assert all(w.endswith("pages 1-2") for w in seen)
+
+
+def test_a_paper_without_page_markers_cites_page_1_and_warns():
+    store = InMemoryStore()
+    manifest = add_doc(store, PAPER_B, [("x", "T")], name="b.txt")
+    store.canonical[PAPER_B] = (manifest, "text without a page marker")
+    session, qa, _ = given(store=store)
+    result = run(session.answer_from_passages("q", [GivenPassage(PAPER_B, "text")]))
+    (chunk,) = result.contexts
+    assert (chunk.first_page, chunk.last_page, chunk.start) == (1, 1, 0)
+    assert result.warnings == (f"{UNPLACED_WARNING} {PAPER_B[:16]}; cited with pages 1-1",)
+    assert qa.contexts == [chunk]
+
+
+@pytest.mark.parametrize(
+    ("passages", "message"),
+    [
+        ([], "no passages"),
+        ([GivenPassage(PAPER_C, "anything")], f"paper {PAPER_C[:16]} is not in the corpus"),
+        ([GivenPassage(PAPER_B, LAST), GivenPassage(PAPER_C, LAST)], f"paper {PAPER_C[:16]}"),
+    ],
+)
+def test_no_passages_or_an_unknown_paper_is_a_value_error_and_the_session_goes_on(
+    passages, message
+):
+    session, qa, _ = given()
+    seen: list[str] = []
+    with pytest.raises(ValueError, match=message):
+        run(session.answer_from_passages("q", passages, on_phase=seen.append))
+    assert qa.contexts is None and seen == []  # the answerer was not called
+    assert run(session.answer_from_passages("q", [GivenPassage(PAPER_B, LAST)])).answer
+
+
+class UnreadableStore(InMemoryStore):
+    def markdown(self, doc):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+
+def test_a_paper_that_cannot_be_read_is_raised_and_not_reported_as_a_missing_passage():
+    session, qa, _ = given(store=passage_store(UnreadableStore()))
+    seen: list[str] = []
+    with pytest.raises(UnicodeDecodeError):
+        run(session.answer_from_passages("q", [GivenPassage(PAPER_B, LAST)], seen.append))
+    assert qa.contexts is None and seen == []
+
+
+def test_the_phase_comes_once_in_the_event_loop_after_the_passages_are_placed():
+    session, _, _ = given()
+    seen: list[tuple[str, bool]] = []
+
+    async def ask():
+        loop = threading.get_ident()
+        await session.answer_from_passages(
+            "q",
+            [GivenPassage(PAPER_B, LAST)],
+            on_phase=lambda p: seen.append((p, threading.get_ident() == loop)),
+        )
+
+    run(ask())
+    assert seen == [("answering", True)]
+
+
+class NoLock:
+    def __enter__(self):
+        raise AssertionError("the retrieval lock must not be taken")
+
+    def __exit__(self, *exc):
+        return False
+
+    acquire = __enter__
+
+
+def test_the_retrieval_lock_is_not_taken():
+    session, _, _ = given()
+    session._lock = NoLock()
+    assert run(session.answer_from_passages("q", [GivenPassage(PAPER_B, LAST)])).answer
+
+
+def test_the_store_is_read_off_the_event_loop_thread():
+    session, _, store = given(store=passage_store(ThreadStore()))
+
+    async def ask():
+        store.threads.clear()
+        await session.answer_from_passages("q", [GivenPassage(PAPER_B, LAST)])
+        return threading.get_ident(), set(store.threads)
+
+    loop, threads = run(ask())
+    assert threads and loop not in threads
+
+
+def test_the_warnings_of_the_listing_and_of_the_answerer_are_in_the_result_and_given_to_warn():
+    session, _, _ = given(WarningQA(), passage_store(WarningStore()))
+    seen: list[str] = []
+    result = run(session.answer_from_passages("q", [GivenPassage(PAPER_B, LAST)], seen.append))
+    assert result.warnings == ("listing: a warning", "the answerer cut the sources")
+    assert list(result.warnings) == seen
+
+
+def test_the_timings_split_the_placing_from_the_answer():
+    ticks = itertools.count(0, 2)
+    session, _, _ = given(clock=lambda: float(next(ticks)))
+    result = run(session.answer_from_passages("q", [GivenPassage(PAPER_B, LAST)]))
+    # clock reads: start 0, before the answer 2, end 4
+    assert (result.timings.retrieve_s, result.timings.answer_s, result.timings.wall_s) == (
+        2.0,
+        2.0,
+        4.0,
+    )

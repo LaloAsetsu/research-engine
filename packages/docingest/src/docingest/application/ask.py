@@ -28,18 +28,22 @@ paper, and no search can weigh a number that every paper has.
 ``AskService.ask`` is one question: it opens the index and closes it again. ``AskSession`` is
 many: it keeps the index and the corpus listing open between questions and returns an
 ``AskResult`` (the answer, the chunks it was made from, the sources, the warnings, the timings
-and the index commit) instead of text.
+and the index commit) instead of text. ``AskSession.answer_from_passages`` answers from passages
+the caller already has, with no retrieval at all.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
+import unicodedata
 from bisect import bisect_right
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
+from functools import cache, partial
 from typing import Literal
 
 from ..domain.blocks import Kind, complete, partial_note, whole_blocks
@@ -83,6 +87,9 @@ MAX_ADDED = 4
 # 99.6% of the 40,609 blocks of 1,249 papers are within three chunks; the rest is a very long
 # equation or table, whose remaining text would crowd out the other chunks of the prompt.
 BLOCK_CHUNKS = 3
+# The warning of a given passage that is not in its paper starts with this, followed by the
+# 16-character id of the paper, so that a caller can tell which passage it is about.
+UNPLACED_WARNING = "a given passage was not found in"
 
 
 @dataclass(frozen=True)
@@ -125,6 +132,14 @@ class WholeBlocks:
     chunk_chars: int  # [qa] chunk_chars: the caption of a block is at most this long, a block
     # is completed up to ``BLOCK_CHUNKS`` times this
     sources: int  # [qa] answer_max_sources: only these first chunks are completed
+
+
+@dataclass(frozen=True)
+class GivenPassage:
+    """A passage of a paper that the caller chose as evidence, for ``answer_from_passages``."""
+
+    doc_id: str  # the full id of a paper in the corpus
+    text: str  # as the paper's Markdown holds it, give or take white space
 
 
 @dataclass(frozen=True)
@@ -412,6 +427,65 @@ class AskSession:
             AskTimings(answering - found.locked, done - answering, done - started),
         )
 
+    async def answer_from_passages(
+        self,
+        question: str,
+        passages: Sequence[GivenPassage],
+        warn: Callable[[str], None] | None = None,
+        on_phase: Callable[[Phase], None] | None = None,
+    ) -> AskResult:
+        """Answer ``question`` from exactly ``passages``, in that order. Nothing is retrieved:
+        no index, embedder or reranker is used, and the retrieval lock is not taken. The
+        passages reach the answerer as given: whole blocks, gate lists and the equation lookup
+        are not applied. The answer model reads exactly the given text only with ``[qa]
+        skip_summary``; without it PaperQA2 summarizes each passage, as on the index path.
+
+        Each passage is looked for in its paper's text, the first tier that finds it winning:
+        as it is; with any run of white space matching any other; and with white space,
+        ``$``, ``\\tag{..}``, ``\\begin{..}`` / ``\\end{..}`` and page markers left out and
+        Unicode, quotes, dashes and minus signs unified on both sides (a paper's display
+        equations carry that markup and a passage taken from another conversion may not).
+        The first occurrence gives the pages and the cited name (``"<16 hex> pages a-b"``) of the
+        context. A passage no tier finds is cited with all the pages of its paper (page 1 for a
+        paper with none) and ``warn`` is called once for it, with a message that starts with
+        ``UNPLACED_WARNING`` (see ``_unplaced``). The text is never changed. ``ValueError`` for
+        no passages and for a paper that is not in the corpus; the message names the paper by the
+        first 16 characters of its id. ``warn`` and the result's warnings are as in ``ask``.
+        ``on_phase`` gets only ``"answering"``, in the caller's event loop, once every passage is
+        placed. ``AskResult.contexts`` are the passages in the given order, ``index_generation``
+        is None and ``timings.retrieve_s`` is the time spent listing the corpus and placing
+        them, which is not the retrieval time of ``ask``."""
+        if not passages:
+            raise ValueError("no passages given")
+        started = self._clock()
+        service = self._service
+        seen: list[str] = []
+
+        def note(message: str) -> None:
+            seen.append(message)
+            if warn is not None:
+                warn(message)
+
+        documents, warnings = await asyncio.to_thread(service.store.corpus)
+        for w in warnings:
+            note(w)
+        contexts, sources = await asyncio.to_thread(
+            _place_passages, service.store, documents, passages, note
+        )
+        answering = self._clock()
+        if on_phase is not None:
+            on_phase("answering")
+        answer = await service.answer_from(question, contexts, sources, note)
+        done = self._clock()
+        return AskResult(
+            answer,
+            tuple(contexts),
+            tuple(d.manifest.doc_id for d in sources),
+            tuple(seen),
+            None,
+            AskTimings(answering - started, done - answering, done - started),
+        )
+
     async def warm_up(self) -> None:
         """Open the index, list the corpus and make the float32 copy now, with one search, so
         that the first question does not pay for them. Does nothing without an index."""
@@ -516,6 +590,123 @@ def retrieve(
     return top, list(seen.values())
 
 
+def _place_passages(
+    store: DocumentStore,
+    documents: list[StoredDocument],
+    passages: Sequence[GivenPassage],
+    warn: Callable[[str], None],
+) -> tuple[list[Chunk], list[StoredDocument]]:
+    """``passages`` as chunks with the pages and offsets of their text in their papers, and the
+    papers by first appearance (see ``AskSession.answer_from_passages``)."""
+    by_id = {d.manifest.doc_id: d for d in documents}
+    # joined pages, page starts, and the squeezed form the third tier needs, made once if at all
+    papers: dict[str, tuple[str, list[tuple[int, int]], Callable[[], tuple[str, list[int]]]]] = {}
+    chunks: list[Chunk] = []
+    for passage in passages:
+        label = passage.doc_id[:NAME_LENGTH]
+        if passage.doc_id not in by_id:
+            raise ValueError(f"paper {label} is not in the corpus")
+        if passage.doc_id not in papers:
+            markdown = store.markdown(by_id[passage.doc_id])  # an unreadable paper is raised
+            try:
+                pages = split_pages(markdown)
+            except ValueError:  # split_pages refuses Markdown with no page marker
+                pages = {}
+            document = "".join(text + PAGE_BREAK for text in pages.values())
+            papers[passage.doc_id] = (
+                document,
+                _page_starts(pages),
+                cache(partial(_squeezed, document)),
+            )
+        document, page_starts, squeezed = papers[passage.doc_id]
+        found = _find_text(document, passage.text, squeezed)
+        if found is None:
+            start = 0
+            first, last = _unplaced(passage.doc_id, page_starts, warn)
+        else:
+            start, stop = found
+            first, last = _page_at(page_starts, start), _page_at(page_starts, stop - 1)
+        name = f"{label} pages {first}-{last}"
+        chunks.append(Chunk(passage.doc_id, name, passage.text, first, last, start=start))
+    seen = {c.doc_id: by_id[c.doc_id] for c in chunks}
+    return chunks, list(seen.values())
+
+
+def _unplaced(
+    doc_id: str, page_starts: list[tuple[int, int]], warn: Callable[[str], None]
+) -> tuple[int, int]:
+    """The pages cited for a passage that is not in its paper's text: all of them, from the
+    first to the last (page 1 for a paper with no pages), with one warning. The one place that
+    decides what a passage that cannot be found means."""
+    first, last = (page_starts[0][1], page_starts[-1][1]) if page_starts else (1, 1)
+    warn(f"{UNPLACED_WARNING} {doc_id[:NAME_LENGTH]}; cited with pages {first}-{last}")
+    return first, last
+
+
+# What a display equation carries that another conversion of the same paper may not, a page
+# marker that a passage copied from document.md may hold, and white space.
+_IGNORED = re.compile(
+    r"\\tag\{[^{}]*\}|\\(?:begin|end)\{[^{}\s]*\}?|\$|<!-- page \d+ \| method=\w+ -->|\s+"
+)
+_UNIFIED = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+    }
+)
+
+
+def _squeezed(text: str) -> tuple[str, list[int]]:
+    """``text`` without what ``_IGNORED`` matches, each character in Unicode compatibility form
+    (NFKC) with quotes, dashes and minus signs unified, and the offset in ``text`` of each
+    character of the result. The form is taken character by character, so that the same
+    characters give the same result in a text and in a paper."""
+    kept: list[str] = []
+    origin: list[int] = []
+    at = 0
+    for ignored in [*_IGNORED.finditer(text), None]:
+        stop = len(text) if ignored is None else ignored.start()
+        for offset in range(at, stop):
+            form = unicodedata.normalize("NFKC", text[offset]).translate(_UNIFIED)
+            kept.append(form)
+            origin.extend([offset] * len(form))
+        if ignored is not None:
+            at = ignored.end()
+    return "".join(kept), origin
+
+
+def _find_text(
+    document: str, text: str, squeezed: Callable[[], tuple[str, list[int]]]
+) -> tuple[int, int] | None:
+    """Where ``text`` first occurs in ``document`` as ``(start, stop)``: as it is; with any run
+    of white space in ``text`` matching any run of white space in the document; with what
+    ``_IGNORED`` matches left out and Unicode, quotes, dashes and minus signs unified on both
+    sides (see ``_squeezed``); ``squeezed`` gives ``_squeezed(document)``. None when no tier finds
+    it."""
+    words = text.split()
+    if not words:
+        return None
+    at = document.find(text)
+    if at >= 0:
+        return at, at + len(text)
+    found = re.search(r"\s+".join(map(re.escape, words)), document)
+    if found:
+        return found.span()
+    needle, _ = _squeezed(text)
+    if not needle:
+        return None
+    folded, origin = squeezed()  # the paper's, for the tier-3 search
+    index = folded.find(needle)
+    if index < 0:
+        return None
+    return origin[index], origin[index + len(needle) - 1] + 1
+
+
 Notes = dict[
     tuple[str, int], tuple[Kind, ...]
 ]  # (doc id, chunk start) to the blocks it shows part of
@@ -598,17 +789,18 @@ def _page_starts(pages: dict[int, str]) -> list[tuple[int, int]]:
     return starts
 
 
+def _page_at(page_starts: list[tuple[int, int]], offset: int) -> int:
+    """The page that holds ``offset`` of the joined pages (see ``_page_starts``)."""
+    offsets = [at for at, _ in page_starts]
+    return page_starts[max(0, bisect_right(offsets, offset) - 1)][1]
+
+
 def _extended(
     chunk: Chunk, document: str, start: int, stop: int, page_starts: list[tuple[int, int]]
 ) -> Chunk:
     """``chunk`` as the paper's text from ``start`` to ``stop``, with the pages it now spans."""
-    offsets = [offset for offset, _ in page_starts]
-
-    def page_at(offset: int) -> int:
-        return page_starts[max(0, bisect_right(offsets, offset) - 1)][1]
-
-    first = min(chunk.first_page, page_at(start))
-    last = max(chunk.last_page, page_at(stop - 1))
+    first = min(chunk.first_page, _page_at(page_starts, start))
+    last = max(chunk.last_page, _page_at(page_starts, stop - 1))
     name = chunk.name
     if (first, last) != (chunk.first_page, chunk.last_page):
         name = f"{chunk.doc_id[:NAME_LENGTH]} pages {first}-{last}"
