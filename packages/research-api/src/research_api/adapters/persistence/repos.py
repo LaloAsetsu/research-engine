@@ -249,10 +249,6 @@ def _set_version(row: ArtifactRow) -> SetVersion:
     )
 
 
-def _set_path(ref: SetRef) -> str:
-    return f"sets/{ref.name}/{ref.version}.qset.jsonl"
-
-
 class SqlSetCatalog:
     """The catalog of question-set versions (``artifacts`` rows of kind ``qset``)."""
 
@@ -296,7 +292,6 @@ class SqlSetCatalog:
             md5=version.md5,
             items=version.items,
             corpus=version.corpus,
-            path=_set_path(version.ref),
             created_at=version.created_at,
             updated_at=version.updated_at,
             frozen_at=version.frozen_at,

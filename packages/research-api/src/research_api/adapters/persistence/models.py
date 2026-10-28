@@ -99,8 +99,7 @@ class ArtifactRow(Base):
     """The catalog of the files under ``data_dir``: one row per set version (kind ``qset``).
 
     The file is the content and its md5 is the identity; this row says who owns it, whether it is
-    still a draft, and what the catalog shows without reading the file. ``path`` is relative to
-    the data folder.
+    still a draft, and what the catalog shows without reading the file.
     """
 
     __tablename__ = "artifacts"
@@ -119,7 +118,6 @@ class ArtifactRow(Base):
     md5: Mapped[str] = mapped_column(String(32))
     items: Mapped[int] = mapped_column(Integer)
     corpus: Mapped[str | None] = mapped_column(String(128))
-    path: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
     updated_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
     frozen_at: Mapped[dt.datetime | None] = mapped_column(UtcDateTime)

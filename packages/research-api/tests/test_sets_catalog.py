@@ -154,24 +154,16 @@ def test_a_missing_corpus_and_frozen_time_stay_none(db: Database) -> None:
 
 def test_the_table_refuses_an_unknown_status_or_kind(db: Database) -> None:
     connection = sqlite3.connect(db.engine.url.database)
-    row = ("qset", "a", "v1", "x", "o", MD5_A, 1, None, "p", "2026-01-01", "2026-01-01")
+    row = ("qset", "a", "v1", "x", "o", MD5_A, 1, None, "2026-01-01", "2026-01-01")
     sql = (
-        "insert into artifacts (kind, name, version, status, owner, md5, items, corpus, path,"
-        " created_at, updated_at) values (?,?,?,?,?,?,?,?,?,?,?)"
+        "insert into artifacts (kind, name, version, status, owner, md5, items, corpus,"
+        " created_at, updated_at) values (?,?,?,?,?,?,?,?,?,?)"
     )
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(sql, row)
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(sql, ("run", *row[1:3], "draft", *row[4:]))
     connection.close()
-
-
-def test_the_path_column_is_relative_to_the_data_folder(db: Database) -> None:
-    db.sets.add(make("demo", "v2"))
-    connection = sqlite3.connect(db.engine.url.database)
-    (path,) = connection.execute("select path from artifacts").fetchone()
-    connection.close()
-    assert path == "sets/demo/v2.qset.jsonl"
 
 
 def test_parallel_saves_from_the_same_md5_let_exactly_one_through(db: Database) -> None:
