@@ -79,9 +79,9 @@ uv run docingest ask "What limits T1 in transmons?" -c config/examples/lab-serve
 ## Development
 
 - **One uv workspace.** The root [`pyproject.toml`](pyproject.toml) lists the packages (`packages/*`) and the supported platforms. All packages share one [`uv.lock`](uv.lock) and one environment (`.venv` at the root).
-- **Quality gates.** `./scripts/check.sh` checks the lock file and the documentation links, checks that the shell scripts parse (and run shellcheck where it is installed), then runs every package's own `scripts/check.sh` (ruff, ruff format, import-linter contracts, pyright, pytest with a coverage floor of 85%).
+- **Quality gates.** `./scripts/check.sh` checks the lock file and the documentation links, checks that the shell scripts parse (and run shellcheck where it is installed; CI always runs it), then runs every package's own `scripts/check.sh` (ruff, ruff format, import-linter contracts, pyright, pytest with a coverage floor of 85%).
 - **Web app.** [`apps/web`](apps/web/README.md) is not a uv member: it has its own pnpm lock and its gates (`apps/web/scripts/check.sh`: ESLint, Prettier, types, Vitest, build, bundle budget, API contract drift check). `./scripts/check.sh` runs them when `pnpm` is on the PATH.
-- **CI.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the same gates for each package in two jobs: Linux with core and dev dependencies, macOS with every extra. Two more jobs cover the web app: `web` (its gates) and `contract` (the OpenAPI drift check and a Playwright smoke test against the API in fake mode).
+- **CI.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the same gates for each package in two jobs: Linux with core and dev dependencies, macOS with every extra. A `shell` job runs a pinned shellcheck (0.11.0) on `deploy/research-api.sh`. Two more jobs cover the web app: `web` (its gates) and `contract` (the OpenAPI drift check and a Playwright smoke test against the API in fake mode).
 - **Contributing.** Conventions, the architecture rules and the pull-request checklist are in [packages/docingest/CONTRIBUTING.md](packages/docingest/CONTRIBUTING.md).
 
 ## License
