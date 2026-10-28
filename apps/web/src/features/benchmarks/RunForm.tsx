@@ -15,7 +15,8 @@ import { ProblemAlert } from "./ProblemAlert";
 import { runFormSchema, type RunFormValues } from "./schemas";
 import { Section } from "./Section";
 import { StateBadge } from "./StateBadge";
-import { ARMS, type ArmName, type Job } from "./types";
+import { useStartedJobs } from "./startedJobs";
+import { ARMS, type ArmName } from "./types";
 
 function toggled<T>(list: readonly T[], item: T, on: boolean): T[] {
   const without = list.filter((entry) => entry !== item);
@@ -34,7 +35,7 @@ export function RunForm() {
   const status = useServiceStatus();
   const start = useStartRuns();
   const jobsQuery = useJobs();
-  const [started, setStarted] = useState<Job[] | null>(null);
+  const started = useStartedJobs(jobsQuery.data);
   const [refused, setRefused] = useState(0);
   const ids = useId();
 
@@ -99,7 +100,7 @@ export function RunForm() {
         setRefused((count) => count + 1);
         return;
       }
-      setStarted(null);
+      started.show([]);
       start.mutate(
         {
           set: { name: values.set.slice(0, separator), version: values.set.slice(separator + 1) },
@@ -108,7 +109,7 @@ export function RunForm() {
           repeats: values.repeats,
           notes: values.notes.trim(),
         },
-        { onSuccess: (jobs) => setStarted(jobs) },
+        { onSuccess: (jobs) => started.show(jobs) },
       );
     },
     () => setRefused((count) => count + 1),
@@ -311,35 +312,31 @@ export function RunForm() {
       </form>
 
       <div aria-live="polite">
-        {started ? (
+        {started.jobs.length > 0 ? (
           <Alert role="none">
             <CircleCheck aria-hidden="true" />
-            <AlertTitle>{t("startedTitle", { count: started.length })}</AlertTitle>
+            <AlertTitle>{t("startedTitle", { count: started.count })}</AlertTitle>
             <AlertDescription>
               <ul className="grid gap-1">
-                {started.map((first) => {
-                  // the state and the place in line as the list of jobs has them now
-                  const job = jobsQuery.data?.find((entry) => entry.id === first.id) ?? first;
-                  return (
-                    <li key={job.id} className="flex flex-wrap items-center gap-2">
-                      <Link
-                        className="underline underline-offset-4"
-                        to={`/benchmarks/jobs/${job.id}`}
-                      >
-                        {t("startedJob", {
-                          arm: job.run?.arm.name ?? "",
-                          model: job.run?.model ?? "",
-                        })}
-                      </Link>
-                      <StateBadge state={job.state} />
-                      {job.position !== null && job.position !== undefined ? (
-                        <span className="text-muted-foreground">
-                          {job.position === 0 ? t("next") : t("ahead", { count: job.position })}
-                        </span>
-                      ) : null}
-                    </li>
-                  );
-                })}
+                {started.jobs.map((job) => (
+                  <li key={job.id} className="flex flex-wrap items-center gap-2">
+                    <Link
+                      className="underline underline-offset-4"
+                      to={`/benchmarks/jobs/${job.id}`}
+                    >
+                      {t("startedJob", {
+                        arm: job.run?.arm.name ?? "",
+                        model: job.run?.model ?? "",
+                      })}
+                    </Link>
+                    <StateBadge state={job.state} />
+                    {job.position !== null && job.position !== undefined ? (
+                      <span className="text-muted-foreground">
+                        {job.position === 0 ? t("next") : t("ahead", { count: job.position })}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
               </ul>
             </AlertDescription>
           </Alert>
