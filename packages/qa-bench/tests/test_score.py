@@ -420,6 +420,27 @@ def test_an_oracle_run_with_the_gold_passages_is_scored():
     assert one(result, "group", group="all", metric="all_keys")["mean"] == 1.0
 
 
+def test_an_oracle_error_line_has_no_contexts_to_check_but_an_answer_still_does():
+    q = small_set()
+    gold = [{"doc_id": DOC_A, "text": f"Passage of S-{i}."} for i in range(1, 5)]
+    failed = answer("S-2", None, contexts=[], error={"kind": "timeout", "message": "too slow"})
+    answers = [
+        answer("S-1", RIGHT, contexts=[gold[0]]),
+        failed,
+        answer("S-3", RIGHT, contexts=[gold[2]]),
+        answer("S-4", RIGHT, contexts=[gold[3]]),
+    ]
+    run = make_run("r1", q, answers, arm="oracle")
+    assert check_against_set(run, q) == []
+    result = scored(q, [run])
+    assert one(result, "group", group="all", metric="all_keys")["n"] == 4
+    wrong = make_run("r2", q, [*answers[:2], answer("S-3", RIGHT), answers[3]], arm="oracle")
+    (problem,) = check_against_set(wrong, q)
+    assert problem.path == "/contexts" and problem.line == wrong.line_of(2)
+    with pytest.raises(ScoreError, match="oracle"):
+        scored(q, [wrong])
+
+
 def test_naming_a_run_that_is_not_given_is_refused():
     q = small_set()
     r = run_of("r1", q, [RIGHT] * 4)

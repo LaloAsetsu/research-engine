@@ -41,7 +41,8 @@ def check_against_set(file: FormatFile, qset: FormatFile) -> list[Problem]:
     """What a run, a score or a reviews file gets wrong about the set it points at.
 
     Run: the set name and md5 match the set file, every answer is for an item of the set, and an
-    ``oracle`` answer's contexts are the gold passages (``md_text``, in set order). Score: the
+    ``oracle`` answer's contexts are the gold passages (``md_text``, in set order), except those of
+    an error line, which has no answer and so no contexts to check. Score: the
     set name and md5 match, every item record is for an item of the set. Reviews: the set name
     matches and every decision names an item of the set.
     """
@@ -58,7 +59,11 @@ def check_against_set(file: FormatFile, qset: FormatFile) -> list[Problem]:
             item = items.get(record["id"])
             if item is None:
                 problems.append(Problem(line, "/id", f"{record['id']!r} is not an item of the set"))
-            elif oracle and [c.get("text") for c in record["contexts"]] != _gold_texts(item):
+            elif (
+                oracle
+                and "error" not in record  # an answer that was never made read no passage
+                and [c.get("text") for c in record["contexts"]] != _gold_texts(item)
+            ):
                 problems.append(
                     Problem(
                         line,

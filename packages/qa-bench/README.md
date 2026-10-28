@@ -75,7 +75,7 @@ A schema sees one line. `load` and `build` also check these:
 
 | File | Rule |
 |---|---|
-| `qa-run/1` | `set.name` and `set.md5` are the set's; every answer is for an item of the set; an `oracle` answer's contexts are the gold passages (`md_text`, in set order) |
+| `qa-run/1` | `set.name` and `set.md5` are the set's; every answer is for an item of the set; an `oracle` answer's contexts are the gold passages (`md_text`, in set order), except on an error line, which has no answer and no contexts to check |
 | `qa-score/1` | `set.name` and `set.md5` are the set's; every `item` record is for an item of the set |
 | `reviews/1` | `set` is the set's name; every decision names an item of the set |
 
@@ -156,7 +156,7 @@ A metric whose inputs a run lacks is `null` on the item and is left out of the g
 
 numpy gives no stream guarantee between versions; `npcompat` follows numpy 2.x, checked against 2.5.3, and the tests pin values taken from it (and compare many more when numpy is installed).
 
-**Refused.** A run whose set name or md5 is not the set file's, an answer to a question the set does not have, an oracle run whose contexts are not the gold passages, two runs with one `run_id`, a pair that names an unknown run or a run with itself, a pair given twice, a group that cannot be written. A run with questions unanswered, or searched on a corpus the set does not name, is a warning (printed by the command and kept in the header notes).
+**Refused.** A run whose set name or md5 is not the set file's, an answer to a question the set does not have, an oracle run with an answer whose contexts are not the gold passages (an error line is not checked), two runs with one `run_id`, a pair that names an unknown run or a run with itself, a pair given twice, a group that cannot be written. A run with questions unanswered, or searched on a corpus the set does not name, is a warning (printed by the command and kept in the header notes).
 
 **Not done.** Folding `reviews/1` grades into the metrics, a bootstrap cluster by paper or mirror pair (only `id`), the multi-paper metrics, multiple choice, the circuit grader, and the model call that extracts a short answer for QASPER (the extracted answer is read from `ext.short`).
 
