@@ -7,25 +7,24 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import MEMBER, sign_in_as_member
+from helpers import BELL, MEMBER, sign_in_as_member
 
 from research_api.entrypoints.cli import openapi_document
 from research_api.entrypoints.http.security import CSRF_HEADER, SESSION_COOKIE
 
 PROBLEM = "application/problem+json"
 UNAUTHENTICATED = "urn:research-api:problem:unauthenticated"
-BELL_TEXT = json.dumps(
-    {
-        "format": "circuit/1",
-        "wires": 1,
-        "parts": [[[{"kind": "gate", "label": "H", "targets": [1]}]]],
-    }
-)
+BELL_TEXT = json.dumps(BELL)
+BELL_STATE = [0.7071067811865476, 0, 0, 0.7071067811865476]
 
 ROUTES = [
     ("post", "/api/v1/circuits/parse", {"latex": "x"}),
     ("post", "/api/v1/circuits/run", {"circuit_json": BELL_TEXT}),
-    ("post", "/api/v1/circuits/check", {"circuit_json": BELL_TEXT}),
+    (
+        "post",
+        "/api/v1/circuits/check",
+        {"circuit_json": BELL_TEXT, "target": {"state": BELL_STATE}},
+    ),
     ("get", "/api/v1/circuits/conventions", None),
 ]
 
@@ -46,6 +45,13 @@ def test_no_session_is_a_401(client: TestClient, method: str, path: str, body: A
 def test_a_member_is_served(client: TestClient, method: str, path: str, body: Any) -> None:
     sign_in_as_member(client)
     assert send(client, method, path, body).status_code == 200
+
+
+@pytest.mark.parametrize("path", ["run", "check"])
+def test_a_member_gets_a_result_and_not_a_refusal(client: TestClient, path: str) -> None:
+    sign_in_as_member(client)
+    body = next(b for m, p, b in ROUTES if p.endswith(f"/{path}"))
+    assert client.post(f"/api/v1/circuits/{path}", json=body).json()["status"] == "ok"
 
 
 @pytest.mark.parametrize(("method", "path", "body"), ROUTES)
@@ -76,7 +82,7 @@ def test_a_temporary_password_must_be_changed_first(
 def test_a_write_without_the_csrf_header_is_a_403(
     client: TestClient, method: str, path: str, body: Any
 ) -> None:
-    client.post("/api/v1/auth/login", json=MEMBER)
+    assert client.post("/api/v1/auth/login", json=MEMBER).status_code == 204
     response = send(client, method, path, body)
     assert response.status_code == 403
     assert response.json()["detail"] == "The CSRF token is missing or wrong."

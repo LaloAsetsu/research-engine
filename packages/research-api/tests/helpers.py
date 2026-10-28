@@ -29,6 +29,18 @@ MEMBER = {"username": "beto", "password": "test-password-beto-02"}
 ORIGIN = {"Origin": LOOPBACK}
 SEED_FILE = Path(__file__).parent / "fixtures" / "seed-users.json"
 
+# H on wire 1, then X on wire 2 controlled by wire 1: the circuit the HTTP tests send as a good one.
+BELL = {
+    "format": "circuit/1",
+    "wires": 2,
+    "parts": [
+        [
+            [{"kind": "gate", "label": "H", "targets": [1]}],
+            [{"kind": "x", "label": "X", "targets": [2], "controls": [1]}],
+        ]
+    ],
+}
+
 
 class MovableClock:
     """A clock the test moves by hand, to cross session and rate-limit windows."""
