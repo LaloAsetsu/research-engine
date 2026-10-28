@@ -34,6 +34,7 @@ from ..domain.errors import (
     UnavailableError,
 )
 from ..domain.jobs import (
+    ENGINE_ARMS,
     MAX_ARMS,
     MAX_MODELS,
     MAX_NOTES,
@@ -73,6 +74,7 @@ from ..domain.runs import (
     partial_text,
 )
 from ..domain.sets import Actor, SetRef
+from ..ports.ask import AskEngine
 from ..ports.clock import Clock
 from ..ports.jobs import (
     ArmCall,
@@ -159,6 +161,7 @@ class JobDesk:
         sets: ManageSets,
         set_formats: SetFormats,
         arms: Arms,
+        engine: AskEngine,
         models: ModelServer,
         clock: Clock,
         gpu: Lane,
@@ -173,6 +176,7 @@ class JobDesk:
         self._sets = sets
         self._set_formats = set_formats
         self._arms = arms
+        self._engine = engine
         self._models = models
         self._clock = clock
         self._gpu = gpu
@@ -259,10 +263,24 @@ class JobDesk:
             reason = self._arms.refusal(arm.name)
             if reason is not None:
                 raise UnavailableError(reason)
+        served = (
+            self._engine.answer_model().name
+            if any(arm.name in ENGINE_ARMS for arm in request.arms)
+            else None
+        )
         for index, name in enumerate(request.models):
             info = await self._models.get(name)
             if info is None:
                 raise _bad(f"/models/{index}", "No such model. See GET /models.")
+            for arm_index, arm in enumerate(request.arms):
+                if arm.name in ENGINE_ARMS and name != served:
+                    message = (
+                        f"The {arm.name} arm answers with the model docingest is set up with, "
+                        f"{served}, so it cannot run on {name}. Ask for {served}, "
+                        f"or use the bare arm to ask {name} without papers."
+                    )
+                    # in `detail` too: a client may show only that
+                    raise InvalidInputError(message, (FieldError(f"/arms/{arm_index}", message),))
             if not info.available:
                 raise UnavailableError(
                     f"The model {info.label} does not answer right now.",
@@ -595,18 +613,17 @@ class JobDesk:
             raise ConflictError("The question set is no longer the file this run started on.")
         items = {i["id"]: i for i in self._set_formats.peek(data).items}
         expected = list(expected_keys(list(items), params.repeats))
-        info = await self._models.get(params.model)
-        facts = ModelFacts(
-            params.model, info.label if info else None, info.revision if info else None
-        )
+        facts = await self._model_facts(params)
         header, done = self._open_run_file(job, params, run_id, facts, row.corpus)
+        if params.arm.name in ENGINE_ARMS:
+            self._check_same_model(header, facts)
         todo = [key for key in expected if key not in done]
         have = len(expected) - len(todo)
         self._repo.set_progress(job.id, Progress(have, len(expected)))
         self._log(
             job.id,
             f"started: {have} of {len(expected)} answers are already in the file, "
-            f"{len(todo)} to ask ({params.arm.name}, model {params.model})",
+            f"{len(todo)} to ask ({params.arm.name}, model {facts.name})",
         )
         self._interleave = (
             self._gpu.finished(ASK_PRIORITY),
@@ -647,6 +664,42 @@ class JobDesk:
         """Asks that went through the GPU lane during this run, this session and before."""
         asks_before, base = self._interleave
         return base + self._gpu.finished(ASK_PRIORITY) - asks_before
+
+    async def _model_facts(self, params: RunParams) -> ModelFacts:
+        """The model for the run header. ``bare`` calls the model of the request. The engine arms
+        run on the engine's model, so the header names that one (its revision when docingest pins
+        one, else the one the settings give the entry of the same name). The request named it
+        too, so a docingest that was set up with another model since (a restart) is a conflict."""
+        name, revision = params.model, None
+        if params.arm.name in ENGINE_ARMS:
+            used = self._engine.answer_model()
+            if used.name != params.model:
+                raise ConflictError(
+                    f"This run asked for {params.model}, and docingest now answers with "
+                    f"{used.name}. Start a new run."
+                )
+            name, revision = used.name, used.revision
+        info = await self._models.get(name)
+        return ModelFacts(
+            name, info.label if info else None, revision or (info.revision if info else None)
+        )
+
+    @staticmethod
+    def _check_same_model(header: Mapping[str, Any], facts: ModelFacts) -> None:
+        """A resumed run goes on with the model it started on: its file holds one model's answers
+        under one header. The revision counts only when both sides have one."""
+        recorded = header.get("model", {})
+        was, was_revision = recorded.get("id"), recorded.get("revision")
+        if was != facts.name:
+            started, now = was, facts.name
+        elif was_revision and facts.revision and was_revision != facts.revision:
+            started, now = f"{was} at {was_revision}", f"{facts.name} at {facts.revision}"
+        else:
+            return
+        raise ConflictError(
+            f"This run was started on {started}, and docingest now answers with {now}. "
+            "Start a new run."
+        )
 
     def _open_run_file(
         self, job: Job, params: RunParams, run_id: str, facts: ModelFacts, corpus: str | None

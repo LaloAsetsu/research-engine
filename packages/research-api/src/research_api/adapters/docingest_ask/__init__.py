@@ -20,7 +20,9 @@ def open_docingest(config: Path) -> tuple[DocingestAskEngine, DocingestDocumentR
     """
     container = Container(load_config(config), log=lambda _message: None)
     return (
-        DocingestAskEngine(lambda: container.ask_session),
+        DocingestAskEngine(
+            lambda: container.ask_session, read_answer_model=lambda: container.answer_model
+        ),
         DocingestDocumentReader(lambda: container.adapter("store")),
     )
 

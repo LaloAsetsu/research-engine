@@ -200,3 +200,7 @@ def test_the_engine_is_ready_at_once_and_counts_its_questions() -> None:
     ask_fake("x")
     engine.close()
     assert engine.closed
+
+
+def test_the_fake_engine_answers_with_the_demo_model_that_answers() -> None:
+    assert FakeAskEngine().answer_model().name == "fake-model"

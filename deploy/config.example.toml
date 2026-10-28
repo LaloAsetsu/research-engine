@@ -46,3 +46,15 @@ session_max_days = 7
 # Failed sign-ins allowed per username in the window; one address gets four times as many.
 login_max_failures = 5
 login_window_minutes = 15
+
+# CHANGE: the models a benchmark run may ask. `name` is what the model server serves the model as
+# (vLLM's served name), `endpoint` is the address up to /v1 (no key, query or fragment), `label` is
+# shown in the web app, and `revision` is the commit of the served weights; it is written in the
+# run header. The harness and oracle arms answer with docingest's own model, so they run only on
+# the entry whose `name` is the last `/` part of docingest's model (`qwen-local` for
+# `llm = "openai/qwen-local"`). Without an entry no run can be requested.
+# [[models]]
+# name = "qwen-local"
+# endpoint = "http://127.0.0.1:8001/v1"
+# label = "Qwen (local)"
+# revision = "fill in the weights revision"

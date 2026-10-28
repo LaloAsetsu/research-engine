@@ -50,7 +50,10 @@ timeout_s = 30             # seconds to wait for one request (answer 422 after i
 # the server serves the model as (vLLM's served name), `endpoint` is the address up to /v1: no
 # key, no query, no fragment, a key never goes in this file. Plain http is for a loopback or
 # Tailscale address only; any other host needs https. `label` and `revision` are shown
-# and written in the run header. Without any entry only the harness and the fake mode run.
+# and written in the run header. A request names one of these models. The harness and oracle
+# arms answer with docingest's own model, so they run only on the entry whose `name` is the last
+# `/` part of docingest's model (`qwen-local` when `[qa] llm` is "openai/qwen-local"); any other
+# model is a 422 for those arms. Without any entry no run can be requested.
 # [[models]]
 # name = "qwen-local"
 # endpoint = "http://127.0.0.1:8001/v1"

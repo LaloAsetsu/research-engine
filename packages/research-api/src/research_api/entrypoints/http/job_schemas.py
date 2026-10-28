@@ -94,7 +94,9 @@ class RunRequestBody(_Body):
     models: list[ModelName] = Field(
         min_length=1,
         max_length=MAX_MODELS,
-        description="Names from `GET /models`. One job is made for each arm and model.",
+        description="Names from `GET /models`. One job is made for each arm and model. The "
+        "`harness` and `oracle` arms answer with docingest's own model and accept only that one "
+        "(a `422` at `/arms/{i}` names it); `bare` takes any.",
     )
     repeats: int = Field(default=1, ge=1, le=MAX_REPEATS)
     notes: str = Field(default="", max_length=MAX_NOTES)

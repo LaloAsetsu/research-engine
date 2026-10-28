@@ -32,6 +32,9 @@ JobKind = Literal["run", "score"]
 KINDS: tuple[JobKind, ...] = ("run", "score")
 
 ARMS = ("bare", "harness", "oracle")
+ENGINE_ARMS = ("harness", "oracle")
+"""The arms that docingest's answer engine answers, with the model it is set up with. The model
+of the request does not choose it (only ``bare`` calls the requested model)."""
 MAX_REPEATS = 10
 MAX_ARMS = 3
 MAX_MODELS = 4

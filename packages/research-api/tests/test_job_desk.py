@@ -44,6 +44,7 @@ from research_api.domain.errors import (
     UpstreamError,
 )
 from research_api.domain.jobs import ArmSpec, JobError, JobState, Progress, RunParams, ScoreOptions
+from research_api.domain.runs import ModelFacts
 from research_api.domain.sets import SetRef
 
 
@@ -53,8 +54,13 @@ def arms() -> ScriptedArms:
 
 
 @pytest.fixture
-def container(arms: ScriptedArms) -> Container:
-    box = container_with(arms, bench_recheck_s=0.02)
+def engine() -> ScriptedEngine:
+    return ScriptedEngine()
+
+
+@pytest.fixture
+def container(arms: ScriptedArms, engine: ScriptedEngine) -> Container:
+    box = container_with(arms, ask_engine=engine, bench_recheck_s=0.02)
     yield box
     box.close()
 
@@ -498,6 +504,127 @@ async def test_an_unknown_or_unavailable_model_is_refused_before_any_job_is_made
 
 
 @arun
+@pytest.mark.parametrize("arm", ["harness", "oracle"])
+async def test_an_engine_arm_refuses_a_model_that_is_not_the_one_docingest_answers_with(
+    desk: JobDesk, engine: ScriptedEngine, arm: str
+) -> None:
+    engine.model = ModelFacts("qwen-local")
+    with pytest.raises(InvalidInputError) as caught:
+        await desk.start_runs(ANA_ACTOR, request("bare", arm))
+    (error,) = caught.value.errors
+    assert error.path == "/arms/1"  # the arm that cannot run on it, not the closed-book one
+    assert f"The {arm} arm answers with the model docingest is set up with, qwen-local" in (
+        error.message
+    )
+    assert "cannot run on fake-model. Ask for qwen-local" in error.message
+    assert desk.list() == []
+    engine.model = ModelFacts("fake-model")
+    views = await desk.start_runs(ANA_ACTOR, request("bare", arm))
+    assert len(views) == 2
+
+
+@arun
+async def test_the_closed_book_arm_takes_any_model_even_when_the_engine_cannot_name_its_own(
+    desk: JobDesk, engine: ScriptedEngine
+) -> None:
+    engine.model = ModelFacts("qwen-local")
+    engine.model_error = UnavailableError("The answer engine is not configured correctly.")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    assert (await finished(desk, view)).job.state is JobState.DONE
+    with pytest.raises(UnavailableError, match="not configured"):
+        await desk.start_runs(ANA_ACTOR, request("harness"))
+    assert len(desk.list()) == 1
+
+
+@arun
+async def test_an_engine_run_records_docingests_model_and_its_revision(
+    desk: JobDesk, engine: ScriptedEngine
+) -> None:
+    engine.model = ModelFacts("fake-model", None, "commit-7")
+    bare, harness = await desk.start_runs(ANA_ACTOR, request("bare", "harness"))
+    await finished(desk, bare)
+    await finished(desk, harness)
+    bare_model = run_file(desk, bare)[0]["model"]
+    harness_model = run_file(desk, harness)[0]["model"]
+    assert bare_model["id"] == "fake-model" and bare_model["revision"] == "synthetic-0"
+    assert harness_model["id"] == "fake-model" and harness_model["revision"] == "commit-7"
+    assert harness_model["endpoint"] == "fake-model (demo)"  # the label of the entry of that name
+
+
+@arun
+async def test_an_engine_run_with_no_pinned_revision_records_the_one_of_the_settings_entry(
+    desk: JobDesk,
+) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("harness"))
+    await finished(desk, view)
+    assert run_file(desk, view)[0]["model"]["revision"] == "synthetic-0"
+
+
+@arun
+async def test_an_engine_run_asked_on_one_model_fails_when_docingest_has_another_at_the_start(
+    desk: JobDesk, engine: ScriptedEngine, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-001")
+    first, second = await desk.start_runs(ANA_ACTOR, request("bare", "harness"))
+    await until(lambda: desk.get(first.job.id).job.state is JobState.RUNNING)
+    engine.model = ModelFacts("restarted-with", None, "commit-9")  # docingest restarted meanwhile
+    gate.set()
+    await finished(desk, first)
+    failed = (await finished(desk, second)).job
+    assert failed.state is JobState.FAILED and failed.error is not None
+    assert failed.error.kind == "conflict"
+    assert failed.error.message == (
+        "This run asked for fake-model, and docingest now answers with restarted-with. "
+        "Start a new run."
+    )
+    assert desk._files.read_run(failed.artifact_id or "") is None  # no file, nothing recorded
+    assert run_file(desk, first)[0]["model"]["id"] == "fake-model"
+
+
+@arun
+@pytest.mark.parametrize(
+    ("then", "message"),
+    [
+        (
+            ModelFacts("other-model", None, "commit-1"),
+            "This run asked for fake-model, and docingest now answers with other-model.",
+        ),
+        (
+            ModelFacts("fake-model", None, "commit-2"),
+            "This run was started on fake-model at commit-1, and docingest now answers with "
+            "fake-model at commit-2.",
+        ),
+    ],
+)
+async def test_a_resumed_engine_run_goes_on_only_with_the_model_it_started_on(
+    desk: JobDesk, engine: ScriptedEngine, arms: ScriptedArms, then: ModelFacts, message: str
+) -> None:
+    engine.model = ModelFacts("fake-model", None, "commit-1")
+    gate = arms.hold("DP-002")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("harness"))
+    await until(lambda: ("harness", "DP-002", 1) in arms.calls)
+    desk.cancel(ANA_ACTOR, view.job.id)
+    gate.set()
+    assert (await finished(desk, view)).job.state is JobState.CANCELLED
+    kept = len(run_file(desk, view)[1])
+    engine.model = then  # docingest was restarted on another model
+    desk.resume(ANA_ACTOR, view.job.id)
+    failed = (await finished(desk, view)).job
+    assert failed.state is JobState.FAILED and failed.error is not None
+    assert failed.error.kind == "conflict"
+    assert failed.error.message == f"{message} Start a new run."
+    assert len(run_file(desk, view)[1]) == kept  # nothing the other model said was written
+
+
+def test_a_header_that_names_another_model_is_a_conflict_and_a_missing_revision_is_not() -> None:
+    header = {"model": {"id": "a", "revision": "r1"}}
+    with pytest.raises(ConflictError, match="started on a, and docingest now answers with b"):
+        JobDesk._check_same_model(header, ModelFacts("b", None, "r1"))
+    JobDesk._check_same_model(header, ModelFacts("a", None, None))
+    JobDesk._check_same_model({"model": {"id": "a"}}, ModelFacts("a", None, "r2"))
+
+
+@arun
 async def test_an_arm_the_service_cannot_run_is_refused(desk: JobDesk, arms: ScriptedArms) -> None:
     arms.refused["oracle"] = "No oracle yet."
     with pytest.raises(UnavailableError, match="No oracle yet"):
@@ -907,3 +1034,19 @@ def test_the_live_container_has_the_same_desk(tmp_path: Path) -> None:
         assert container.bench.jobs.get is not None
     finally:
         container.close()
+
+
+@arun
+async def test_a_resumed_engine_run_on_the_same_model_goes_on(
+    desk: JobDesk, engine: ScriptedEngine, arms: ScriptedArms
+) -> None:
+    engine.model = ModelFacts("fake-model", None, "commit-1")
+    gate = arms.hold("DP-002")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("harness"))
+    await until(lambda: ("harness", "DP-002", 1) in arms.calls)
+    desk.cancel(ANA_ACTOR, view.job.id)
+    gate.set()
+    await finished(desk, view)
+    desk.resume(ANA_ACTOR, view.job.id)
+    assert (await finished(desk, view)).job.state is JobState.DONE
+    assert pairs(run_file(desk, view)[1]) == every_pair(1)

@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from ask_helpers import engine_over
 from docingest.adapters.store.filesystem import FilesystemStore
 from docingest.application.ask import AskResult, AskService, AskSession, AskTimings
+from docingest.config import load_config
 from docingest.domain.chunking import Chunk
 from docingest.domain.errors import (
     IndexMismatchError,
@@ -20,6 +22,7 @@ from docingest.domain.errors import (
     RetrievalError,
 )
 from docingest.domain.models import (
+    AnswerModel,
     DocumentManifest,
     PageMethod,
     PageRecord,
@@ -53,6 +56,7 @@ from research_api.domain.errors import (
     UnavailableError,
     UpstreamError,
 )
+from research_api.domain.runs import ModelFacts
 from research_api.ports.ask import EngineHealth
 
 # --- a corpus on disk ---------------------------------------------------------------------
@@ -404,7 +408,7 @@ async def test_a_real_session_without_the_index_goes_through_the_adapter(
     store: FilesystemStore,
 ) -> None:
     answerer = Answerer()
-    engine = DocingestAskEngine(lambda: real_session(store, answerer))
+    engine = engine_over(lambda: real_session(store, answerer))
     phases: list[str] = []
     answer = await engine.ask(AskQuestion(QUESTION, AskOptions(use_index=False)), phases.append)
     assert phases == ["answering"]
@@ -461,7 +465,7 @@ def indexed_result() -> AskResult:
 @arun
 async def test_the_result_of_an_indexed_question_is_split_like_a_run_item() -> None:
     session = StubSession(indexed_result())
-    engine = DocingestAskEngine(lambda: session)  # type: ignore[arg-type]
+    engine = engine_over(lambda: session)  # type: ignore[arg-type]
     phases: list[str] = []
     options = AskOptions(use_index=True, bm25="always", whole_blocks=False)
     answer = await engine.ask(AskQuestion(QUESTION, options), phases.append)
@@ -500,7 +504,7 @@ async def test_the_session_opens_once_in_a_worker_thread() -> None:
         opened.append(1)
         return session
 
-    engine = DocingestAskEngine(open_session)  # type: ignore[arg-type]
+    engine = engine_over(open_session)  # type: ignore[arg-type]
     assert opened == [] and engine.health().state == "warming_up"
     await engine.warm_up()
     await engine.ask(AskQuestion(QUESTION), lambda _: None)
@@ -511,7 +515,7 @@ async def test_the_session_opens_once_in_a_worker_thread() -> None:
 
 
 def test_closing_an_engine_that_never_opened_does_nothing() -> None:
-    DocingestAskEngine(StubSession).close()  # type: ignore[arg-type]
+    engine_over(StubSession).close()  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -534,7 +538,7 @@ def test_closing_an_engine_that_never_opened_does_nothing() -> None:
 async def test_a_warm_up_that_fails_is_unavailable_with_a_fixed_reason(
     error: Exception, state: str, reason: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    engine = DocingestAskEngine(lambda: StubSession(error=error))  # type: ignore[arg-type]
+    engine = engine_over(lambda: StubSession(error=error))  # type: ignore[arg-type]
     await engine.warm_up()
     health = engine.health()
     assert (health.state, health.reason) == (state, reason)
@@ -553,7 +557,7 @@ async def test_a_warm_up_that_never_ends_becomes_unavailable_and_a_question_reco
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     session = HangingSession(indexed_result())
-    engine = DocingestAskEngine(lambda: session, warm_up_limit_s=0.05)  # type: ignore[arg-type]
+    engine = engine_over(lambda: session, warm_up_limit_s=0.05)  # type: ignore[arg-type]
     assert engine.health().state == "warming_up"
     await engine.warm_up()
     assert engine.health() == EngineHealth("unavailable", REASON_SLOW)
@@ -568,14 +572,14 @@ async def test_the_warm_up_limit_covers_building_the_session() -> None:
         threading.Event().wait(0.3)
         return StubSession(indexed_result())
 
-    engine = DocingestAskEngine(slow, warm_up_limit_s=0.05)  # type: ignore[arg-type]
+    engine = engine_over(slow, warm_up_limit_s=0.05)  # type: ignore[arg-type]
     await engine.warm_up()
     assert engine.health() == EngineHealth("unavailable", REASON_SLOW)
 
 
 @arun
 async def test_a_warm_up_within_the_limit_is_ready() -> None:
-    engine = DocingestAskEngine(lambda: StubSession(indexed_result()), warm_up_limit_s=5)  # type: ignore[arg-type]
+    engine = engine_over(lambda: StubSession(indexed_result()), warm_up_limit_s=5)  # type: ignore[arg-type]
     await engine.warm_up()
     assert engine.health().state == "ready"
 
@@ -585,7 +589,7 @@ async def test_a_session_that_cannot_be_built_is_unavailable() -> None:
     def broken() -> StubSession:
         raise ImportError("No module named 'paperqa'")
 
-    engine = DocingestAskEngine(broken)  # type: ignore[arg-type]
+    engine = engine_over(broken)  # type: ignore[arg-type]
     await engine.warm_up()
     assert engine.health().reason == REASON_CONFIG
     with pytest.raises(UnavailableError, match=r"`qa` extra"):
@@ -595,7 +599,7 @@ async def test_a_session_that_cannot_be_built_is_unavailable() -> None:
 @arun
 async def test_the_engine_recovers_when_the_index_is_built_later() -> None:
     session = StubSession(error=IndexNotReadyError("empty"))
-    engine = DocingestAskEngine(lambda: session)  # type: ignore[arg-type]
+    engine = engine_over(lambda: session)  # type: ignore[arg-type]
     await engine.warm_up()
     assert engine.health().state == "unavailable"
     session.error, session.result = None, indexed_result()
@@ -608,7 +612,7 @@ async def test_a_failed_question_says_what_to_do_and_marks_the_engine_only_when_
     None
 ):
     session = StubSession(error=IndexNotReadyError("the index is empty"))
-    engine = DocingestAskEngine(lambda: session)  # type: ignore[arg-type]
+    engine = engine_over(lambda: session)  # type: ignore[arg-type]
     with pytest.raises(UnavailableError) as raised:
         await engine.ask(AskQuestion(QUESTION), lambda _: None)
     assert raised.value.retry_after_s == 30 and "index" in raised.value.detail
@@ -625,7 +629,7 @@ async def test_a_failed_question_says_what_to_do_and_marks_the_engine_only_when_
 @arun
 async def test_a_surprise_is_raised_as_it_is_for_the_desk_to_log() -> None:
     surprise = KeyError("boom")
-    engine = DocingestAskEngine(lambda: StubSession(error=surprise))  # type: ignore[arg-type]
+    engine = engine_over(lambda: StubSession(error=surprise))  # type: ignore[arg-type]
     with pytest.raises(KeyError):
         await engine.ask(AskQuestion(QUESTION), lambda _: None)
 
@@ -637,7 +641,7 @@ async def test_cancelling_a_question_is_not_swallowed() -> None:
             await asyncio.sleep(3600)
             raise AssertionError
 
-    engine = DocingestAskEngine(Slow)  # type: ignore[arg-type]
+    engine = engine_over(Slow)  # type: ignore[arg-type]
     task = asyncio.ensure_future(engine.ask(AskQuestion(QUESTION), lambda _: None))
     await asyncio.sleep(0.05)
     task.cancel()
@@ -737,6 +741,49 @@ async def test_the_offline_engine_says_why_it_cannot_answer() -> None:
     engine.close()
 
 
+def test_the_answer_model_is_named_as_a_models_entry_names_it() -> None:
+    litellm = engine_over(StubSession)  # type: ignore[arg-type]
+    assert litellm.answer_model() == ModelFacts("qwen-local", None, None)  # "openai/qwen-local"
+    nested = AnswerModel(name="hosted_vllm/org/some-model", revision=None)
+    assert engine_over(StubSession, nested).answer_model().name == "some-model"  # type: ignore[arg-type]
+    plain = AnswerModel(name="llama3", revision=None)
+    assert engine_over(StubSession, plain).answer_model().name == "llama3"  # type: ignore[arg-type]
+
+
+def test_the_pinned_model_is_its_repository_name_and_its_commit() -> None:
+    pinned = AnswerModel(name="Owner/The-Model-27B", revision="0a1b2c3")
+    named = engine_over(StubSession, pinned).answer_model()  # type: ignore[arg-type]
+    assert named == ModelFacts("The-Model-27B", None, "0a1b2c3")
+
+
+def test_naming_the_answer_model_asks_no_session_and_no_server() -> None:
+    opened: list[int] = []
+    engine = engine_over(lambda: opened.append(1))  # type: ignore[arg-type,func-returns-value]
+    engine.answer_model()
+    assert opened == []
+
+
+def test_an_engine_that_cannot_name_its_model_says_so_and_a_surprise_is_raised() -> None:
+    def not_configured() -> AnswerModel:
+        raise NotConfiguredError('[adapters] qa is "x"')
+
+    engine = DocingestAskEngine(StubSession, read_answer_model=not_configured)  # type: ignore[arg-type]
+    with pytest.raises(UnavailableError) as raised:
+        engine.answer_model()
+    assert raised.value.detail == REASON_CONFIG
+
+    def surprise() -> AnswerModel:
+        raise KeyError("boom")
+
+    with pytest.raises(KeyError):
+        DocingestAskEngine(StubSession, read_answer_model=surprise).answer_model()  # type: ignore[arg-type]
+
+
+def test_the_offline_engine_cannot_name_a_model() -> None:
+    with pytest.raises(UnavailableError):
+        OfflineAskEngine().answer_model()
+
+
 def test_the_offline_reader_has_no_papers() -> None:
     reader = OfflineDocumentReader()
     assert reader.search("x", 5).total == 0
@@ -753,6 +800,8 @@ def test_open_docingest_reads_the_settings_and_opens_nothing(tmp_path: Path) -> 
     assert isinstance(engine, DocingestAskEngine) and isinstance(reader, DocingestDocumentReader)
     assert engine.health().state == "warming_up" and engine._session is None
     assert reader._opened is None
+    # the model is read from the settings alone: the pinned one, by the name of its repository
+    assert engine.answer_model().name == load_config(config).ocr.repo_id.rsplit("/", 1)[-1]
 
 
 def test_open_docingest_refuses_a_file_that_is_not_settings(tmp_path: Path) -> None:

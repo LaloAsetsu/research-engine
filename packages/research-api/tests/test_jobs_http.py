@@ -195,6 +195,8 @@ def test_three_arms_make_three_jobs_that_run_one_after_the_other() -> None:
         (run_body() | {"set": {"name": "demo-papers", "version": "v9"}}, 404, None),
         (run_body() | {"set": {"name": "demo-papers", "version": "v2"}}, 409, None),
         (run_body(model="fake-offline"), 503, None),
+        (run_body("harness", model="fake-offline"), 422, "/arms/0"),
+        (run_body("oracle", model="fake-offline"), 422, "/arms/0"),
     ],
 )
 def test_a_run_that_cannot_be_started_is_told_why(
@@ -207,6 +209,16 @@ def test_a_run_that_cannot_be_started_is_told_why(
         if path is not None:
             assert path in [e["path"] for e in done.json()["errors"]], done.json()
         assert client.get(JOBS).json() == []  # nothing was made
+
+
+def test_a_model_that_is_not_docingests_is_refused_for_the_engine_arms_with_the_right_one() -> None:
+    with bench_app(ScriptedArms()) as (client, _):
+        done = post(client, RUNS, json=run_body("harness", model="fake-offline"))
+        (error,) = done.json()["errors"]
+        assert error["path"] == "/arms/0"
+        assert "answers with the model docingest is set up with, fake-model" in error["message"]
+        assert done.json()["detail"] == error["message"]  # a client may show only the detail
+        assert post(client, RUNS, json=run_body("harness")).status_code == 202
 
 
 def test_a_draft_is_refused_with_the_way_out() -> None:

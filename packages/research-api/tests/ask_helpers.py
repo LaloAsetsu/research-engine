@@ -9,9 +9,12 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from docingest.application.ask import AskSession
+from docingest.domain.models import AnswerModel
 from fastapi.testclient import TestClient
 from helpers import LOOPBACK, SEED_FILE
 
+from research_api.adapters.docingest_ask import DocingestAskEngine
 from research_api.bootstrap import Container, Settings, build_container
 from research_api.bootstrap.seed import load_seed_users
 from research_api.domain.ask import (
@@ -21,11 +24,22 @@ from research_api.domain.ask import (
     AskTimings,
     Phase,
 )
+from research_api.domain.runs import ModelFacts
 from research_api.entrypoints.http import build_app
 from research_api.entrypoints.http.security import CSRF_COOKIE, CSRF_HEADER
 from research_api.ports.ask import AskEngine, EngineHealth, EngineState
 
 DOC = "c" * 64
+LITELLM_MODEL = AnswerModel(name="openai/qwen-local", revision=None)
+
+
+def engine_over(
+    open_session: Callable[[], AskSession],
+    model: AnswerModel = LITELLM_MODEL,
+    **kwargs: Any,
+) -> DocingestAskEngine:
+    """The docingest engine over a stand-in session, naming ``model`` as its answer model."""
+    return DocingestAskEngine(open_session, read_answer_model=lambda: model, **kwargs)
 
 
 def answer_for(text: str) -> AskAnswer:
@@ -47,6 +61,8 @@ class ScriptedEngine:
 
     def __init__(self, state: EngineState = "ready") -> None:
         self.state: EngineState = state
+        self.model = ModelFacts("fake-model")
+        self.model_error: Exception | None = None
         self.reason: str | None = None
         self.asked: list[str] = []
         self.options: list[AskQuestion] = []
@@ -62,6 +78,11 @@ class ScriptedEngine:
 
     def health(self) -> EngineHealth:
         return EngineHealth(self.state, self.reason, "g1")
+
+    def answer_model(self) -> ModelFacts:
+        if self.model_error is not None:
+            raise self.model_error
+        return self.model
 
     async def warm_up(self) -> None:
         self.warmed += 1

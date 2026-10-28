@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 from docingest.application.ask import AskOptions, AskSession
 from docingest.domain.errors import IndexMismatchError, IndexNotReadyError, NotConfiguredError
+from docingest.domain.models import AnswerModel
 
 from ...domain.ask import (
     AskAnswer,
@@ -18,6 +19,7 @@ from ...domain.ask import (
     Phase,
     read_formatted_answer,
 )
+from ...domain.runs import ModelFacts
 from ...ports.ask import EngineHealth
 from .errors import classify, start_reason
 
@@ -29,14 +31,31 @@ log = logging.getLogger("research_api.ask")
 WARM_UP_LIMIT_S = 90.0
 
 
+def served_name(model: AnswerModel) -> str:
+    """The name a ``[[models]]`` entry gives this model: the last ``/`` part of docingest's name.
+
+    For a litellm model (``DOCINGEST_LLM`` or ``[qa] llm``) ``name`` is the litellm string
+    (``openai/qwen-local``) and the part after the provider is what the server serves it as
+    (``qwen-local``). For the pinned model ``name`` is the repository (``org/repo``) and the part
+    after the owner is ``repo``.
+    """
+    return model.name.rsplit("/", 1)[-1]
+
+
 class DocingestAskEngine:
     def __init__(
-        self, open_session: Callable[[], AskSession], *, warm_up_limit_s: float = WARM_UP_LIMIT_S
+        self,
+        open_session: Callable[[], AskSession],
+        *,
+        read_answer_model: Callable[[], AnswerModel],
+        warm_up_limit_s: float = WARM_UP_LIMIT_S,
     ) -> None:
         """``open_session`` builds the session (its adapters, which may fail to import or to
         read their settings); it runs in a worker thread on the first use. Warming up that takes
-        longer than ``warm_up_limit_s`` leaves the engine ``unavailable`` until a question works."""
+        longer than ``warm_up_limit_s`` leaves the engine ``unavailable`` until a question works.
+        ``read_answer_model`` names the model docingest answers with (settings only)."""
         self._open_session = open_session
+        self._read_answer_model = read_answer_model
         self._warm_up_limit_s = warm_up_limit_s
         self._session: AskSession | None = None
         self._lock = threading.Lock()
@@ -117,6 +136,16 @@ class DocingestAskEngine:
                 result.timings.retrieve_s, result.timings.answer_s, result.timings.wall_s
             ),
         )
+
+    def answer_model(self) -> ModelFacts:
+        try:
+            model = self._read_answer_model()
+        except Exception as error:
+            translated = classify(error)
+            if translated is None:
+                raise
+            raise translated from None
+        return ModelFacts(served_name(model), None, model.revision)
 
     def close(self) -> None:
         if self._session is not None:

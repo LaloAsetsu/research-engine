@@ -31,6 +31,7 @@ from ...domain.documents import (
     resolve_doc_id,
 )
 from ...domain.errors import NotFoundError, UnavailableError, UpstreamError
+from ...domain.runs import ModelFacts
 from ...ports.ask import EngineHealth
 from .answers import (
     NO_EVIDENCE_EN,
@@ -40,6 +41,7 @@ from .answers import (
     pick_topic,
     render,
 )
+from .bench import ONLINE
 from .corpus import PAPERS, FakePaper
 
 GENERATION = "fake-0001"
@@ -64,6 +66,9 @@ class FakeAskEngine:
 
     async def warm_up(self) -> None:
         return None
+
+    def answer_model(self) -> ModelFacts:
+        return ModelFacts(ONLINE)
 
     def close(self) -> None:
         self.closed = True
