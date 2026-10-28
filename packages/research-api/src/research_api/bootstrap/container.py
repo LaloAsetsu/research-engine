@@ -288,64 +288,68 @@ def build_container(
         engine.close()
         release()
 
-    auth = build_auth(database, settings, clock, ArgonPasswordHasher(cheap=cheap_hashing))
-    for account in seed:
-        auth.users.create(
-            account.username,
-            account.display_name,
-            account.role,
-            password=account.password,
-            must_change_password=account.must_change_password,
-            language=account.language,
+    try:
+        auth = build_auth(database, settings, clock, ArgonPasswordHasher(cheap=cheap_hashing))
+        for account in seed:
+            auth.users.create(
+                account.username,
+                account.display_name,
+                account.role,
+                password=account.password,
+                must_change_password=account.must_change_password,
+                language=account.language,
+            )
+        caps = settings.circuit_caps.caps()
+        # quantum-sim and docingest's gate lists do no I/O, so fake mode runs the real engine.
+        circuits = CircuitsAdapter(timeout_s=caps.timeout_s)
+        sets = build_sets(database, data_dir, clock)
+        if fake:
+            seed_demo_sets(sets)
+        models = model_server or (FakeModelServer() if fake else _model_server(settings))
+        arms: Arms
+        if bench_arms is not None:
+            arms = bench_arms
+        elif fake:
+            arms = FakeArms(pause_s=fake_bench_pause_s)
+        else:
+            arms = LiveArms(engine=engine, models=models)
+        asks = AskDesk(engine=engine, clock=ask_clock)
+        bench = build_bench(
+            database=database,
+            data_dir=data_dir,
+            sets=sets,
+            arms=arms,
+            models=models,
+            clock=ask_clock,
+            lane=asks.lane,
+            api_version=api_version,
+            recheck_s=bench_recheck_s,
         )
-    caps = settings.circuit_caps.caps()
-    # quantum-sim and docingest's gate lists do no I/O, so fake mode runs the real engine.
-    circuits = CircuitsAdapter(timeout_s=caps.timeout_s)
-    sets = build_sets(database, data_dir, clock)
-    if fake:
-        seed_demo_sets(sets)
-    models = model_server or (FakeModelServer() if fake else _model_server(settings))
-    arms: Arms
-    if bench_arms is not None:
-        arms = bench_arms
-    elif fake:
-        arms = FakeArms(pause_s=fake_bench_pause_s)
-    else:
-        arms = LiveArms(engine=engine, models=models)
-    asks = AskDesk(engine=engine, clock=ask_clock)
-    bench = build_bench(
-        database=database,
-        data_dir=data_dir,
-        sets=sets,
-        arms=arms,
-        models=models,
-        clock=ask_clock,
-        lane=asks.lane,
-        api_version=api_version,
-        recheck_s=bench_recheck_s,
-    )
-    container = Container(
-        mode=mode,
-        settings=settings,
-        version=api_version,
-        clock=clock,
-        report_status=ReportStatus(
-            clock=clock, mode=mode, version=api_version, started_at=clock.now()
-        ),
-        parse_circuit=ParseCircuit(engine=circuits),
-        run_circuit=RunCircuit(engine=circuits, caps=caps),
-        check_circuit=CheckCircuit(engine=circuits, caps=caps),
-        circuit_conventions=ShowCircuitConventions(engine=circuits),
-        auth=auth,
-        asks=asks,
-        documents=DocumentServices(reader=reader),
-        sets=sets,
-        bench=bench,
-        close=cleanup,
-    )
-    # A process that exits without a clean shutdown still removes the fake database's folder.
-    weakref.finalize(container, cleanup)
-    return container
+        container = Container(
+            mode=mode,
+            settings=settings,
+            version=api_version,
+            clock=clock,
+            report_status=ReportStatus(
+                clock=clock, mode=mode, version=api_version, started_at=clock.now()
+            ),
+            parse_circuit=ParseCircuit(engine=circuits),
+            run_circuit=RunCircuit(engine=circuits, caps=caps),
+            check_circuit=CheckCircuit(engine=circuits, caps=caps),
+            circuit_conventions=ShowCircuitConventions(engine=circuits),
+            auth=auth,
+            asks=asks,
+            documents=DocumentServices(reader=reader),
+            sets=sets,
+            bench=bench,
+            close=cleanup,
+        )
+        # A process that exits without a clean shutdown still removes the fake database's folder.
+        weakref.finalize(container, cleanup)
+        return container
+    except Exception:
+        cleanup()  # a failed start must not leave the throwaway folder or the open database
+        raise
 
 
 def _fake_pause(text: str | None, *, name: str, default: float, limit: float) -> float:

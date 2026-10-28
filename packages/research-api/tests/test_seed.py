@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -66,7 +67,10 @@ def test_a_seed_with_an_unknown_field_is_refused_without_echoing_passwords(tmp_p
     assert "s3cret-value-here" not in str(refused.value)
 
 
-def test_a_seed_account_with_a_weak_password_stops_the_build() -> None:
+def test_a_seed_account_with_a_weak_password_stops_the_build_and_leaves_no_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     with pytest.raises(InvalidInputError):
         build_container(
             Settings.defaults(),
@@ -74,3 +78,4 @@ def test_a_seed_account_with_a_weak_password_stops_the_build() -> None:
             seed=[SeedUser(username="x", display_name="X", password="short")],
             cheap_hashing=True,
         )
+    assert list(tmp_path.iterdir()) == []
