@@ -1,5 +1,9 @@
 # Run guide
 
+The circuit extraction and assembly contract is documented in
+[Circuit retrieval and assembly](circuit-retrieval-and-assembly.md). It defines the provenance
+requirements, strict agent behavior, image review boundary, and future OpenQASM 3 export.
+
 This guide takes you from a clone of the repository to a cited answer from your own corpus, on a Linux machine with NVIDIA GPUs. It runs every step of the research engine: install, the three model servers, papers in, the chunk index, and `docingest ask`. Each step says what it prints and how long it took in the measurements.
 
 ## Use downloaded documents from an explicit Linux path
