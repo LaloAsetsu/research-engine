@@ -448,15 +448,16 @@ class AskSession:
         The first occurrence gives the pages and the cited name (``"<16 hex> pages a-b"``) of the
         context. A passage no tier finds is cited with all the pages of its paper (page 1 for a
         paper with none) and ``warn`` is called once for it, with a message that starts with
-        ``UNPLACED_WARNING`` (see ``_unplaced``). The text is never changed. ``ValueError`` for
-        no passages and for a paper that is not in the corpus; the message names the paper by the
-        first 16 characters of its id. ``warn`` and the result's warnings are as in ``ask``.
+        ``UNPLACED_WARNING`` (see ``_unplaced``). The text is never changed. ``ValueError`` for a
+        paper that is not in the corpus; the message names the paper by the first 16 characters
+        of its id. An empty list is a question with no evidence (one with no gold paper): the
+        corpus is not listed and the answerer is asked with no context, which PaperQA2 answers
+        with its own "I cannot answer" text and no request to the model. ``warn`` and the
+        result's warnings are as in ``ask``.
         ``on_phase`` gets only ``"answering"``, in the caller's event loop, once every passage is
         placed. ``AskResult.contexts`` are the passages in the given order, ``index_generation``
         is None and ``timings.retrieve_s`` is the time spent listing the corpus and placing
         them, which is not the retrieval time of ``ask``."""
-        if not passages:
-            raise ValueError("no passages given")
         started = self._clock()
         service = self._service
         seen: list[str] = []
@@ -466,12 +467,15 @@ class AskSession:
             if warn is not None:
                 warn(message)
 
-        documents, warnings = await asyncio.to_thread(service.store.corpus)
-        for w in warnings:
-            note(w)
-        contexts, sources = await asyncio.to_thread(
-            _place_passages, service.store, documents, passages, note
-        )
+        contexts: list[Chunk] = []
+        sources: list[StoredDocument] = []
+        if passages:  # with none there is nothing to place, and the corpus need not be listed
+            documents, warnings = await asyncio.to_thread(service.store.corpus)
+            for w in warnings:
+                note(w)
+            contexts, sources = await asyncio.to_thread(
+                _place_passages, service.store, documents, passages, note
+            )
         answering = self._clock()
         if on_phase is not None:
             on_phase("answering")

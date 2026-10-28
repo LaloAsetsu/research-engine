@@ -294,8 +294,6 @@ class PaperQAAnswerer:
         warn: Callable[[str], None],
         contexts: list[Chunk] | None = None,
     ) -> str:
-        if contexts is not None and not contexts:
-            raise ValueError("contexts is empty: nothing to answer from")
         settings = local_settings(self.cfg)
         if contexts is None:
             if self.cfg.qa.skip_summary:
@@ -306,7 +304,8 @@ class PaperQAAnswerer:
             embedding_model = settings.get_embedding_model()  # load the embedder once
             docs = await self._docs_from_corpus(documents, settings, embedding_model)
         else:
-            # Nothing is retrieved from given contexts, so nothing is embedded either.
+            # Nothing is retrieved from given contexts, so nothing is embedded either. With none
+            # (an empty list) PaperQA2 has nothing to read and answers "cannot answer" itself.
             embedding_model = _unused_embedding()
             if self.cfg.qa.skip_summary:
                 contexts = without_repeated_text(contexts)

@@ -765,20 +765,31 @@ def test_a_paper_without_page_markers_cites_page_1_and_warns():
 @pytest.mark.parametrize(
     ("passages", "message"),
     [
-        ([], "no passages"),
         ([GivenPassage(PAPER_C, "anything")], f"paper {PAPER_C[:16]} is not in the corpus"),
         ([GivenPassage(PAPER_B, LAST), GivenPassage(PAPER_C, LAST)], f"paper {PAPER_C[:16]}"),
     ],
 )
-def test_no_passages_or_an_unknown_paper_is_a_value_error_and_the_session_goes_on(
-    passages, message
-):
+def test_an_unknown_paper_is_a_value_error_and_the_session_goes_on(passages, message):
     session, qa, _ = given()
     seen: list[str] = []
     with pytest.raises(ValueError, match=message):
         run(session.answer_from_passages("q", passages, on_phase=seen.append))
     assert qa.contexts is None and seen == []  # the answerer was not called
     assert run(session.answer_from_passages("q", [GivenPassage(PAPER_B, LAST)])).answer
+
+
+def test_no_passages_asks_the_answerer_with_no_context_and_lists_nothing():
+    session, qa, store = given(store=passage_store(CountingStore()))
+    seen: list[str] = []
+    result = run(session.answer_from_passages("q", [], on_phase=seen.append))
+    assert qa.contexts == [] and qa.seen == []  # an empty list, not None (None retrieves)
+    assert (
+        result.answer == "answer to 'q' from 0 docs"
+        and result.contexts == ()
+        and result.sources == ()
+    )
+    assert result.warnings == () and result.index_generation is None
+    assert seen == ["answering"] and store.listings == 0
 
 
 class UnreadableStore(InMemoryStore):
