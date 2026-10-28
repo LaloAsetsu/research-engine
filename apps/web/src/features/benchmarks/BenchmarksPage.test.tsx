@@ -72,42 +72,69 @@ describe("the start form", () => {
     expect(up).toHaveAccessibleDescription(/revision synthetic-0. Answering/);
   });
 
-  it("explains why the oracle arm is unavailable when the service runs live", async () => {
+  it("lets the oracle arm be chosen when the service runs live", async () => {
+    let reads = 0;
     server.use(
-      http.get("*/api/v1/status", () => HttpResponse.json({ ...CAPTURE.status, mode: "live" })),
+      http.get("*/api/v1/status", () => {
+        reads += 1;
+        return HttpResponse.json({ ...CAPTURE.status, mode: "live" });
+      }),
     );
-    await openPage();
+    const user = await openPage();
     const oracle = await screen.findByRole("checkbox", { name: "oracle" });
-    await waitFor(() => expect(oracle).toBeDisabled());
-    expect(oracle).not.toBeChecked();
-    expect(oracle).toHaveAccessibleDescription(/Not available in live mode/);
-    expect(oracle).toHaveAccessibleDescription(/docingest to answer from given passages/);
+    await waitFor(() => expect(reads).toBeGreaterThan(1));
+    expect(oracle).toBeEnabled();
+    expect(oracle).toHaveAccessibleDescription(/gold passages/);
+    expect(oracle).toHaveAccessibleDescription(/no text is refused/);
+    await user.click(oracle);
+    expect(oracle).toBeChecked();
+    const seen = reads;
+    await waitFor(() => expect(reads).toBeGreaterThan(seen));
+    expect(oracle).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "harness" })).toBeEnabled();
     expect(screen.getByRole("checkbox", { name: "bare" })).toBeEnabled();
   });
 
-  it("takes the oracle arm out of a choice made before the mode was known", async () => {
-    let live = false;
-    server.use(
-      http.get("*/api/v1/status", () =>
-        HttpResponse.json({ ...CAPTURE.status, mode: live ? "live" : "fake" }),
-      ),
-    );
-    const user = await openPage();
-    const oracle = await screen.findByRole("checkbox", { name: "oracle" });
-    await waitFor(() => expect(oracle).toBeEnabled());
-    await user.click(oracle);
-    expect(oracle).toBeChecked();
-    live = true;
-    await waitFor(() => expect(screen.getByRole("checkbox", { name: "oracle" })).toBeDisabled());
-    expect(screen.getByRole("checkbox", { name: "oracle" })).not.toBeChecked();
-  });
-
-  it("makes the oracle arm available on test data", async () => {
+  it("lets the oracle arm be chosen on test data", async () => {
     await openPage();
     const oracle = await screen.findByRole("checkbox", { name: "oracle" });
     expect(oracle).toBeEnabled();
     expect(oracle).toHaveAccessibleDescription(/gold passages/);
+  });
+
+  it("shows the message of the server when it refuses an oracle run on a set without gold text", async () => {
+    const message =
+      "The oracle arm answers from the gold passage texts (md_text), and 7 of 9 questions of demo-papers v1 have a gold passage without one: DP-001, DP-002. Run it on a set whose gold passages all have it, or leave the oracle arm out.";
+    const bodies: unknown[] = [];
+    server.use(
+      http.get("*/api/v1/status", () => HttpResponse.json({ ...CAPTURE.status, mode: "live" })),
+      http.post("*/api/v1/runs", async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json(
+          {
+            type: "urn:research-api:problem:invalid-input",
+            title: "Unprocessable Content",
+            status: 422,
+            detail: message,
+            instance: "/api/v1/runs",
+            errors: [{ path: "/arms/0", message }],
+          },
+          { status: 422, headers: { "content-type": "application/problem+json" } },
+        );
+      }),
+    );
+    const user = await openPage();
+    await screen.findByRole("checkbox", { name: "fake-model (demo)" });
+    await user.click(screen.getByRole("checkbox", { name: "bare" }));
+    await user.click(screen.getByRole("checkbox", { name: "harness" }));
+    await user.click(screen.getByRole("checkbox", { name: "oracle" }));
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Request refused");
+    expect(alert).toHaveTextContent(message);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({ arms: [{ name: "oracle" }] });
+    expect(within(form()).queryByText(/^Started/)).not.toBeInTheDocument();
   });
 
   it("counts the jobs that the choice makes", async () => {
@@ -196,13 +223,7 @@ describe("the start form", () => {
   it("shows the words of the server when it refuses the run", async () => {
     server.use(
       http.post("*/api/v1/runs", () =>
-        problem(
-          503,
-          "The oracle arm needs docingest to answer from given passages, and it cannot do that yet.",
-          {
-            "retry-after": "30",
-          },
-        ),
+        problem(503, "The answering model is not ready yet.", { "retry-after": "30" }),
       ),
     );
     const user = await openPage();
@@ -210,7 +231,7 @@ describe("the start form", () => {
     await user.click(screen.getByRole("button", { name: "Start" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("The service cannot do this now");
-    expect(alert).toHaveTextContent("The oracle arm needs docingest to answer from given passages");
+    expect(alert).toHaveTextContent("The answering model is not ready yet.");
     expect(alert).toHaveTextContent("Try again in 30 s.");
   });
 

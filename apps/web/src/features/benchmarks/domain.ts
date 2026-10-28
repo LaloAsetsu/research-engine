@@ -94,11 +94,6 @@ export function shortHash(md5: string): string {
   return md5.slice(0, 8);
 }
 
-/** The oracle arm answers from the gold passages, which a live service cannot do yet. */
-export function oracleUnavailable(mode: "live" | "fake" | undefined): boolean {
-  return mode === "live";
-}
-
 // ---- the compare address ---------------------------------------------------------------
 
 export interface CompareAddress {

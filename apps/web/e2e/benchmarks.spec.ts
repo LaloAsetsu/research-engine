@@ -77,7 +77,7 @@ test.describe("B1: start a run", () => {
     await expect(form.getByRole("checkbox", { name: "fake-offline (demo, down)" })).toBeDisabled();
     await expect(form.getByText("Not answering, so it cannot be chosen.")).toBeVisible();
 
-    // on test data the oracle arm is available
+    // the oracle arm can be chosen like the others
     await expect(form.getByRole("checkbox", { name: "oracle" })).toBeEnabled();
     await form.getByRole("checkbox", { name: "oracle" }).check();
     await form.getByLabel("Notes").fill("B1 from the browser");

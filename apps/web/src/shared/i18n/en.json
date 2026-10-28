@@ -240,7 +240,7 @@
   },
   "benchmarks": {
     "intro": "Run the question sets through the arms and compare the answers. A run asks every question of a frozen set, one at a time, in the same line as the Ask screen. A score reads the runs and writes the means, the intervals and the paired comparison.",
-    "fakeNote": "The service runs on test data: the models, the papers and the answers are made up, and the oracle arm is available.",
+    "fakeNote": "The service runs on test data: the models, the papers and the answers are made up.",
     "state": {
       "queued": "Queued",
       "running": "Running",
@@ -277,9 +277,8 @@
       "armHint": {
         "bare": "The model alone, with no papers (closed book).",
         "harness": "The same engine as the Ask screen: search the papers, then answer.",
-        "oracle": "The model with the gold passages of each question: the best case for retrieval."
+        "oracle": "The model answers from the gold passages of each question: the best case for retrieval. A set with a gold passage that has no text is refused; a question with no gold paper gets no passage."
       },
-      "oracleLive": "Not available in live mode: it needs docingest to answer from given passages, and it cannot do that yet. It works on test data.",
       "models": "Models",
       "noModels": "The service lists no models.",
       "revision": "revision {{revision}}",

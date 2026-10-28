@@ -8,8 +8,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
-import { useJobs, useModels, useServiceStatus, useSets, useStartRuns } from "./api";
-import { frozenVersions, oracleUnavailable, shortHash, versionKey } from "./domain";
+import { useJobs, useModels, useSets, useStartRuns } from "./api";
+import { frozenVersions, shortHash, versionKey } from "./domain";
 import { CHECKBOX_CLASS, SELECT_CLASS } from "./fields";
 import { ProblemAlert } from "./ProblemAlert";
 import { runFormSchema, type RunFormValues } from "./schemas";
@@ -32,7 +32,6 @@ export function RunForm() {
   const { t: root } = useTranslation();
   const setsQuery = useSets();
   const modelsQuery = useModels();
-  const status = useServiceStatus();
   const start = useStartRuns();
   const jobsQuery = useJobs();
   const started = useStartedJobs(jobsQuery.data);
@@ -41,7 +40,6 @@ export function RunForm() {
 
   const versions = frozenVersions(setsQuery.data ?? []);
   const models = modelsQuery.data ?? [];
-  const noOracle = oracleUnavailable(status.data?.mode);
 
   const {
     control,
@@ -65,15 +63,6 @@ export function RunForm() {
   useEffect(() => {
     if (firstModel && getValues("models").length === 0) setValue("models", [firstModel]);
   }, [firstModel, getValues, setValue]);
-  // The live service cannot run the oracle arm: take it out of a choice made before that was known.
-  useEffect(() => {
-    if (noOracle && getValues("arms").includes("oracle")) {
-      setValue(
-        "arms",
-        getValues("arms").filter((arm) => arm !== "oracle"),
-      );
-    }
-  }, [noOracle, getValues, setValue]);
 
   const chosenArms = useWatch({ control, name: "arms" });
   const chosenModels = useWatch({ control, name: "models" });
@@ -188,7 +177,6 @@ export function RunForm() {
             <fieldset className="grid gap-2">
               <legend className="mb-1 text-sm font-medium">{t("arms")}</legend>
               {ARMS.map((arm: ArmName) => {
-                const blocked = arm === "oracle" && noOracle;
                 const inputId = `${ids}-arm-${arm}`;
                 return (
                   <div key={arm} className="flex items-start gap-2">
@@ -197,7 +185,6 @@ export function RunForm() {
                       type="checkbox"
                       className={`${CHECKBOX_CLASS} mt-0.5`}
                       checked={field.value.includes(arm)}
-                      disabled={blocked}
                       aria-describedby={`${inputId}-hint`}
                       onChange={(event) =>
                         field.onChange(toggled(field.value, arm, event.target.checked))
@@ -209,14 +196,6 @@ export function RunForm() {
                       </Label>
                       <p id={`${inputId}-hint`} className="text-sm text-muted-foreground">
                         {t(`armHint.${arm}`)}
-                        {blocked ? (
-                          <>
-                            {" "}
-                            <strong className="font-medium text-foreground">
-                              {t("oracleLive")}
-                            </strong>
-                          </>
-                        ) : null}
                       </p>
                     </div>
                   </div>

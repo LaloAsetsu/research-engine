@@ -240,7 +240,7 @@
   },
   "benchmarks": {
     "intro": "Pasa los conjuntos de preguntas por los brazos y compara las respuestas. Una corrida hace todas las preguntas de un conjunto congelado, de una en una, en la misma fila que la pantalla Preguntar. Una puntuación lee las corridas y escribe las medias, los intervalos y la comparación pareada.",
-    "fakeNote": "El servicio usa datos de prueba: los modelos, los artículos y las respuestas son inventados, y el brazo oracle está disponible.",
+    "fakeNote": "El servicio usa datos de prueba: los modelos, los artículos y las respuestas son inventados.",
     "state": {
       "queued": "En cola",
       "running": "En marcha",
@@ -277,9 +277,8 @@
       "armHint": {
         "bare": "El modelo solo, sin artículos (a libro cerrado).",
         "harness": "El mismo motor que la pantalla Preguntar: busca en los artículos y luego responde.",
-        "oracle": "El modelo con los pasajes de referencia de cada pregunta: el mejor caso para la recuperación."
+        "oracle": "El modelo responde a partir de los pasajes de referencia de cada pregunta: el mejor caso para la recuperación. Se rechaza un conjunto con un pasaje de referencia sin texto; una pregunta sin artículo de referencia no recibe pasajes."
       },
-      "oracleLive": "No disponible en modo real: necesita que docingest responda a partir de pasajes dados, y todavía no puede. Funciona con datos de prueba.",
       "models": "Modelos",
       "noModels": "El servicio no lista ningún modelo.",
       "revision": "revisión {{revision}}",

@@ -20,7 +20,6 @@ import {
   isScorable,
   keyOutcomes,
   metricNames,
-  oracleUnavailable,
   parseCompareAddress,
   passesFilter,
   progressShare,
@@ -116,11 +115,8 @@ describe("the start form", () => {
     expect(many.map(versionKey)).toEqual(["a/v1", "b/v2", "b/v10"]);
   });
 
-  it("shortens a hash and knows when the oracle cannot run", () => {
+  it("shortens a hash", () => {
     expect(shortHash("cb9cb733168663d4b04e75cdf16e5030")).toBe("cb9cb733");
-    expect(oracleUnavailable("live")).toBe(true);
-    expect(oracleUnavailable("fake")).toBe(false);
-    expect(oracleUnavailable(undefined)).toBe(false);
   });
 });
 
