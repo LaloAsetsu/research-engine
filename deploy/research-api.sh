@@ -38,8 +38,8 @@ ENV_LOCAL=${RESEARCH_API_ENV_FILE:-$HERE/env.local}
 # gives the widest mode, so the checks below refuse it instead of passing it.
 # shellcheck disable=SC2012
 mode_text() {
-  local m try
-  for try in 1 2 3; do
+  local m
+  for _ in 1 2 3; do
     if m=$(ls -ld -- "$1" 2> /dev/null); then
       printf '%s\n' "${m:0:10}"
       return 0
@@ -137,13 +137,13 @@ proc_stamp() {   # proc_stamp PID
 # service on another port) fails the second test. The files go away when a stop or start removes
 # them, so a missing one means "not running", not an error.
 running() {
-  local pid addr port cmd try
+  local pid addr port cmd
   pid=$(cat "$PIDF" 2> /dev/null) || return 1
   [[ $pid =~ ^[0-9]+$ ]] || return 1
   addr=$(cat "$ADDRF" 2> /dev/null) || return 1
   port=${addr##*:}
   [[ $port =~ ^[0-9]+$ ]] || return 1
-  for try in 1 2 3; do
+  for _ in 1 2 3; do
     kill -0 "$pid" 2> /dev/null || return 1
     cmd=$(proc_command "$pid")
     [ -z "$cmd" ] || break   # nothing is shown for a process that is in the middle of an exec
