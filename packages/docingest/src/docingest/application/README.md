@@ -1041,6 +1041,15 @@ does not use the index does.
 The answerer may still cut the passages: PaperQA2 drops a repeated text under `skip_summary` and
 halves `answer_max_sources` when the prompt overflows, and says so in `warnings`.
 
+#### The answer model
+
+`Container.answer_model` returns an `AnswerModel(name, revision)` (`domain.models`) that names
+the model writing the answers, chosen by the rule `adapters.qa.paperqa.llm_params` uses:
+`DOCINGEST_LLM`, else `[qa] llm`, else the pinned `[ocr]` model. For the pinned model `name` is
+its repository and `revision` its commit (`[qa] llm_revision`, else `[ocr] revision`); for a
+litellm model `name` is its string and `revision` is `None`. It holds no address and no key, so a
+caller can record it. It raises `NotConfiguredError` when `[adapters] qa` is not `paperqa`.
+
 ## `index.py`: keep the chunk index in step with the corpus
 
 `IndexService(*, store, embedder, index, chunk_chars, overlap, batch_chunks=512, log=print)`

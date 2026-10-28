@@ -18,6 +18,7 @@ from pathlib import Path
 
 from ...config import DEFAULT_LLM_BASE, AppConfig
 from ...domain.chunking import NAME_LENGTH, Chunk
+from ...domain.models import AnswerModel
 from ...domain.text import split_pages
 from ...ports import StoredDocument
 from ..models.huggingface import resolve
@@ -71,6 +72,17 @@ def llm_params(cfg: AppConfig) -> dict:
     if custom.startswith("openai/") and not os.environ.get("OPENAI_API_KEY"):
         params["api_key"] = "sk-local"
     return params
+
+
+def answer_model(cfg: AppConfig) -> AnswerModel:
+    """The model ``llm_params`` selects, without its address or key: the pinned model's
+    repository and revision, or the litellm string of ``DOCINGEST_LLM`` or ``[qa] llm``."""
+    custom = os.environ.get("DOCINGEST_LLM") or cfg.qa.llm
+    if custom is not None:
+        return AnswerModel(name=custom, revision=None)
+    rev = cfg.qa.llm_revision or cfg.ocr.revision
+    assert rev is not None
+    return AnswerModel(name=cfg.ocr.repo_id, revision=rev)
 
 
 def local_settings(cfg: AppConfig):
