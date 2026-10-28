@@ -196,6 +196,9 @@ class IngestService:
             update={"artifacts": self._conversion_artifacts(conversion.artifacts)}
         )
         stored = self.store.save(manifest, markdown)
+        save_circuits = getattr(self.store, "save_circuits", None)
+        if callable(save_circuits):
+            save_circuits(stored, extract_circuit_artifacts(markdown))
         persist_raw = getattr(self.store, "save_raw_output", None)
         if conversion.raw_output is not None and callable(persist_raw):
             persist_raw(stored, conversion.raw_output)

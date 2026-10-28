@@ -1,5 +1,7 @@
 """IngestService with in-memory fakes for every port: no files parsed, no model loaded."""
 
+import asyncio
+
 import pytest
 from fakes import (
     FakeConverter,
@@ -17,7 +19,7 @@ from docingest.application.ingest import IngestOptions
 from docingest.domain.errors import DocumentOpenError, UnsupportedInputError
 from docingest.domain.layout import PageLayout, TextLine
 from docingest.domain.models import PageMethod, PageSignals, SourceKind, SourceMetadata
-from docingest.ports import Segment
+from docingest.ports import Conversion, Segment
 
 TEXT = "Attention is all you need. " * 10
 
@@ -208,6 +210,32 @@ def test_latex_ingest_persists_source_backed_circuit_artifacts(src):
     assert artifacts[0]["source"].strip() == source
     assert artifacts[0]["circuits"][0]["format"] == "circuit/1"
     assert "```latex" in svc.store.markdown(doc)
+
+
+def test_async_ingest_persists_source_backed_circuit_artifacts(src):
+    source = r"""\begin{quantikz}
+& \gate{H} & \qw
+\end{quantikz}"""
+
+    class AsyncConverter:
+        fingerprint = "fake-rag-anything"
+
+        async def convert_async(self, path):
+            return Conversion(
+                segments=[Segment(f"Intro\n```latex\n{source}\n```\n")],
+                method=PageMethod.RAG_ANYTHING,
+                engine=self.fingerprint,
+            )
+
+    svc = make_service()
+    svc.multimodal = AsyncConverter()
+
+    doc = asyncio.run(svc.ingest_async(src("paper.pdf")))
+
+    artifacts = svc.store.circuits(doc)
+    assert len(artifacts) == 1
+    assert artifacts[0]["status"] == "parsed"
+    assert artifacts[0]["source"].strip() == source
 
 
 def test_a_segment_can_carry_its_own_method_and_warnings(src):
