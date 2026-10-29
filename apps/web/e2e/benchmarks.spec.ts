@@ -342,6 +342,17 @@ test.describe("B3 and B4: a run resumed after it was scored", () => {
           record.run_id === runId && record.group === "all" && record.metric === "all_keys",
       )?.n ?? 0;
     expect(questionsOf(after)).toBeGreaterThan(questionsOf(before));
+    // the run list gives the md5 the whole score recorded, and not the one of the partial score
+    interface Scored {
+      summary: { runs: { run_id: string; md5: string }[] };
+    }
+    const md5Of = async (score: string) =>
+      (await getJson<Scored>(api, `/api/v1/scores/${score}`)).summary.runs.find(
+        (held) => held.run_id === runId,
+      )?.md5;
+    const now = (await getJson<{ md5: string }>(api, `/api/v1/runs/${runId}`)).md5;
+    expect(await md5Of(whole)).toBe(now);
+    expect(await md5Of(partial)).not.toBe(now);
     // and a visit to the results finds that score from now on
     await page.goto(`/benchmarks/compare?runs=${runId}`);
     await expect(page.getByRole("table", { name: /Mean and 95% interval/ })).toBeVisible();

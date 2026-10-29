@@ -770,6 +770,76 @@ describe("finding or making the score", () => {
     expect(screen.queryByText("This score is older than the run")).not.toBeInTheDocument();
   });
 
+  describe("when the run list has the md5 of each run", () => {
+    /** What `GET /runs` gives: the md5 each run has now, `changes` replacing some of them. */
+    const withMd5 = (changes: Record<string, Record<string, unknown>> = {}) =>
+      server.use(
+        http.get("*/api/v1/runs", () =>
+          HttpResponse.json(
+            CAPTURE.runs.map((run) => ({
+              ...run,
+              md5: CAPTURE.scores[0]!.runs.find((held) => held.run_id === run.run_id)?.md5,
+              ...changes[run.run_id],
+            })),
+          ),
+        ),
+      );
+
+    it("opens the score when every md5 is the one it recorded", async () => {
+      withMd5();
+      const { app } = await open(address([RUNS.base, RUNS.harness], null));
+      await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });
+      expect(app.router.state.location.search).toContain(`score=${SCORE}`);
+    });
+
+    it("does not open a score when one md5 differs though the times have not moved", async () => {
+      // the run still ends before the score was made: only the md5 shows that it changed
+      withMd5({ [RUNS.harness]: { md5: "f".repeat(32) } });
+      const { app } = await open(address([RUNS.base, RUNS.harness], null));
+      const section = await screen.findByRole("region", { name: "Score these runs" });
+      expect(within(section).getByRole("link", { name: "Open it anyway" })).toBeInTheDocument();
+      expect(app.router.state.location.search).not.toContain("score=");
+    });
+
+    it("opens the score when the md5 are equal though the run says it ended after the score", async () => {
+      withMd5({ [RUNS.harness]: { ended: "2026-10-27T16:00:00+00:00" } });
+      const { app } = await open(address([RUNS.base, RUNS.harness], null));
+      await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });
+      expect(app.router.state.location.search).toContain(`score=${SCORE}`);
+    });
+
+    it("says that a score opened by its address is older when an md5 differs", async () => {
+      withMd5({ [RUNS.base]: { md5: "f".repeat(32) } });
+      await open(address([RUNS.base, RUNS.harness]));
+      expect(await screen.findByText("This score is older than the run")).toBeInTheDocument();
+      expect(
+        await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not say it when the md5 are equal", async () => {
+      withMd5({ [RUNS.base]: { ended: "2026-10-27T16:00:00+00:00" } });
+      await open(address([RUNS.base, RUNS.harness]));
+      await screen.findByRole("table", { name: /Mean and 95% interval of each metric/ });
+      expect(screen.queryByText("This score is older than the run")).not.toBeInTheDocument();
+    });
+
+    it("still takes a resumed run as newer than the score while its job is going", async () => {
+      // the file has not grown yet, so its md5 is still the scored one
+      const job = CAPTURE.jobs.find((entry) => entry.run?.run_id === RUNS.harness)!;
+      withMd5({ [RUNS.harness]: { ended: null, state: "cancelled" } });
+      server.use(
+        http.get(`*/api/v1/jobs/${job.id}`, () =>
+          HttpResponse.json({ ...job, state: "queued", settled: false, ended_at: null }),
+        ),
+      );
+      const { app } = await open(address([RUNS.base, RUNS.harness], null));
+      const section = await screen.findByRole("region", { name: "Score these runs" });
+      expect(within(section).getByRole("link", { name: "Open it anyway" })).toBeInTheDocument();
+      expect(app.router.state.location.search).not.toContain("score=");
+    });
+  });
+
   it("offers to score runs that no score holds, as a pair with base and variant", async () => {
     await open(address(pair, null));
     const section = await screen.findByRole("region", { name: "Score these runs" });

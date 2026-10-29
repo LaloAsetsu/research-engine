@@ -151,21 +151,50 @@ export function runChangedAt(
   return times.length === 0 ? null : Math.max(...times);
 }
 
-/** True when the score was made before the run last changed: it does not hold the run's latest answers. */
-export function scoreIsOlder(score: Pick<ScoreSummary, "created">, changedAt: number | null) {
+/** What the screen knows of a run as it is now, to tell whether a score still holds it. */
+export interface RunNow {
+  /** The md5 of the run file as the API reads it; null when the summary has none. */
+  md5: string | null;
+  /** When the run last changed (see `runChangedAt`); `Infinity` while it is going. */
+  changedAt: number | null;
+}
+
+export function runNow(
+  run: Pick<RunSummary, "ended" | "state" | "md5">,
+  job: Pick<Job, "ended_at" | "settled"> | null | undefined,
+): RunNow {
+  return { md5: run.md5 ?? null, changedAt: runChangedAt(run, job) };
+}
+
+/**
+ * True when the score does not hold the run as it is now. A run that is still going is newer than
+ * any score. Otherwise the md5 the score recorded for the run is compared with the md5 of the
+ * run file now: any difference is an older score, and equal md5 is a current one whatever the
+ * clocks say. Only when one of the two md5 is missing does the time rule decide: the score was
+ * made more than a second before the run last changed. A run the list does not have is not older.
+ */
+export function scoreIsOlder(
+  score: Pick<ScoreSummary, "created" | "runs">,
+  runId: string,
+  now: RunNow | undefined,
+): boolean {
+  if (now === undefined) return false;
+  if (now.changedAt === Number.POSITIVE_INFINITY) return true;
+  const scored = score.runs.find((run) => run.run_id === runId)?.md5;
+  if (scored && now.md5) return scored !== now.md5;
   const made = moment(score.created);
-  return made !== null && changedAt !== null && made + SCORE_CLOCK_MS < changedAt;
+  return made !== null && now.changedAt !== null && made + SCORE_CLOCK_MS < now.changedAt;
 }
 
 /**
  * The newest score that holds these runs, and for two runs the pair as (base, variant). With
- * `changedAt` (when each run last changed, by run id) a score made before one of its runs changed
+ * `now` (what each run is now, by run id) a score that does not hold one of its runs as it is now
  * is left out: `stale` is the newest of those, so the screen can say that it exists.
  */
 export function findScore(
   scores: readonly ScoreSummary[],
   runs: readonly string[],
-  changedAt: Readonly<Record<string, number | null>> = {},
+  now: Readonly<Record<string, RunNow | undefined>> = {},
 ): { current: ScoreSummary | null; stale: ScoreSummary | null } {
   const wanted = runs;
   const matches = scores.filter((score) => {
@@ -176,8 +205,7 @@ export function findScore(
     return score.pairs.some((pair) => pair.base_run === base && pair.var_run === variant);
   });
   matches.sort((a, b) => b.created.localeCompare(a.created));
-  const older = (score: ScoreSummary) =>
-    wanted.some((id) => scoreIsOlder(score, changedAt[id] ?? null));
+  const older = (score: ScoreSummary) => wanted.some((id) => scoreIsOlder(score, id, now[id]));
   return {
     current: matches.find((score) => !older(score)) ?? null,
     stale: matches.find(older) ?? null,

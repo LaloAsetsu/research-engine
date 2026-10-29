@@ -8,6 +8,7 @@ import {
   elapsedSeconds,
   findScore,
   runChangedAt,
+  runNow,
   scoreIsOlder,
   formatDuration,
   formatInterval,
@@ -31,6 +32,7 @@ import {
   summaryRows,
   versionKey,
 } from "./domain";
+import type { RunNow } from "./domain";
 import type { KeyFact, RunSummary, ScoreGroup, ScoreItem, ScoreSummary, SetEntry } from "./types";
 
 const JOB = CAPTURE.jobs[0]!;
@@ -189,8 +191,11 @@ describe("finding a score", () => {
     expect(findScore([], ["a"])).toEqual({ current: null, stale: null });
   });
 
+  // a run list without md5: only the times can tell
+  const timed = (changedAt: number | null): RunNow => ({ md5: null, changedAt });
+
   it("leaves out a score made before one of its runs changed, and says it exists", () => {
-    const changed = { a: Date.parse("2026-02-15T00:00:00Z"), b: null };
+    const changed = { a: timed(Date.parse("2026-02-15T00:00:00Z")), b: timed(null) };
     // "new" was made before a changed: the older "old" is older still, so no score is current
     const found = findScore(scores, ["a", "b"], changed);
     expect(found.current).toBeNull();
@@ -225,12 +230,12 @@ describe("finding a score", () => {
         Number.POSITIVE_INFINITY,
       );
     }
-    const made = { created: "2026-03-01T10:00:00+00:00" };
-    const changing = runChangedAt(cancelled, { ended_at: null, settled: false });
-    expect(scoreIsOlder(made, changing)).toBe(true);
-    const found = findScore([score("partial", "2026-03-01T10:00:00+00:00", ["a"], [])], ["a"], {
-      a: changing,
-    });
+    const partial = score("partial", "2026-03-01T10:00:00+00:00", ["a"], []);
+    const changing = timed(runChangedAt(cancelled, { ended_at: null, settled: false }));
+    expect(scoreIsOlder(partial, "a", changing)).toBe(true);
+    // the file has not grown yet, so its md5 is still the scored one: still going is newer
+    expect(scoreIsOlder(partial, "a", { ...changing, md5: "m" })).toBe(true);
+    const found = findScore([partial], ["a"], { a: changing });
     expect(found.current).toBeNull();
     expect(found.stale?.score_id).toBe("partial");
     // once it settles again its own end decides
@@ -239,12 +244,76 @@ describe("finding a score", () => {
     );
   });
 
-  it("allows for the second a score is written to", () => {
-    const made = { created: "2026-03-01T10:00:00+00:00" };
-    expect(scoreIsOlder(made, Date.parse("2026-03-01T10:00:00.659Z"))).toBe(false);
-    expect(scoreIsOlder(made, Date.parse("2026-03-01T10:00:02Z"))).toBe(true);
-    expect(scoreIsOlder(made, null)).toBe(false);
-    expect(scoreIsOlder({ created: "" }, Date.parse("2026-03-01T10:00:02Z"))).toBe(false);
+  it("allows for the second a score is written to when the times decide", () => {
+    const made = score("s", "2026-03-01T10:00:00+00:00", ["a"], []);
+    const at = (text: string) => scoreIsOlder(made, "a", timed(Date.parse(text)));
+    expect(at("2026-03-01T10:00:00.659Z")).toBe(false);
+    expect(at("2026-03-01T10:00:02Z")).toBe(true);
+    expect(scoreIsOlder(made, "a", timed(null))).toBe(false);
+    expect(
+      scoreIsOlder({ ...made, created: "" }, "a", timed(Date.parse("2026-03-01T10:00:02Z"))),
+    ).toBe(false);
+    expect(scoreIsOlder(made, "a", undefined)).toBe(false);
+  });
+
+  describe("by the md5 of the runs", () => {
+    const made = score("s", "2026-03-01T10:00:00+00:00", ["a", "b"], [["a", "b"]]);
+    const scoredA = {
+      ...made,
+      runs: made.runs.map((run) => ({ ...run, md5: `md5-${run.run_id}` })),
+    };
+    const same = (id: string, changedAt: number | null = null): RunNow => ({
+      md5: `md5-${id}`,
+      changedAt,
+    });
+
+    it("is older exactly when an md5 differs", () => {
+      const now = { a: same("a"), b: same("b") };
+      expect(scoreIsOlder(scoredA, "a", now.a)).toBe(false);
+      expect(findScore([scoredA], ["a", "b"], now).current?.score_id).toBe("s");
+      const grown = { ...now, b: { ...now.b, md5: "another" } };
+      expect(scoreIsOlder(scoredA, "a", grown.a)).toBe(false);
+      expect(scoreIsOlder(scoredA, "b", grown.b)).toBe(true);
+      expect(findScore([scoredA], ["a", "b"], grown)).toMatchObject({
+        current: null,
+        stale: { score_id: "s" },
+      });
+    });
+
+    it("sees a change the times miss: the file changed within the second of the score", () => {
+      // the run ended 0.4 s after the score was made: the time rule lets that pass
+      const changedAt = Date.parse("2026-03-01T10:00:00.400Z");
+      expect(scoreIsOlder(made, "a", timed(changedAt))).toBe(false);
+      expect(scoreIsOlder(scoredA, "a", { md5: "another", changedAt })).toBe(true);
+      // and a run whose times were lost (no end, no job) is still caught
+      expect(scoreIsOlder(scoredA, "a", { md5: "another", changedAt: null })).toBe(true);
+    });
+
+    it("keeps a score whose md5 are equal though the times say the run is newer", () => {
+      // a job row touched after the score, or a clock that was set back, changes no answer
+      const changedAt = Date.parse("2026-03-02T00:00:00Z");
+      expect(scoreIsOlder(made, "a", timed(changedAt))).toBe(true);
+      expect(scoreIsOlder(scoredA, "a", same("a", changedAt))).toBe(false);
+    });
+
+    it("falls back to the times when the summary or the score has no md5", () => {
+      const late = Date.parse("2026-03-02T00:00:00Z");
+      expect(scoreIsOlder(scoredA, "a", { md5: null, changedAt: late })).toBe(true);
+      expect(scoreIsOlder(scoredA, "a", { md5: null, changedAt: null })).toBe(false);
+      const unscored = { ...scoredA, runs: scoredA.runs.map((run) => ({ ...run, md5: "" })) };
+      expect(scoreIsOlder(unscored, "a", { md5: "x", changedAt: late })).toBe(true);
+      expect(scoreIsOlder(unscored, "a", { md5: "x", changedAt: null })).toBe(false);
+    });
+
+    it("takes the md5 of the run list into what it knows of a run", () => {
+      const run = { ended: "2026-03-01T10:00:00Z", state: "done", md5: "m1" } as const;
+      expect(runNow(run, { ended_at: "2026-03-01T10:05:00Z", settled: true })).toEqual({
+        md5: "m1",
+        changedAt: Date.parse("2026-03-01T10:05:00Z"),
+      });
+      expect(runNow({ ...run, md5: undefined }, null).md5).toBeNull();
+      expect(runNow({ ...run, md5: null }, null).md5).toBeNull();
+    });
   });
 
   it("scores a run that has stopped and flags one that did not reach its end", () => {

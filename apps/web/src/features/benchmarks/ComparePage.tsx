@@ -14,7 +14,7 @@ import {
   formatMoment,
   parseCompareAddress,
   progressShare,
-  runChangedAt,
+  runNow,
   scoreIsOlder,
   shortId,
 } from "./domain";
@@ -24,6 +24,7 @@ import { Results } from "./Results";
 import { ScoreStarter } from "./ScoreStarter";
 import { Section } from "./Section";
 import { StateBadge } from "./StateBadge";
+import type { RunNow } from "./domain";
 import type { RunSummary } from "./types";
 
 /** A scoring that is waiting, running or has stopped: the same words and bar as a run. */
@@ -79,19 +80,20 @@ function Scoring({ scoreId }: { scoreId: string }) {
 }
 
 /**
- * When each run of the address last changed (by run id), read from the run lists and the jobs
- * that made them. A run resumed after it was scored ends again, later than the score.
+ * What each run of the address is now (by run id): its md5 from the run list, and from the list
+ * and the jobs that made the runs whether it is still going and, for a list without md5, when it
+ * last changed.
  */
-function useChangedAt(runs: readonly string[]) {
+function useRunsNow(runs: readonly string[]) {
   const list = useRuns(false);
   const mine = list.data ? runs.flatMap((id) => list.data.filter((run) => run.run_id === id)) : [];
   const jobs = useRunJobs(mine);
-  const changedAt: Record<string, number | null> = {};
+  const now: Record<string, RunNow> = {};
   mine.forEach((run: RunSummary, index) => {
-    changedAt[run.run_id] = runChangedAt(run, jobs.jobs[index]);
+    now[run.run_id] = runNow(run, jobs.jobs[index]);
   });
   return {
-    changedAt,
+    now,
     pending: list.isPending || jobs.pending,
     // a failed background read keeps the list it had: only a list never read is a problem
     error: list.data ? null : list.error,
@@ -128,7 +130,7 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
   const noJob = job.isError && isApiError(job.error, 404);
   const ready = job.data?.state === "done" || noJob;
   const score = useScore(scoreId, ready);
-  const { changedAt, error: checkError } = useChangedAt(runs);
+  const { now, error: checkError } = useRunsNow(runs);
 
   if (job.isError && !noJob) {
     return <ProblemAlert error={job.error} onRetry={() => void job.refetch()} />;
@@ -161,7 +163,7 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
       </Alert>
     );
   }
-  const older = runs.some((id) => scoreIsOlder(score.data.summary, changedAt[id] ?? null));
+  const older = runs.some((id) => scoreIsOlder(score.data.summary, id, now[id]));
   return (
     <>
       {older ? <OlderScoreNotice runs={runs} created={score.data.summary.created} /> : null}
@@ -177,19 +179,19 @@ function ScoreLoader({ scoreId, runs }: { scoreId: string; runs: readonly string
 }
 
 /**
- * Without a score in the address: use the newest one that holds these runs and was made after
- * they last changed, or offer to make it.
+ * Without a score in the address: use the newest one that holds these runs as they are now, or
+ * offer to make it.
  */
 function ScoreFinder({ runs }: { runs: readonly string[] }) {
   const scores = useScores();
-  const { changedAt, pending, error, retry } = useChangedAt(runs);
+  const { now, pending, error, retry } = useRunsNow(runs);
   if (scores.isError && !scores.data) {
     return <ProblemAlert error={scores.error} onRetry={() => void scores.refetch()} />;
   }
   // Without the run list it cannot be told whether a score holds the latest answers of the runs.
   if (error) return <ProblemAlert error={error} onRetry={retry} />;
   if (!scores.data || pending) return <Skeleton className="h-24 w-full" />;
-  const { current, stale } = findScore(scores.data, runs, changedAt);
+  const { current, stale } = findScore(scores.data, runs, now);
   if (current) return <Navigate replace to={compareAddress(runs, current.score_id)} />;
   return <ScoreStarter runs={runs} older={stale} />;
 }
