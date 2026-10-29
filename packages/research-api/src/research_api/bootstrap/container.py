@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import tempfile
@@ -164,15 +165,36 @@ def _live_ask_parts(settings: Settings) -> tuple[AskEngine, DocumentReader]:
         raise SettingsError(f"docingest_config {path} cannot be used: {e}") from e
 
 
+def _release_quietly(*releases: Callable[[], None]) -> None:
+    """Run the releases in the order given, each one even if an earlier one fails.
+
+    For a start that failed: the caller raises the error that made it necessary, and an error
+    from a release must not take its place.
+    """
+    for release in releases:
+        with contextlib.suppress(Exception):
+            release()
+
+
 def _fake_storage() -> tuple[Database, Path, Callable[[], None]]:
     """A throwaway database and data folder in a private temporary folder, removed at the end."""
     folder = Path(tempfile.mkdtemp(prefix="research-api-fake-"))
-    database = Database.open(folder / "fake.sqlite3")
-    database.create_all()
+    try:
+        database = Database.open(folder / "fake.sqlite3")
+        try:
+            database.create_all()
+        except Exception:
+            _release_quietly(database.close)
+            raise
+    except Exception:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
 
     def cleanup() -> None:
-        database.close()
-        shutil.rmtree(folder, ignore_errors=True)
+        try:
+            database.close()
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
 
     return database, folder / "data", cleanup
 
@@ -279,12 +301,18 @@ def build_container(
     if fake:
         engine = ask_engine or FakeAskEngine(pause_s=fake_ask_pause_s)
         reader = document_reader or FakeDocumentReader()
-        database, data_dir, release = _fake_storage()
     else:
         engine, reader = _live_ask_parts(settings)
-        database = open_current_database(settings)
-        data_dir = storage_paths(settings)[0]
-        release = database.close
+    try:
+        if fake:
+            database, data_dir, release = _fake_storage()
+        else:
+            data_dir = storage_paths(settings)[0]
+            database = open_current_database(settings)
+            release = database.close
+    except Exception:
+        _release_quietly(engine.close)  # the storage failed to open: the engine is all there is
+        raise
 
     def cleanup() -> None:
         engine.close()
@@ -351,7 +379,8 @@ def build_container(
         weakref.finalize(container, cleanup)
         return container
     except Exception:
-        cleanup()  # a failed start must not leave the throwaway folder or the open database
+        # A failed start must not leave the throwaway folder, the open database or the engine.
+        _release_quietly(release, engine.close)
         raise
 
 
