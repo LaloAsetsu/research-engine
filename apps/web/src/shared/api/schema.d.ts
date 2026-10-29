@@ -1879,6 +1879,11 @@ export interface components {
             expected?: number | null;
             /** Job Id */
             job_id?: string | null;
+            /**
+             * Md5
+             * @description The md5 of the run file's bytes as read (unzipped when gzip): the value `ScoreRunOut.md5` records when the run is scored, so a score is of this version of the run when the two are equal.
+             */
+            md5?: string | null;
             /** Model */
             model: string;
             /** Notes */

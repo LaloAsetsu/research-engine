@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from bench_helpers import ANA_ACTOR, ScriptedArms, container_with
 from helpers import arun
+from qa_bench.formats import load_bytes, md5_hex
 
 from research_api.application.jobs import RunRequest, ScoreRequest
 from research_api.application.results import RunsDesk
@@ -127,6 +128,38 @@ def test_a_summary_is_read_again_when_the_file_grows(container: Container, runs:
     assert runs.get("growing-2").answers == 1
     drop(container, "growing-2", lines(header("growing-2"), answer("DP-001"), answer("DP-002")))
     assert runs.get("growing-2").answers == 2
+
+
+def test_the_md5_of_a_run_is_the_one_the_scorer_records_and_changes_when_the_file_grows(
+    container: Container, runs: RunsDesk
+) -> None:
+    data = lines(header("md5-1"), answer("DP-001"))
+    drop(container, "md5-1", data)
+    loaded = load_bytes(data).file
+    assert loaded is not None
+    assert runs.get("md5-1").md5 == loaded.md5 == md5_hex(data)
+    assert [r.md5 for r in runs.list()] == [loaded.md5]
+    grown = data + lines(answer("DP-002"))
+    drop(container, "md5-1", grown)
+    assert runs.get("md5-1").md5 == md5_hex(grown) != loaded.md5
+
+
+def test_the_md5_of_a_gzip_run_is_that_of_the_text_the_scorer_reads(
+    container: Container, runs: RunsDesk
+) -> None:
+    data = lines(header("md5-2", ended="2026-10-20T11:00:00+00:00"), answer("DP-001"))
+    drop(container, "md5-2", gzip.compress(data), ".qa-run.jsonl.gz")
+    loaded = load_bytes(gzip.compress(data)).file
+    assert loaded is not None
+    assert runs.get("md5-2").md5 == loaded.md5 == md5_hex(data)
+
+
+def test_the_md5_of_a_run_that_is_still_being_written_covers_the_half_line_it_holds(
+    container: Container, runs: RunsDesk
+) -> None:
+    whole = lines(header("md5-3"), answer("DP-001"))
+    drop(container, "md5-3", whole + b'{"id": "DP-002", "rep')
+    assert runs.get("md5-3").md5 == md5_hex(whole + b'{"id": "DP-002", "rep')
 
 
 def test_a_run_that_was_removed_is_gone_from_the_list(container: Container, runs: RunsDesk) -> None:

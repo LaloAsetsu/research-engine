@@ -296,6 +296,12 @@ class RunSummaryOut(BaseModel):
     )
     complete: bool
     notes: str
+    md5: str | None = Field(
+        default=None,
+        description="The md5 of the run file's bytes as read (unzipped when gzip): the value "
+        "`ScoreRunOut.md5` records when the run is scored, so a score is of this version of the "
+        "run when the two are equal.",
+    )
     job_id: str | None = None
     owner: str | None = None
     state: JobState | None = None

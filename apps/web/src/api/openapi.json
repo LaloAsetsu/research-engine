@@ -2518,6 +2518,18 @@
             ],
             "title": "Job Id"
           },
+          "md5": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The md5 of the run file's bytes as read (unzipped when gzip): the value `ScoreRunOut.md5` records when the run is scored, so a score is of this version of the run when the two are equal.",
+            "title": "Md5"
+          },
           "model": {
             "title": "Model",
             "type": "string"

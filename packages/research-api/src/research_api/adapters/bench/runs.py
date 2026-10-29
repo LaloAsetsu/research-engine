@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from qa_bench.formats import QA_RUN, check_line
-from qa_bench.formats.jsonl import GZIP_MAGIC, dumps_line, loads
+from qa_bench.formats.jsonl import GZIP_MAGIC, dumps_line, loads, md5_hex
 
 from ...domain.errors import CorruptStoreError
 from ...ports.jobs import RunData
@@ -72,4 +72,4 @@ class QaBenchRunFormats:
             raise CorruptStoreError("a run file has a qa-run/1 header that does not fit the format")
         if not all(isinstance(i, dict) for i in items):
             raise CorruptStoreError("a run file has a line that is not an object")
-        return RunData(header, items, end)
+        return RunData(header, items, end, md5_hex(raw))

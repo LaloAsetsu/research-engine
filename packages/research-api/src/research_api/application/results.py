@@ -69,6 +69,7 @@ class RunSummary:
     expected: int | None
     complete: bool
     notes: str
+    md5: str
     job_id: str | None = None
     owner: str | None = None
     state: str | None = None
@@ -220,6 +221,7 @@ class RunsDesk:
             expected=None,
             complete=header.get("ended") is not None,
             notes=str(header.get("notes", "")),
+            md5=run.md5,
         )
 
     def _with_job(self, summary: RunSummary, jobs: Mapping[str, Job]) -> RunSummary:

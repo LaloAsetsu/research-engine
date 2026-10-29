@@ -522,6 +522,21 @@ def test_runs_are_listed_newest_first_from_the_files() -> None:
         }
 
 
+def test_every_place_that_returns_a_run_summary_carries_the_md5_a_score_records() -> None:
+    with bench_app(ScriptedArms()) as (client, _):
+        job = start_run(client, "bare")
+        settled(client, job["id"])
+        run_id = job["run"]["run_id"]
+        listed = client.get(RUNS).json()[0]
+        assert listed["md5"] and len(listed["md5"]) == 32
+        assert client.get(f"{RUNS}/{run_id}").json()["md5"] == listed["md5"]
+        assert client.get(f"{RUNS}/{run_id}/items").json()["run"]["md5"] == listed["md5"]
+        asked = post(client, SCORES, json={"set": DEMO, "runs": [run_id]})
+        settled(client, asked.json()["id"])
+        (scored,) = client.get(f"{SCORES}/{asked.json()['id']}").json()["summary"]["runs"]
+        assert scored["md5"] == listed["md5"]
+
+
 # --- the whole path in fake mode, the way the demo goes --------------------------------------
 
 

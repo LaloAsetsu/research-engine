@@ -110,11 +110,14 @@ class BenchFiles(Protocol):
 @dataclass(frozen=True)
 class RunData:
     """A run file read leniently: the header, the complete item lines, and where the last
-    complete line ends (a half line left by a crash is not part of it)."""
+    complete line ends (a half line left by a crash is not part of it). ``md5`` is the file's
+    identity as the formats define it (of the unzipped bytes, half line included), the value a
+    scoring records for the run."""
 
     header: dict[str, Any]
     items: tuple[dict[str, Any], ...]
     complete_bytes: int
+    md5: str
 
 
 class RunFormats(Protocol):

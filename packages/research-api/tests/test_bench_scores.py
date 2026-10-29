@@ -92,3 +92,29 @@ async def test_the_score_file_sits_beside_the_runs_in_private_files(tmp_path: Pa
         assert str(tmp_path) not in str(root)
     finally:
         container.close()
+
+
+@arun
+async def test_the_md5_a_run_lists_is_the_md5_its_score_records_and_follows_the_file() -> None:
+    container = container_with(None)
+    try:
+        desk = container.bench.jobs
+        views = await desk.start_runs(
+            ANA_ACTOR, RunRequest(DEMO, (ArmSpec("bare"), ArmSpec("harness")), ("fake-model",), 2)
+        )
+        for view in views:
+            await finish(desk, view.job.id)
+        runs = tuple(v.job.artifact_id or "" for v in views)
+        job = await desk.start_score(
+            ANA_ACTOR, ScoreRequest(DEMO, runs, ScoreOptions(pairs=((runs[0], runs[1]),)))
+        )
+        await finish(desk, job.job.id)
+        header = container.bench.scores.get(job.job.id).header
+        scored = {r["run_id"]: r["md5"] for r in header["runs"]}
+        listed = {r.run_id: r.md5 for r in container.bench.runs.list()}
+        assert scored == listed and len(set(scored.values())) == 2
+        desk._files.append_run(runs[0], b'{"id": "DP-001", "repeat": 3, "answer": "x"}\n')
+        assert container.bench.runs.get(runs[0]).md5 != scored[runs[0]]
+        assert container.bench.runs.get(runs[1]).md5 == scored[runs[1]]
+    finally:
+        container.close()
