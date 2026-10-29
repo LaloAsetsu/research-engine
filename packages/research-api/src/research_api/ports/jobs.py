@@ -77,6 +77,10 @@ class LogChunk:
     size: int
 
 
+RunStamp = tuple[int, int, int, int]
+"""What ``BenchFiles.run_stamp`` returns; equal stamps mean the file was not touched."""
+
+
 class BenchFiles(Protocol):
     """The files under the private data folder: runs, scores and job logs. Bytes only."""
 
@@ -84,8 +88,12 @@ class BenchFiles(Protocol):
 
     def read_run(self, run_id: str) -> bytes | None: ...
 
-    def run_stamp(self, run_id: str) -> tuple[int, int] | None:
-        """(modification time in ns, size) to tell a changed file from an unchanged one."""
+    def run_stamp(self, run_id: str) -> RunStamp | None:
+        """(modification time in ns, size, inode, change time in ns) to tell a changed file from an
+        unchanged one. Time and size miss a replaced file and a copy that keeps the time; the inode
+        changes when a file is replaced, and the change time moves when the time is set back, which
+        no tool can undo. Only an in-place rewrite of the same size inside one clock tick of the
+        last write keeps all four."""
         ...
 
     def create_run(self, run_id: str, data: bytes) -> None:

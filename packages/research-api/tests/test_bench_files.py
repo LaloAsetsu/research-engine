@@ -9,6 +9,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from helpers import past_the_tick
 from qa_bench.formats import QA_RUN, check_line
 
 from research_api.adapters.bench import QaBenchRunFormats, QaBenchScorer
@@ -104,6 +105,40 @@ def test_the_stamp_changes_when_the_file_grows(store: BenchFileStore) -> None:
     before = store.run_stamp(RUN)
     store.append_run(RUN, formats.item_line(item("q1")))
     assert store.run_stamp(RUN) != before
+
+
+def test_the_stamp_changes_when_the_file_is_rewritten_with_its_time_and_size_kept(
+    store: BenchFileStore,
+) -> None:
+    store.create_run(RUN, b"old\n")
+    path = store.root / "runs" / f"{RUN}.qa-run.jsonl"
+    before, seen = store.run_stamp(RUN), path.stat()
+    past_the_tick(path, seen.st_ctime_ns)
+    path.write_bytes(b"new\n")
+    os.utime(path, ns=(seen.st_atime_ns, seen.st_mtime_ns))
+    after = store.run_stamp(RUN)
+    assert after is not None and before is not None
+    assert after[:2] == before[:2] and after != before
+
+
+def test_the_stamp_changes_when_a_file_of_the_same_size_and_time_replaces_it(
+    store: BenchFileStore,
+) -> None:
+    store.create_run(RUN, b"old\n")
+    path = store.root / "runs" / f"{RUN}.qa-run.jsonl"
+    before, seen = store.run_stamp(RUN), path.stat()
+    copy = path.with_name("copy")
+    copy.write_bytes(b"new\n")
+    os.utime(copy, ns=(seen.st_atime_ns, seen.st_mtime_ns))  # what ``cp -p`` does
+    copy.replace(path)
+    after = store.run_stamp(RUN)
+    assert after is not None and before is not None
+    assert after[:2] == before[:2] and after != before
+
+
+def test_the_stamp_is_the_same_for_a_file_that_was_not_touched(store: BenchFileStore) -> None:
+    store.create_run(RUN, b"old\n")
+    assert store.run_stamp(RUN) == store.run_stamp(RUN)
 
 
 def test_replacing_a_run_is_all_at_once(store: BenchFileStore) -> None:

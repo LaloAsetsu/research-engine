@@ -19,7 +19,7 @@ from pathlib import Path
 
 from ...domain.errors import ConflictError
 from ...domain.jobs import valid_job_id, valid_run_id
-from ...ports.jobs import LogChunk
+from ...ports.jobs import LogChunk, RunStamp
 from .private import FILE_MODE, ensure_private_dir, replace_file
 
 RUN_SUFFIX = ".qa-run.jsonl"
@@ -93,7 +93,7 @@ class BenchFileStore:
         except FileNotFoundError:
             return None
 
-    def run_stamp(self, run_id: str) -> tuple[int, int] | None:
+    def run_stamp(self, run_id: str) -> RunStamp | None:
         path = self._run_path(run_id)
         if path is None:
             return None
@@ -101,7 +101,7 @@ class BenchFileStore:
             info = path.stat()
         except FileNotFoundError:
             return None
-        return info.st_mtime_ns, info.st_size
+        return info.st_mtime_ns, info.st_size, info.st_ino, info.st_ctime_ns
 
     def create_run(self, run_id: str, data: bytes) -> None:
         if self._run_path(run_id) is not None:

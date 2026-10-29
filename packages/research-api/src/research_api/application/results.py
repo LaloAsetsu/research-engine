@@ -20,7 +20,7 @@ from typing import Any
 from ..domain.errors import CorruptStoreError, NotFoundError
 from ..domain.jobs import Job, valid_job_id, valid_run_id
 from ..domain.sets import SetRef, parse_header_name
-from ..ports.jobs import BenchFiles, JobRepo, RunFormats, ScoreData, Scorer
+from ..ports.jobs import BenchFiles, JobRepo, RunFormats, RunStamp, ScoreData, Scorer
 from ..ports.sets import SetFormats
 from .sets import ManageSets
 
@@ -156,7 +156,7 @@ class RunsDesk:
         self._sets = sets
         self._set_formats = set_formats
         self._lock = threading.Lock()
-        self._cache: dict[str, tuple[tuple[int, int], RunSummary | None]] = {}
+        self._cache: dict[str, tuple[RunStamp, RunSummary | None]] = {}
         self._checked: dict[str, _ItemCheck] = {}
 
     def _jobs_by_run(self) -> dict[str, Job]:

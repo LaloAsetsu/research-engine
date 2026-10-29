@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 from typing import Any
 
 import pytest
 from bench_helpers import ANA_ACTOR, ScriptedArms, container_with
-from helpers import arun
+from helpers import arun, past_the_tick
 from qa_bench.formats import load_bytes, md5_hex
 
 from research_api.application.jobs import RunRequest, ScoreRequest
@@ -128,6 +129,54 @@ def test_a_summary_is_read_again_when_the_file_grows(container: Container, runs:
     assert runs.get("growing-2").answers == 1
     drop(container, "growing-2", lines(header("growing-2"), answer("DP-001"), answer("DP-002")))
     assert runs.get("growing-2").answers == 2
+
+
+def test_a_summary_is_read_again_when_the_file_is_rewritten_with_its_time_and_size_kept(
+    container: Container, runs: RunsDesk
+) -> None:
+    first = lines(header("same-size"), answer("DP-001", answer="aa"))
+    second = lines(header("same-size"), answer("DP-001", answer="bb"))
+    assert len(first) == len(second)
+    drop(container, "same-size", first)
+    path = container.bench.jobs._files.root / "runs" / "same-size.qa-run.jsonl"
+    seen = path.stat()
+    assert runs.get("same-size").md5 == md5_hex(first)
+    past_the_tick(path, seen.st_ctime_ns)
+    path.write_bytes(second)
+    os.utime(path, ns=(seen.st_atime_ns, seen.st_mtime_ns))
+    assert runs.get("same-size").md5 == md5_hex(second)
+
+
+def test_a_summary_is_read_again_when_a_copy_of_the_same_size_and_time_replaces_the_file(
+    container: Container, runs: RunsDesk
+) -> None:
+    first = lines(header("copied"), answer("DP-001", answer="aa"))
+    second = lines(header("copied"), answer("DP-001", answer="bb"))
+    drop(container, "copied", first)
+    path = container.bench.jobs._files.root / "runs" / "copied.qa-run.jsonl"
+    seen = path.stat()
+    assert runs.get("copied").md5 == md5_hex(first)
+    copy = path.with_name("copy")
+    copy.write_bytes(second)
+    os.utime(copy, ns=(seen.st_atime_ns, seen.st_mtime_ns))
+    copy.replace(path)
+    assert runs.get("copied").md5 == md5_hex(second)
+
+
+def test_a_file_that_did_not_change_is_not_read_again(container: Container, runs: RunsDesk) -> None:
+    drop(container, "steady", lines(header("steady"), answer("DP-001")))
+    files = container.bench.jobs._files
+    original, reads = files.read_run, []
+
+    def read(run_id: str) -> bytes | None:
+        reads.append(run_id)
+        return original(run_id)
+
+    files.read_run = read  # type: ignore[method-assign]
+    runs.list()
+    runs.list()
+    runs.get("steady")
+    assert reads == ["steady"]
 
 
 def test_the_md5_of_a_run_is_the_one_the_scorer_records_and_changes_when_the_file_grows(
