@@ -46,6 +46,8 @@ The API does not serve sign-in yet, so in development `/login` finds no `/api/v1
 | `pnpm e2e`                          | Playwright tests against the built app and the API in fake mode                                                                                                                             |
 | `scripts/check.sh [--e2e]`          | All of the above except `e2e` unless asked; the repository's `scripts/check.sh` calls it when pnpm is on the PATH. `pnpm audit` is not part of it: it needs the network and runs in CI only |
 
+The build never inlines a font as a `data:` URI, which research-api's `font-src 'self'` would block, and keeps only the woff2 file of each KaTeX font (`vite.config.ts`, checked by `src/app/build.test.ts`).
+
 Playwright needs a browser: `pnpm exec playwright install chromium`, or `E2E_CHANNEL=chrome pnpm e2e` to use an installed Google Chrome. Traces and screenshots are off on purpose, so no corpus text is ever written to a report.
 
 ## The API contract and the generated client
