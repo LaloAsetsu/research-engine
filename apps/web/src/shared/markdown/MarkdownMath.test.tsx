@@ -238,6 +238,22 @@ describe("Markdown with math", () => {
   });
 });
 
+describe("display math closed in the middle of a line", () => {
+  it("ends the formula there and shows the text after it as text", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {"$$\\begin{equation}\nx^2\n\\end{equation}$$ where $x$ is a number.\n\nNext paragraph."}
+      </MarkdownMath>,
+    );
+    const display = container.querySelectorAll(".katex-display");
+    expect(display).toHaveLength(1);
+    expect(display[0]).not.toHaveTextContent("Next paragraph");
+    expect(screen.getByText(/where/)).toBeInTheDocument();
+    expect(screen.getByText("Next paragraph.")).toBeInTheDocument();
+    expect(container.querySelectorAll(".katex-error")).toHaveLength(0);
+  });
+});
+
 describe("pipe tables", () => {
   const table =
     "| Gate | Qubits | Note |\n| :--- | ---: | --- |\n| H | 1 | one qubit |\n| CNOT | 2 | two qubits |";

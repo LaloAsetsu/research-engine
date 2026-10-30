@@ -5,6 +5,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { cn } from "@/shared/lib/utils";
+import { closeDisplayMathOnItsOwnLine } from "./displayMath";
 import { remarkPlainFootnotes } from "./plainFootnotes";
 import { escapeBarsInTableMath } from "./tableMath";
 
@@ -191,7 +192,7 @@ export function MarkdownMath({ children, components, className }: MarkdownMathPr
         rehypePlugins={REHYPE_PLUGINS}
         components={{ ...SAFE_COMPONENTS, ...components }}
       >
-        {escapeBarsInTableMath(children)}
+        {escapeBarsInTableMath(closeDisplayMathOnItsOwnLine(children))}
       </Markdown>
     </div>
   );
