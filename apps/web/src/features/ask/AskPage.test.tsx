@@ -142,9 +142,83 @@ describe("sending a question (A1)", () => {
     serve((source) => source.emit("answer", TRANSMON));
     await screen.findByRole("heading", { name: "Answer" });
 
-    await user.type(screen.getByLabelText("Your question"), " and second{Meta>}{Enter}{/Meta}");
+    expect(screen.getByLabelText("Your question")).toHaveValue("");
+    await user.type(screen.getByLabelText("Your question"), "Second{Meta>}{Enter}{/Meta}");
     await waitFor(() => expect(seen.bodies).toHaveLength(2));
-    expect(seen.bodies[1]?.question).toBe("First and second");
+    expect(seen.bodies[1]?.question).toBe("Second");
+  });
+
+  it("empties the question box once the question is sent, and Edit and ask again puts it back", async () => {
+    const user = await openAsk();
+    takeAsks();
+    const box = screen.getByLabelText("Your question");
+    await user.click(screen.getByRole("button", { name: "Options for this question" }));
+    await user.click(screen.getByRole("radio", { name: "Never" }));
+    await user.keyboard("{Escape}");
+    await ask(user, "First question");
+    expect(box).toHaveValue("");
+    expect(screen.getByText("0 of 4,000 characters")).toBeInTheDocument();
+    serve((source) => replay(source, capturedAsk("transmon").events));
+    await screen.findByRole("heading", { name: "Answer" });
+
+    // typing the next question starts from nothing
+    await user.type(box, "Second question");
+    expect(box).toHaveValue("Second question");
+    await user.clear(box);
+
+    // the options change after sending; Edit and ask again brings back the ones the question had
+    await user.click(screen.getByRole("button", { name: /^Options for this question/ }));
+    await user.click(screen.getByRole("radio", { name: "Always" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Edit and ask again" }));
+    expect(box).toHaveValue("First question");
+    expect(box).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: /^Options for this question/ }));
+    expect(screen.getByRole("radio", { name: "Never" })).toBeChecked();
+  });
+
+  it("lets a refused question be edited and asked again, with its options", async () => {
+    const user = await openAsk();
+    server.use(http.post("*/api/v1/asks", () => problem(422, "The question has no words.")));
+    await user.click(screen.getByRole("button", { name: "Options for this question" }));
+    await user.click(screen.getByRole("radio", { name: "Never" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByLabelText("Your question"), "A question");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The question was refused");
+    const box = screen.getByLabelText("Your question");
+    expect(box).toHaveValue("");
+
+    await user.click(within(alert).getByRole("button", { name: "Edit and ask again" }));
+    expect(box).toHaveValue("A question");
+    expect(box).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: /^Options for this question/ }));
+    expect(screen.getByRole("radio", { name: "Never" })).toBeChecked();
+  });
+
+  it("empties the question box when Ask anyway sends the question", async () => {
+    withStatus({ state: "unavailable", reason: "The index could not be opened." });
+    takeAsks();
+    const user = await openAsk();
+    await screen.findByText("The engine reports a problem");
+    await user.type(screen.getByLabelText("Your question"), "A question");
+    await user.click(screen.getByRole("button", { name: "Ask anyway" }));
+    await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+    expect(screen.getByLabelText("Your question")).toHaveValue("");
+  });
+
+  it("leaves the box alone when a failed question is tried again", async () => {
+    const user = await openAsk();
+    const seen = takeAsks();
+    await ask(user, "simulate-unavailable please");
+    serve((source) => replay(source, capturedAsk("unavailable").events));
+    const alert = await screen.findByRole("alert");
+    await user.type(screen.getByLabelText("Your question"), "The next one");
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(seen.bodies).toHaveLength(2));
+    expect(seen.bodies[1]?.question).toBe("simulate-unavailable please");
+    expect(screen.getByLabelText("Your question")).toHaveValue("The next one");
   });
 
   it("sends one question at a time", async () => {
@@ -964,9 +1038,10 @@ describe("cancelling and the history", () => {
     await user.click(screen.getByRole("button", { name: "Cancel question" }));
     await waitFor(() => expect(deleted).toBe("a1"));
     expect(await screen.findByText("You cancelled this question.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ask" })).toBeEnabled();
+    // the box was emptied when the question went out, so there is nothing to send until it is typed
+    expect(screen.getByLabelText("Your question")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Ask" })).toBeDisabled();
 
-    await user.clear(screen.getByLabelText("Your question"));
     await user.click(screen.getByRole("button", { name: "Edit and ask again" }));
     expect(screen.getByLabelText("Your question")).toHaveValue("Q");
     expect(screen.getByLabelText("Your question")).toHaveFocus();

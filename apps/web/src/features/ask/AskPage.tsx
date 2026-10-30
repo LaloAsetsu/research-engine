@@ -87,6 +87,12 @@ function EntryView({
   const { t } = useTranslation(undefined, { keyPrefix: "ask" });
   const setQuestion = useAskStore((state) => state.setQuestion);
   const setSettings = useAskStore((state) => state.setSettings);
+  // Puts the question and its options back in the box, to change them before asking again.
+  const edit = () => {
+    setQuestion(entry.question);
+    setSettings(entry.settings);
+    document.getElementById("ask-question")?.focus();
+  };
   if (isActive(entry.status)) return <ProgressView entry={entry} onCancel={onCancel} />;
   if (entry.status === "done" && entry.response) {
     return <AnswerView entry={entry} response={entry.response} />;
@@ -98,6 +104,7 @@ function EntryView({
         question={entry.question}
         disabled={retryDisabled}
         onRetry={() => onRetry(entry)}
+        onEdit={edit}
       />
     );
   }
@@ -107,16 +114,7 @@ function EntryView({
       <p className="text-sm text-muted-foreground">
         <span className="font-medium">{t("answer.asked")}:</span> {entry.question}
       </p>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          setQuestion(entry.question);
-          setSettings(entry.settings);
-          document.getElementById("ask-question")?.focus();
-        }}
-      >
+      <Button type="button" variant="outline" size="sm" onClick={edit}>
         {t("answer.again")}
       </Button>
     </div>

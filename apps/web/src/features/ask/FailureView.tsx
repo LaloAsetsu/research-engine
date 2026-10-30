@@ -39,17 +39,19 @@ function describe(failure: Failure, t: (key: string) => string): Described {
 
 const TITLED = new Set([503, 502, 429, 422]);
 
-/** A question that got no answer: why, and a way to try again. */
+/** A question that got no answer: why, and a way to try again as it was or after an edit. */
 export function FailureView({
   failure,
   question,
   disabled,
   onRetry,
+  onEdit,
 }: {
   failure: Failure;
   question: string;
   disabled: boolean;
   onRetry: () => void;
+  onEdit: () => void;
 }) {
   const { t } = useTranslation(undefined, { keyPrefix: "ask" });
   const { status, message, retryAfter, errorId } = describe(failure, t);
@@ -67,9 +69,12 @@ export function FailureView({
         <p className="text-muted-foreground">
           <span className="font-medium">{t("answer.asked")}:</span> {question}
         </p>
-        <div>
+        <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={onRetry}>
             {t("failure.retry")}
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+            {t("answer.again")}
           </Button>
         </div>
       </AlertDescription>

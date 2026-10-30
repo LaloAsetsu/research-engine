@@ -74,6 +74,7 @@ test.describe("A1: ask and get an answer with cited sources", () => {
     await box.fill("surface code threshold");
     await box.press("Control+Enter");
     await expect(page.getByRole("heading", { name: "Answer", level: 2 })).toBeVisible();
+    await expect(box).toHaveValue("");
     await expect(page.getByRole("note")).toContainText("not in the index");
   });
 
@@ -303,6 +304,9 @@ test.describe("A5: when the server cannot answer", () => {
     await expect(sources(page).getByRole("button").first()).toBeVisible();
     await expect(page.getByText("The engine reports a problem")).toBeHidden();
     await expect(page.getByRole("button", { name: "Ask anyway" })).toBeHidden();
+    // the box was emptied when the question went out
+    await expect(page.getByLabel("Your question")).toHaveValue("");
+    await page.getByLabel("Your question").fill("surface code threshold");
     await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeEnabled();
   });
 
@@ -372,6 +376,8 @@ test.describe("what the stream does", () => {
     await expect(cancel).toBeEnabled();
     await cancel.click();
     await expect(page.getByText("You cancelled this question.")).toBeVisible();
+    await expect(page.getByLabel("Your question")).toHaveValue("");
+    await page.getByLabel("Your question").fill("surface code threshold");
     await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeEnabled();
     // the cancelled answer never shows up
     await page.waitForTimeout(2500);
@@ -395,7 +401,6 @@ test.describe("the history of this tab", () => {
   }) => {
     await openAsk(page);
     await askAndWait(page, "What limits T1 in transmons?");
-    await page.getByLabel("Your question").fill("");
     await askAndWait(page, "teleportation circuit");
     const history = page.getByRole("region", { name: "This session" });
     await expect(history.getByRole("listitem")).toHaveCount(2);

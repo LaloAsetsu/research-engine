@@ -30,8 +30,14 @@ export function QuestionForm({ blocked, busy, askAnyway, onSubmit }: QuestionFor
 
   const canForce = askAnyway && !blank && !busy;
 
+  // The box empties once the question is sent, so the next one starts from nothing. The question
+  // stays in the history, and "Edit and ask again" puts it back.
+  const submit = () => {
+    onSubmit(question);
+    setQuestion("");
+  };
   const send = () => {
-    if (canSend) onSubmit(question);
+    if (canSend) submit();
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -76,12 +82,7 @@ export function QuestionForm({ blocked, busy, askAnyway, onSubmit }: QuestionFor
           {busy ? t("form.sending") : t("form.submit")}
         </Button>
         {askAnyway ? (
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!canForce}
-            onClick={() => onSubmit(question)}
-          >
+          <Button type="button" variant="outline" disabled={!canForce} onClick={submit}>
             {t("form.askAnyway")}
           </Button>
         ) : null}
