@@ -437,7 +437,10 @@ test.describe("B4 and B5: results and comparison", () => {
       }
     }
 
-    // B5: the paired bootstrap, number by number
+    // B5: the paired bootstrap, number by number. The screen starts on all, content and lang
+    // groups; the form group is one the person ticks.
+    await page.getByText(/^Groups \(\d+ of \d+\)$/).click();
+    await page.getByRole("checkbox", { name: "form=single", exact: true }).check();
     const compare = page.getByTestId("compare-table");
     const recorded: CompareRecord[] = score.compares.filter(
       (record) => record.base_run === bare && record.var_run === harness,

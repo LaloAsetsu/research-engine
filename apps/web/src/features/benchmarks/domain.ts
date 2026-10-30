@@ -274,6 +274,17 @@ export function groupNames(groups: readonly Pick<ScoreGroup, "group">[]): string
   return names.sort((a, b) => (a === "all" ? -1 : b === "all" ? 1 : a.localeCompare(b, "en")));
 }
 
+/**
+ * The groups the compare screen starts with: `all` and the `content=` and `lang=` groups. A score
+ * with none of those (other fields only) starts with every group. The person can tick any group.
+ */
+export function defaultGroups(names: readonly string[]): string[] {
+  const short = names.filter(
+    (name) => name === "all" || name.startsWith("content=") || name.startsWith("lang="),
+  );
+  return short.some((name) => name !== "all") ? short : [...names];
+}
+
 export interface SummaryCell {
   mean: number | null;
   ci: [number, number] | null;

@@ -110,7 +110,7 @@ describe("the summary by group", () => {
     await user.click(screen.getByRole("checkbox", { name: "key_share" }));
     expect(within(summary()).queryByRole("cell", { name: "key_share" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByText(/Groups \(all /));
+    await user.click(screen.getByText(/Groups \(5 of 13\)/));
     for (const group of ["all", "lang=en"]) {
       await user.click(screen.getByRole("checkbox", { name: group }));
     }
@@ -119,7 +119,34 @@ describe("the summary by group", () => {
     expect(shown.has("all")).toBe(false);
     expect(shown.has("lang=en")).toBe(false);
     expect(shown.has("lang=es")).toBe(true);
-    expect(screen.getByText(/Groups \(\d+ of /)).toBeInTheDocument();
+    expect(screen.getByText(/Groups \(3 of 13\)/)).toBeInTheDocument();
+  });
+
+  it("starts with all, content and lang groups and lets the person tick any other group", async () => {
+    const { user } = await openPair();
+    const groupsShown = () =>
+      new Set(
+        within(summary())
+          .getAllByRole("row")
+          .slice(1)
+          .map((row) => within(row).getByRole("rowheader").textContent),
+      );
+    expect(groupsShown()).toEqual(
+      new Set(["all", "content=math", "content=other", "lang=en", "lang=es"]),
+    );
+    expect(
+      Array.from(compare().querySelectorAll("tbody th")).every((cell) =>
+        /^(all|content=|lang=)/.test(cell.textContent ?? ""),
+      ),
+    ).toBe(true);
+    await user.click(screen.getByText(/Groups \(5 of 13\)/));
+    await user.click(screen.getByRole("checkbox", { name: "form=single" }));
+    expect(groupsShown().has("form=single")).toBe(true);
+    expect(screen.getByText(/Groups \(6 of 13\)/)).toBeInTheDocument();
+    for (const group of ["category=chain", "category=notation"]) {
+      await user.click(screen.getByRole("checkbox", { name: group }));
+    }
+    expect(groupsShown().has("category=chain")).toBe(true);
   });
 
   it("shows only a run on a screen for one run", async () => {

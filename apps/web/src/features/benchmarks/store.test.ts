@@ -7,7 +7,7 @@ describe("the compare store", () => {
     expect(useCompareStore.getState()).toMatchObject({
       metrics: null,
       focus: null,
-      groups: [],
+      groups: null,
       filter: "all",
       text: "",
       hidden: [],
@@ -52,7 +52,7 @@ describe("the compare store", () => {
     store.toggleHidden("a");
     store.reset();
     const after = useCompareStore.getState();
-    expect(after).toMatchObject({ metrics: null, groups: [], hidden: [] });
+    expect(after).toMatchObject({ metrics: null, groups: null, hidden: [] });
     store.toggleHidden("z");
     store.reset();
     expect(useCompareStore.getState().hidden).toEqual([]);

@@ -4,6 +4,7 @@ import {
   canResume,
   compareAddress,
   compareRows,
+  defaultGroups,
   defaultMetrics,
   elapsedSeconds,
   findScore,
@@ -374,6 +375,24 @@ describe("the tables of a score", () => {
     expect(defaultMetrics(names)).toEqual(["all_keys", "all_keys_lenient", "key_share"]);
     expect(defaultMetrics(["b", "a", "c", "d"])).toEqual(["b", "a", "c"]);
     expect(defaultMetrics([])).toEqual([]);
+  });
+
+  it("starts with all, the content and the lang groups, or with every group when there are none", () => {
+    expect(defaultGroups(groupNames(groups))).toEqual([
+      "all",
+      "content=math",
+      "content=other",
+      "lang=en",
+      "lang=es",
+    ]);
+    expect(defaultGroups(["all", "category=a", "form=single"])).toEqual([
+      "all",
+      "category=a",
+      "form=single",
+    ]);
+    expect(defaultGroups(["all"])).toEqual(["all"]);
+    expect(defaultGroups(["all", "form=single", "lang=es"])).toEqual(["all", "lang=es"]);
+    expect(defaultGroups([])).toEqual([]);
   });
 
   it("gives a row per group and metric with the numbers of the score and a cell per run", () => {

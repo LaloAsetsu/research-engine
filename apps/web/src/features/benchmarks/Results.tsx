@@ -6,6 +6,7 @@ import { useRuns, useScoreItems, useSetQuestions } from "./api";
 import { CompareTable } from "./CompareTable";
 import {
   compareRows,
+  defaultGroups,
   defaultMetrics,
   groupNames,
   metricNames,
@@ -75,12 +76,22 @@ export function Results({ score, runIds }: { score: Score; runIds: readonly stri
   const order = useMemo(() => groupNames(score.groups), [score.groups]);
   const metricsChosen = useCompareStore((state) => state.metrics);
   const focusChosen = useCompareStore((state) => state.focus);
-  const groups = useCompareStore((state) => state.groups);
+  const groupsChosen = useCompareStore((state) => state.groups);
   const open = useCompareStore((state) => state.open);
   const setMetrics = useCompareStore((state) => state.setMetrics);
   const setFocus = useCompareStore((state) => state.setFocus);
   const setGroups = useCompareStore((state) => state.setGroups);
   const metrics = metricsChosen ?? defaultMetrics(names);
+  // Untouched: a short list; none ticked (or all): every group.
+  const groups = useMemo(
+    () =>
+      groupsChosen === null
+        ? defaultGroups(order)
+        : groupsChosen.length === 0
+          ? order
+          : groupsChosen,
+    [groupsChosen, order],
+  );
   const focus =
     focusChosen && names.includes(focusChosen)
       ? focusChosen
@@ -141,12 +152,12 @@ export function Results({ score, runIds }: { score: Score; runIds: readonly stri
           <Choice
             legend={t("choose.groups")}
             summary={
-              groups.length === 0
+              groups.length === order.length
                 ? t("choose.groupsAll", { total: order.length })
                 : t("choose.groupsSome", { chosen: groups.length, total: order.length })
             }
             options={order}
-            chosen={groups.length === 0 ? order : groups}
+            chosen={groups}
             onChange={(next) => setGroups(next.length === order.length ? [] : next)}
           />
           <div className="grid gap-1.5">

@@ -11,8 +11,8 @@ export interface CompareState {
   metrics: string[] | null;
   /** The metric that decides "better", "worse" and the question column. Null: the first of `metrics`. */
   focus: string | null;
-  /** Groups to list; empty means all of them. */
-  groups: string[];
+  /** Groups to list; empty means all of them. Null until chosen: the screen starts with `defaultGroups`. */
+  groups: string[] | null;
   filter: QuestionFilter;
   text: string;
   /** The runs whose column is shown in the side by side. Empty means all. */
@@ -36,7 +36,7 @@ export interface CompareState {
 const INITIAL = {
   metrics: null,
   focus: null,
-  groups: [],
+  groups: null,
   filter: "all",
   text: "",
   hidden: [],
@@ -47,7 +47,6 @@ const INITIAL = {
 
 export const useCompareStore = create<CompareState>()((set) => ({
   ...INITIAL,
-  groups: [],
   hidden: [],
   setMetrics: (metrics) => set({ metrics }),
   setFocus: (focus) => set({ focus, page: 0 }),
@@ -63,5 +62,5 @@ export const useCompareStore = create<CompareState>()((set) => ({
   openQuestion: (open) => set({ open, repeat: 1 }),
   setRepeat: (repeat) => set({ repeat }),
   setPage: (page) => set({ page }),
-  reset: () => set({ ...INITIAL, groups: [], hidden: [] }),
+  reset: () => set({ ...INITIAL, hidden: [] }),
 }));
