@@ -105,3 +105,35 @@ describe("the question table of a long set", () => {
     expect(button).toHaveAttribute("aria-expanded", "false");
   });
 });
+
+describe("the text of a question", () => {
+  it("shows math between dollar signs as math and any other text as written", () => {
+    const mixed = [
+      { id: "M-1", question: "What is $E = mc^2$ here?" },
+      { id: "M-2", question: "Is 2 * 3 * 4 the same as _x_?" },
+      { id: "M-3", question: "Does it cost from $5 to $10 per run?" },
+    ] as unknown as ItemPage["items"];
+    render(
+      <QuestionsTable
+        questions={mixed}
+        cells={questionCells(
+          mixed.map((entry) => item(entry.id, "a", 1, [{ i: 0, exact: true, lenient: false }])),
+          "all_keys",
+        )}
+        runIds={["a"]}
+        labels={{ a: "base run" }}
+        metric="all_keys"
+      />,
+    );
+    const math = document.querySelector("[data-question='M-1']");
+    const plain = document.querySelector("[data-question='M-2']");
+    expect(math?.querySelector(".katex")).not.toBeNull();
+    expect(math).not.toHaveTextContent("$");
+    expect(plain?.querySelector(".katex")).toBeNull();
+    expect(plain).toHaveTextContent("Is 2 * 3 * 4 the same as _x_?");
+    // two prices are not a formula
+    const prices = document.querySelector("[data-question='M-3']");
+    expect(prices?.querySelector(".katex")).toBeNull();
+    expect(prices).toHaveTextContent("Does it cost from $5 to $10 per run?");
+  });
+});

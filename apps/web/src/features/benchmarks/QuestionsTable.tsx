@@ -21,6 +21,7 @@ import {
   type QuestionFilter,
 } from "./domain";
 import { SELECT_CLASS } from "./fields";
+import { MathText } from "./MathText";
 import { useCompareStore } from "./store";
 import type { ItemPage } from "./types";
 
@@ -175,7 +176,7 @@ export function QuestionsTable({
                     >
                       {question.id}
                     </Button>
-                    <span className="block text-muted-foreground">{question.question}</span>
+                    <MathText className="text-muted-foreground">{question.question}</MathText>
                   </TableHead>
                   {runIds.map((id) => {
                     const cell = row?.[id];

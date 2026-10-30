@@ -410,6 +410,46 @@ describe("one question side by side", () => {
     }
   });
 
+  it("renders the math of the question, the reference answer and the expression key facts", async () => {
+    server.use(
+      http.get("*/api/v1/sets/:name/versions/:version/items/:id", () => {
+        const detail = CAPTURE.details["DP-002"] as { item: Record<string, unknown> };
+        return HttpResponse.json({
+          ...detail,
+          item: {
+            ...detail.item,
+            question: "Why does $E = mc^2$ hold?",
+            answer: "Because $E = mc^2$ follows from the metric.",
+            key_facts: [
+              { type: "expr", value: "\\alpha^2 + \\beta^2 = 1", unit: null, paper: null },
+              { type: "text", value: "5 * 3 = 15", unit: "units", paper: null },
+            ],
+          },
+        });
+      }),
+    );
+    const { user } = await openPair();
+    await openQuestion(user, "DP-002");
+    const section = await screen.findByRole("region", { name: "Question DP-002 side by side" });
+    await waitFor(() => expect(section.querySelectorAll(".katex").length).toBeGreaterThan(2));
+    const tex = (root: Element) =>
+      Array.from(root.querySelectorAll('annotation[encoding="application/x-tex"]')).map(
+        (node) => node.textContent,
+      );
+    expect(tex(section)).toContain("E = mc^2");
+    expect(tex(section)).toContain("\\alpha^2 + \\beta^2 = 1");
+    const bare = column(RUNS.base);
+    await waitFor(() =>
+      expect(within(bare).getByTestId("keys-summary")).toHaveTextContent("2 keys"),
+    );
+    // the expression is math, a plain text key keeps its characters as they are
+    expect(tex(within(bare).getByText(/Found:/).parentElement as Element)).toEqual([
+      "\\alpha^2 + \\beta^2 = 1",
+    ]);
+    expect(within(bare).getByText("5 * 3 = 15")).toBeInTheDocument();
+    expect(section).not.toHaveTextContent("$");
+  });
+
   it("changes the repeat for every column", async () => {
     const { user } = await openPair();
     await openQuestion(user, "DP-002");

@@ -9,6 +9,7 @@ import { Skeleton } from "@/shared/ui/skeleton";
 import { useQuestionDetail, useRunQuestion, useScoreItems } from "./api";
 import { formatNumber, goldCited, keyOutcomes, splitSetName, type KeyStatus } from "./domain";
 import { CHECKBOX_CLASS, SELECT_CLASS } from "./fields";
+import { MathExpr, MathText } from "./MathText";
 import { ProblemAlert } from "./ProblemAlert";
 import { Section } from "./Section";
 import { useCompareStore } from "./store";
@@ -62,11 +63,17 @@ function KeysList({
                 aria-hidden="true"
                 className={`mt-0.5 size-4 shrink-0 ${KEY_TONE[outcome.status]}`}
               />
-              <span>
-                <span className="font-medium">{t(`keyStatus.${outcome.status}`)}:</span>{" "}
-                <span className="font-mono">{outcome.fact.value}</span>
-                {outcome.fact.unit ? ` ${outcome.fact.unit}` : ""}
-              </span>
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-1">
+                <span className="font-medium">{t(`keyStatus.${outcome.status}`)}:</span>
+                {outcome.fact.type === "expr" ? (
+                  <MathExpr className="max-w-full min-w-0">{outcome.fact.value}</MathExpr>
+                ) : outcome.fact.value.includes("$") ? (
+                  <MathText className="max-w-full min-w-0">{outcome.fact.value}</MathText>
+                ) : (
+                  <span className="font-mono">{outcome.fact.value}</span>
+                )}
+                {outcome.fact.unit ? <span>{outcome.fact.unit}</span> : null}
+              </div>
             </li>
           );
         })}
@@ -278,11 +285,12 @@ export function SideBySide({
       {detail.isError ? <ProblemAlert error={detail.error} /> : null}
       {detail.data ? (
         <div className="grid gap-1">
-          <p className="max-w-prose">{detail.data.question}</p>
+          <MathText className="max-w-prose">{detail.data.question}</MathText>
           {detail.data.answer ? (
-            <p className="max-w-prose text-sm text-muted-foreground">
-              <span className="font-medium">{t("reference")}:</span> {detail.data.answer}
-            </p>
+            <div className="flex max-w-prose items-baseline gap-1 text-sm text-muted-foreground">
+              <span className="font-medium">{t("reference")}:</span>
+              <MathText className="min-w-0">{detail.data.answer}</MathText>
+            </div>
           ) : null}
         </div>
       ) : null}
