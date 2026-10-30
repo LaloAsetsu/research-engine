@@ -20,6 +20,9 @@ Phase = Literal["retrieving", "answering"]
 
 MAX_QUESTION_CHARS = 4000
 SHORT_ID = 16  # characters of a document id that a citation prints
+# docingest's ``UNPLACED_WARNING``: the start of the warning it gives for a passage it cannot find
+# in its paper (a test pins the two together). The domain cannot import docingest.
+UNPLACED_WARNING = "a given passage was not found in"
 
 REFERENCES_MARKER = "\nReferences\n"
 # One entry of the References list: ``3. (aaaaaaaaaaaaaaaa pages 3-4): Title...`` (the rule of the
@@ -49,6 +52,14 @@ class Citation:
     doc_id: str  # the full id when the answer's sources name it, else the 16 printed
     first_page: int
     last_page: int
+
+
+@dataclass(frozen=True)
+class GoldPassage:
+    """A passage the oracle arm hands the answer model: the text, and the paper it is from."""
+
+    doc_id: str
+    text: str
 
 
 @dataclass(frozen=True)
@@ -83,6 +94,7 @@ class AskAnswer:
     warnings: tuple[str, ...]
     index_generation: str | None
     timings: AskTimings
+    truncated: bool = False  # the engine cut the sources it was given before the model read them
 
     def without_contexts(self) -> AskAnswer:
         return AskAnswer(
@@ -94,6 +106,7 @@ class AskAnswer:
             self.warnings,
             self.index_generation,
             self.timings,
+            self.truncated,
         )
 
 

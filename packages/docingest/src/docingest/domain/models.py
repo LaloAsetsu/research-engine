@@ -60,6 +60,14 @@ class ModelRef(BaseModel):
     revision: str
 
 
+class AnswerModel(BaseModel, frozen=True):
+    """The model that writes the answers of ``docingest ask``, as a name and a pinned revision
+    where there is one. No address and no key: it is safe to record or show."""
+
+    name: str  # the Hugging Face repository of the pinned model, else the litellm model string
+    revision: str | None  # a commit of ``name``; None for a litellm model, which has no pin here
+
+
 class SourceMetadata(BaseModel):
     """Bibliographic metadata, e.g. from the arXiv API. Everything optional."""
 

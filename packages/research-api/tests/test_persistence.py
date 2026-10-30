@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from alembic import command
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import StatementError
 
 from research_api.adapters.files import create_private_file
@@ -19,6 +19,7 @@ from research_api.adapters.persistence.database import _alembic_config
 from research_api.adapters.persistence.models import Base, UtcDateTime
 from research_api.domain.auth import NewUser, Role, Session
 from research_api.domain.errors import ConflictError
+from research_api.domain.sets import SetRef
 
 T0 = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
 
@@ -82,7 +83,7 @@ def test_migrations_build_the_tables_the_models_describe(db: Database) -> None:
             "select name from sqlite_master where type='table'"
         )
     }
-    assert tables == {"users", "sessions", "login_attempts", "alembic_version"}
+    assert tables == {"users", "sessions", "login_attempts", "artifacts", "jobs", "alembic_version"}
 
 
 def test_an_empty_file_is_not_current_until_it_is_upgraded(tmp_path: Path) -> None:
@@ -90,7 +91,7 @@ def test_an_empty_file_is_not_current_until_it_is_upgraded(tmp_path: Path) -> No
     assert database.current_revision() is None
     assert not database.is_current()
     database.upgrade()
-    assert database.current_revision() == database.head_revision() == "0001"
+    assert database.current_revision() == database.head_revision() == "0004"
     database.close()
 
 
@@ -107,6 +108,53 @@ def test_the_migration_can_be_undone_and_redone(tmp_path: Path) -> None:
     with database.engine.connect() as connection:
         left = connection.execute(text("select name from sqlite_master where type='table'")).all()
     assert [r[0] for r in left] == ["alembic_version"]
+    database.upgrade()
+    assert database.schema_differences() == []
+    database.close()
+
+
+def test_dropping_the_artifact_path_keeps_the_rows_and_can_be_undone(tmp_path: Path) -> None:
+    database = Database.open(tmp_path / "p.sqlite3")
+    config = _alembic_config(database.engine)
+    command.upgrade(config, "0003")
+    with database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into artifacts (kind, name, version, status, owner, md5, items, corpus,"
+                " path, created_at, updated_at) values ('qset', 'demo', 'v1', 'draft', 'ana',"
+                " :md5, 3, 'c', 'sets/demo/v1.qset.jsonl', '2026-01-01', '2026-01-02')"
+            ),
+            {"md5": "a" * 32},
+        )
+
+    database.upgrade()
+    assert database.schema_differences() == []
+    stored = database.sets.get(SetRef("demo", "v1"))
+    assert stored is not None
+    assert (stored.owner, stored.md5, stored.items, stored.corpus) == ("ana", "a" * 32, 3, "c")
+    with database.engine.connect() as connection:
+        columns = {c["name"] for c in inspect(connection).get_columns("artifacts")}
+    assert "path" not in columns
+    with pytest.raises(Exception, match="CHECK"), database.engine.begin() as connection:
+        connection.execute(text("update artifacts set status = 'x'"))
+    with pytest.raises(Exception, match="CHECK"), database.engine.begin() as connection:
+        connection.execute(text("update artifacts set kind = 'x'"))
+    with pytest.raises(Exception, match="UNIQUE"), database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "insert into artifacts (kind, name, version, status, owner, md5, items,"
+                " created_at, updated_at) select kind, name, version, status, owner, md5, items,"
+                " created_at, updated_at from artifacts"
+            )
+        )
+
+    command.downgrade(config, "0003")
+    assert database.current_revision() == "0003"
+    with database.engine.connect() as connection:
+        path = {c["name"]: c for c in inspect(connection).get_columns("artifacts")}["path"]
+        assert path["nullable"]
+        row = connection.execute(text("select name, owner, path from artifacts")).one()
+    assert tuple(row) == ("demo", "ana", None)
     database.upgrade()
     assert database.schema_differences() == []
     database.close()
@@ -412,7 +460,7 @@ def test_parallel_reservations_never_pass_the_limit(db: Database) -> None:
 
 
 def test_the_models_know_every_table() -> None:
-    assert set(Base.metadata.tables) == {"users", "sessions", "login_attempts"}
+    assert set(Base.metadata.tables) == {"users", "sessions", "login_attempts", "artifacts", "jobs"}
 
 
 def test_the_database_file_made_by_the_service_is_private(tmp_path: Path) -> None:

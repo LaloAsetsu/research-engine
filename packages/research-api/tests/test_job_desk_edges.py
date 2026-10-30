@@ -1,0 +1,637 @@
+"""The corners of the job desk: races, failures that are not a question's, and a desk that was
+never started."""
+
+from __future__ import annotations
+
+import asyncio
+import errno
+import threading
+from typing import Any
+
+import pytest
+from bench_helpers import (
+    ANA_ACTOR,
+    TOTAL,
+    ScriptedArms,
+    container_with,
+    every_pair,
+    finished,
+    pairs,
+    request,
+    run_file,
+    seed_stopped_run,
+    until,
+)
+from bench_helpers import (
+    DEMO_REF as DEMO,
+)
+from helpers import arun
+
+from research_api.application.jobs import JobDesk, ScoreRequest
+from research_api.bootstrap import Container
+from research_api.domain.errors import (
+    ConflictError,
+    NotFoundError,
+    RateLimitedError,
+)
+from research_api.domain.jobs import (
+    MAX_OPEN_PER_MEMBER,
+    ArmSpec,
+    Job,
+    JobState,
+    Progress,
+    RunParams,
+    ScoreOptions,
+    ScoreParams,
+    interleaved_in,
+    move_allowed,
+)
+
+
+@pytest.fixture
+def arms() -> ScriptedArms:
+    return ScriptedArms()
+
+
+@pytest.fixture
+def container(arms: ScriptedArms) -> Container:
+    box = container_with(arms, bench_recheck_s=0.02)
+    yield box
+    box.close()
+
+
+@pytest.fixture
+def desk(container: Container) -> JobDesk:
+    return container.bench.jobs
+
+
+# --- a run that fails for a reason that is not a question's --------------------------------
+
+
+@arun
+async def test_a_failure_of_the_run_itself_is_a_failed_job_with_an_error_id_and_no_message(
+    desk: JobDesk, caplog: pytest.LogCaptureFixture
+) -> None:
+    def broken(item: Any) -> bytes:
+        raise RuntimeError("a path and a question: /secret/place What symbol")
+
+    desk._formats.item_line = broken  # type: ignore[method-assign]
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    failed = await finished(desk, view)
+    assert failed.job.state is JobState.FAILED and failed.job.error is not None
+    assert failed.job.error.kind == "internal"
+    assert failed.job.error.message.startswith("The run failed. Error id ")
+    assert "secret" not in failed.job.error.message
+    assert "secret" not in caplog.text and "What symbol" not in caplog.text
+    assert "failed: internal" in desk.read_log(view.job.id).text
+
+
+@arun
+async def test_a_log_that_cannot_be_written_does_not_stop_a_run(
+    desk: JobDesk, caplog: pytest.LogCaptureFixture
+) -> None:
+    def refuse(job_id: str, text: str) -> None:
+        raise OSError("disk full")
+
+    desk._files.append_log = refuse  # type: ignore[method-assign]
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    done = await finished(desk, view)
+    assert done.job.state is JobState.DONE and done.job.progress.done == TOTAL
+    assert any(getattr(r, "event", "") == "job.log_failed" for r in caplog.records)
+
+
+@arun
+async def test_a_job_cancelled_before_the_scheduler_took_it_is_left_alone(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    gone = desk._repo.move(view.job.id, expected={JobState.DONE}, to=JobState.CANCELLED)
+    assert gone is not None
+    calls = len(arms.calls)
+    await desk._run_job(gone)
+    assert len(arms.calls) == calls and desk.get(view.job.id).job.state is JobState.CANCELLED
+
+
+@arun
+async def test_the_run_scheduler_survives_a_failure_of_its_own(
+    desk: JobDesk, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("research_api.application.jobs.SCHEDULER_RETRY_S", 0.01)
+    await desk.start()
+    real = desk._repo.queued
+    calls = {"n": 0}
+
+    def flaky(kind: str):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("the table is locked")
+        return real(kind)
+
+    desk._repo.queued = flaky  # type: ignore[method-assign]
+    desk._poke()
+    await until(lambda: calls["n"] >= 1)
+    await asyncio.sleep(0.05)
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    done = await finished(desk, view)
+    assert done.job.state is JobState.DONE
+    assert any(getattr(r, "event", "") == "job.scheduler_error" for r in caplog.records)
+
+
+# --- cancel and resume that race with something --------------------------------------------
+
+
+@arun
+async def test_a_cancel_that_loses_a_race_says_what_the_job_became(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-001")
+    first, second = await desk.start_runs(ANA_ACTOR, request("bare", "harness"))
+    await until(lambda: arms.calls)
+    real = desk._repo.move
+    state = {"first": True}
+
+    def lose_once(job_id: str, **kw: Any):  # type: ignore[no-untyped-def]
+        if state["first"]:
+            state["first"] = False
+            real(job_id, expected={JobState.QUEUED}, to=JobState.CANCELLED)  # someone else won
+            return None
+        return real(job_id, **kw)
+
+    desk._repo.move = lose_once  # type: ignore[method-assign]
+    assert desk.cancel(ANA_ACTOR, second.job.id).job.state is JobState.CANCELLED
+    gate.set()
+    await finished(desk, first)
+
+
+@arun
+async def test_a_cancel_that_loses_a_race_to_a_finish_is_a_conflict(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-001")
+    first, second = await desk.start_runs(ANA_ACTOR, request("bare", "harness"))
+    await until(lambda: arms.calls)
+    real = desk._repo.move
+
+    def lose_to_a_finish(job_id: str, **kw: Any):  # type: ignore[no-untyped-def]
+        real(job_id, expected={JobState.QUEUED}, to=JobState.RUNNING)
+        real(job_id, expected={JobState.RUNNING}, to=JobState.DONE)
+
+    desk._repo.move = lose_to_a_finish  # type: ignore[method-assign]
+    with pytest.raises(ConflictError, match="now done"):
+        desk.cancel(ANA_ACTOR, second.job.id)
+    gate.set()
+    await finished(desk, first)
+
+
+@arun
+async def test_a_resume_that_loses_a_race_is_a_conflict(desk: JobDesk) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    desk._repo.move(view.job.id, expected={JobState.DONE}, to=JobState.CANCELLED)
+    desk._repo.move = lambda *a, **k: None  # type: ignore[method-assign]
+    with pytest.raises(ConflictError, match="changed while"):
+        desk.resume(ANA_ACTOR, view.job.id)
+
+
+@arun
+async def test_a_desk_that_was_never_started_can_still_cancel(container: Container) -> None:
+    desk = container.bench.jobs
+    seed = seed_stopped_run(container, JobState.QUEUED, 0)[1]
+    assert desk._wake is None
+    assert desk.cancel(ANA_ACTOR, seed).job.state is JobState.CANCELLED
+
+
+@arun
+async def test_stopping_twice_is_fine(desk: JobDesk) -> None:
+    await desk.start()
+    await desk.stop()
+    await desk.stop()
+    await desk.start()
+    await desk.stop()
+
+
+# --- recovery that meets a damaged file ------------------------------------------------------
+
+
+@arun
+async def test_a_stopped_run_whose_file_is_damaged_is_still_marked_interrupted(
+    arms: ScriptedArms, caplog: pytest.LogCaptureFixture
+) -> None:
+    container = container_with(arms)
+    try:
+        desk, job_id = seed_stopped_run(container, JobState.RUNNING, 2)
+        run_id = desk.get(job_id).job.artifact_id or ""
+        desk._files.replace_run(run_id, b"this is not a run\n")
+        await desk.start()
+        assert desk.get(job_id).job.state is JobState.INTERRUPTED
+        assert any(getattr(r, "event", "") == "job.mark_failed" for r in caplog.records)
+    finally:
+        container.close()
+
+
+@arun
+async def test_a_stopped_run_whose_file_vanished_is_still_marked_interrupted(
+    arms: ScriptedArms,
+) -> None:
+    container = container_with(arms)
+    try:
+        desk, job_id = seed_stopped_run(container, JobState.RUNNING, 1)
+        run_id = desk.get(job_id).job.artifact_id or ""
+        (desk._files.root / "runs" / f"{run_id}.qa-run.jsonl").unlink()
+        await desk.start()
+        assert desk.get(job_id).job.state is JobState.INTERRUPTED
+        # and a resume starts it again from the first question, with a new file
+        desk.resume(ANA_ACTOR, job_id)
+        done = await finished(desk, desk.get(job_id))
+        assert done.job.state is JobState.DONE
+        assert pairs(run_file(desk, done)[1]) == every_pair(1)
+    finally:
+        container.close()
+
+
+@arun
+async def test_the_header_is_left_alone_when_the_file_goes_away_while_it_is_rewritten(
+    desk: JobDesk,
+) -> None:
+    desk._files.read_run = lambda run_id: None  # type: ignore[method-assign]
+    desk._rewrite_header("ghost-run", {"notes": ""}, ended=None, interleaved=0, partial=None)
+    desk._mark_partial(
+        Job(
+            "4" * 26,
+            "run",
+            JobState.INTERRUPTED,
+            "ana",
+            desk._clock.now(),
+            desk._clock.now(),
+            RunParams(DEMO, "a" * 32, ArmSpec("bare"), "m", 1),
+            Progress(0, 1),
+            artifact_id="ghost-run",
+        ),
+        "Stopped",
+    )
+
+
+# --- a scoring that goes wrong ---------------------------------------------------------------
+
+
+@arun
+async def test_a_scorer_that_raises_makes_a_failed_scoring_with_an_error_id(
+    desk: JobDesk, caplog: pytest.LogCaptureFixture
+) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise RuntimeError("internal detail /private/path")
+
+    desk._scorer.score = boom  # type: ignore[method-assign]
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (view.job.artifact_id or "",)))
+    failed = await finished(desk, score)
+    assert failed.job.state is JobState.FAILED and failed.job.error is not None
+    assert failed.job.error.kind == "internal" and "private" not in failed.job.error.message
+    assert "private" not in caplog.text
+    assert desk.status().scoring is False
+
+
+@arun
+async def test_a_run_that_disappears_before_its_scoring_runs_fails_the_scoring_with_a_reason(
+    desk: JobDesk,
+) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    run_id = view.job.artifact_id or ""
+    release = asyncio.Event()
+
+    async def hold() -> None:
+        await release.wait()
+
+    desk._cpu.submit(hold)
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (run_id,)))
+    (desk._files.root / "runs" / f"{run_id}.qa-run.jsonl").unlink()
+    release.set()
+    failed = await finished(desk, score)
+    assert failed.job.state is JobState.FAILED and failed.job.error is not None
+    assert failed.job.error.kind == "not-found" and run_id in failed.job.error.message
+
+
+@arun
+async def test_what_the_scorer_warns_about_goes_to_the_log_of_the_scoring(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-003")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await until(lambda: ("bare", "DP-003", 1) in arms.calls)
+    desk.cancel(ANA_ACTOR, view.job.id)
+    gate.set()
+    await finished(desk, view)  # cancelled with 4 of 6 answers
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (view.job.artifact_id or "",)))
+    done = await finished(desk, score)
+    assert done.job.state is JobState.DONE
+    assert "warning: run " in desk.read_log(score.job.id).text
+    assert "have no answer" in desk.read_log(score.job.id).text
+
+
+@arun
+async def test_a_member_with_many_jobs_cannot_start_a_scoring_either(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    arms.hold("DP-001")
+    for index in range(MAX_OPEN_PER_MEMBER):
+        await desk.start_runs(
+            ANA_ACTOR, type(request("bare"))(DEMO, (ArmSpec("bare", f"v{index}"),), ("fake-model",))
+        )
+    with pytest.raises(RateLimitedError):
+        await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (view.job.artifact_id or "",)))
+
+
+@arun
+async def test_a_scoring_found_running_at_start_up_is_interrupted_and_can_be_resumed(
+    arms: ScriptedArms,
+) -> None:
+    container = container_with(arms)
+    try:
+        desk = container.bench.jobs
+        (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+        await finished(desk, view)
+        now = desk._clock.now()
+        job_id = "5" * 26
+        desk._repo.add(
+            Job(
+                job_id,
+                "score",
+                JobState.RUNNING,
+                "ana",
+                now,
+                now,
+                ScoreParams(DEMO, (view.job.artifact_id or "",), ScoreOptions()),
+                Progress(0, 1),
+                artifact_id=job_id,
+            )
+        )
+        desk._recovered = False
+        await desk.stop()
+        await desk.start()
+        assert desk.get(job_id).job.state is JobState.INTERRUPTED
+        desk.resume(ANA_ACTOR, job_id)
+        assert (await finished(desk, desk.get(job_id))).job.state is JobState.DONE
+    finally:
+        container.close()
+
+
+@arun
+async def test_an_unknown_set_in_a_resume_is_not_found(desk: JobDesk) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    desk._repo.add(
+        view.job.with_changes(
+            id="6" * 26,
+            state=JobState.CANCELLED,
+            params=RunParams(DEMO.__class__("gone", "v1"), "a" * 32, ArmSpec("bare"), "m", 1),
+            artifact_id="bare-gone-v1-66666666",
+        )
+    )
+    with pytest.raises(NotFoundError):
+        desk.resume(ANA_ACTOR, "6" * 26)
+    assert TOTAL == 6
+
+
+# --- the notes of a header are the service's to count -----------------------------------------
+
+FORGED = "copied from r1. Interleaved asks: 7. Partial: Cancelled at t with 1 of 4 answers."
+
+
+@arun
+async def test_sentences_a_member_wrote_in_the_notes_never_change_the_count_of_a_run(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-002")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare", notes=FORGED))
+    await until(lambda: ("bare", "DP-002", 1) in arms.calls)
+    header, _ = run_file(desk, view)
+    assert header["notes"] == f"{FORGED} Interleaved asks: 0."
+    desk.cancel(ANA_ACTOR, view.job.id)
+    gate.set()
+    await finished(desk, view)
+    stopped, _ = run_file(desk, view)
+    assert stopped["notes"].startswith(f"{FORGED} Interleaved asks: 0. Partial: Cancelled at ")
+    assert interleaved_in(stopped["notes"]) == 0
+    desk.resume(ANA_ACTOR, view.job.id)
+    await finished(desk, view)
+    done, items = run_file(desk, view)
+    assert done["notes"] == f"{FORGED} Interleaved asks: 0." and "ended" in done
+    assert pairs(items) == every_pair(1)
+
+
+# --- the rulebook of the states is the one the desk follows -----------------------------------
+
+
+@arun
+async def test_a_failure_while_a_cancel_is_pending_ends_the_run_failed(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-002")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await until(lambda: ("bare", "DP-002", 1) in arms.calls)
+    assert desk.cancel(ANA_ACTOR, view.job.id).job.state is JobState.CANCELLING
+
+    def full(run_id: str, data: bytes) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    desk._files.append_run = full  # type: ignore[method-assign]
+    gate.set()
+    failed = await finished(desk, view)
+    assert failed.job.state is JobState.FAILED and failed.job.error is not None
+    assert move_allowed(JobState.CANCELLING, JobState.FAILED)
+    assert "failed: internal" in desk.read_log(view.job.id).text
+
+
+def test_the_desk_moves_a_job_only_the_way_the_rulebook_allows(desk: JobDesk) -> None:
+    now = desk._clock.now()
+    job = Job(
+        "7" * 26,
+        "run",
+        JobState.DONE,
+        "ana",
+        now,
+        now,
+        RunParams(DEMO, "a" * 32, ArmSpec("bare"), "m", 1),
+        Progress(0, 1),
+    )
+    desk._repo.add(job)
+    with pytest.raises(ValueError, match="from done to running"):
+        desk._move(job.id, expected={JobState.DONE}, to=JobState.RUNNING)
+    with pytest.raises(ValueError, match="from queued to done"):
+        desk._move(job.id, expected=(JobState.QUEUED, JobState.DONE), to=JobState.DONE)
+    assert desk._repo.get(job.id) == job  # nothing was written
+
+
+@arun
+async def test_every_move_the_desk_makes_is_one_the_rulebook_allows(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    moves: list[tuple[frozenset[JobState], JobState]] = []
+    real = desk._repo.move
+
+    def record(job_id: str, *, expected: Any, to: JobState, **columns: Any) -> Job | None:
+        moves.append((frozenset(expected), to))
+        return real(job_id, expected=expected, to=to, **columns)
+
+    desk._repo.move = record  # type: ignore[method-assign]
+    gate = arms.hold("DP-002")
+    first, second = await desk.start_runs(ANA_ACTOR, request("bare", "harness"))
+    await until(lambda: ("bare", "DP-002", 1) in arms.calls)
+    desk.cancel(ANA_ACTOR, second.job.id)  # queued -> cancelled
+    desk.cancel(ANA_ACTOR, first.job.id)  # running -> cancelling
+    gate.set()
+    await finished(desk, first)  # cancelling -> cancelled
+    desk.resume(ANA_ACTOR, first.job.id)  # cancelled -> queued, then queued -> running -> done
+    await finished(desk, first)
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (first.job.artifact_id or "",)))
+    await finished(desk, score)
+    seen = {(state, to) for expected, to in moves for state in expected}
+    assert {
+        (JobState.QUEUED, JobState.RUNNING),
+        (JobState.QUEUED, JobState.CANCELLED),
+        (JobState.RUNNING, JobState.CANCELLING),
+        (JobState.CANCELLING, JobState.CANCELLED),
+        (JobState.CANCELLED, JobState.QUEUED),
+        (JobState.RUNNING, JobState.DONE),
+    } <= seen
+    assert all(move_allowed(state, to) for state, to in seen), seen
+
+
+# --- a cancelled job waits for nothing -------------------------------------------------------
+
+
+@arun
+async def test_the_reason_a_job_was_waiting_does_not_outlive_its_cancel(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    arms.waiting["bare"] = "The model server is down."
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await until(lambda: desk.get(view.job.id).waiting_for is not None)
+    cancelled = desk.cancel(ANA_ACTOR, view.job.id)
+    assert cancelled.job.state is JobState.CANCELLED and cancelled.waiting_for is None
+    assert desk.get(view.job.id).waiting_for is None
+    arms.waiting["bare"] = None
+    desk.resume(ANA_ACTOR, view.job.id)
+    assert (await finished(desk, view)).job.state is JobState.DONE
+
+
+# --- a scoring reads files that are not growing ---------------------------------------------
+
+
+@arun
+async def test_a_run_resumed_while_its_scoring_waits_for_the_lane_fails_the_scoring(
+    desk: JobDesk, arms: ScriptedArms
+) -> None:
+    gate = arms.hold("DP-003")
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await until(lambda: ("bare", "DP-003", 1) in arms.calls)
+    desk.cancel(ANA_ACTOR, view.job.id)
+    gate.set()
+    await finished(desk, view)  # cancelled: a file that does not grow, so it can be scored
+    run_id = view.job.artifact_id or ""
+    release = asyncio.Event()
+
+    async def hold() -> None:
+        await release.wait()
+
+    desk._cpu.submit(hold)
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (run_id,)))
+    arms.hold("DP-004")  # the resumed run stays in flight
+    desk.resume(ANA_ACTOR, view.job.id)
+    await until(lambda: ("bare", "DP-004", 1) in arms.calls)
+    release.set()
+    failed = await finished(desk, score)
+    assert failed.job.state is JobState.FAILED and failed.job.error is not None
+    assert failed.job.error.kind == "conflict" and "has not ended" in failed.job.error.message
+    assert desk._files.read_score(score.job.id) is None
+
+
+@arun
+async def test_a_scoring_in_flight_when_the_service_stops_is_interrupted_and_can_be_resumed(
+    desk: JobDesk,
+) -> None:
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    run_id = view.job.artifact_id or ""
+    started, release, over = threading.Event(), threading.Event(), threading.Event()
+    real = desk._score_blocking
+
+    def slow(job: Job) -> Any:
+        started.set()
+        release.wait(10)
+        try:
+            return real(job)
+        finally:
+            over.set()
+
+    desk._score_blocking = slow  # type: ignore[method-assign]
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (run_id,)))
+    await until(started.is_set)
+    await desk.stop()
+    release.set()
+    await until(over.is_set)  # the worker thread went on to the end of its work
+    stopped = desk.get(score.job.id)
+    assert stopped.job.state is JobState.INTERRUPTED and stopped.job.ended_at is not None
+    assert stopped.job.error is not None and stopped.job.error.kind == "interrupted"
+    assert desk._files.read_score(score.job.id) is None  # the thread left no finished score
+    assert desk._files.score_ids() == []
+    desk._score_blocking = real  # type: ignore[method-assign]
+    await desk.start()
+    desk.resume(ANA_ACTOR, score.job.id)
+    assert (await finished(desk, stopped)).job.state is JobState.DONE
+    assert desk._files.read_score(score.job.id)
+
+
+@arun
+async def test_a_dropped_gzip_run_reaches_the_scorer_under_a_name_that_says_it_is_zipped(
+    desk: JobDesk,
+) -> None:
+    import gzip  # noqa: PLC0415
+
+    (view,) = await desk.start_runs(ANA_ACTOR, request("bare"))
+    await finished(desk, view)
+    run_id = view.job.artifact_id or ""
+    plain = desk._files.root / "runs" / f"{run_id}.qa-run.jsonl"
+    packed = desk._files.root / "runs" / f"gz-{run_id}.qa-run.jsonl.gz"
+    data = plain.read_bytes().replace(run_id.encode(), f"gz-{run_id}".encode())
+    packed.write_bytes(gzip.compress(data))
+    seen: list[list[str]] = []
+    real = desk._scorer.score
+
+    def spy(set_data: bytes, runs: Any, options: Any, created: str) -> Any:
+        seen.append([name for name, _ in runs])
+        return real(set_data, runs, options, created)
+
+    desk._scorer.score = spy  # type: ignore[method-assign]
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, (f"gz-{run_id}", run_id)))
+    assert (await finished(desk, score)).job.state is JobState.DONE
+    assert seen == [[f"gz-{run_id}.qa-run.jsonl.gz", f"{run_id}.qa-run.jsonl"]]
+
+
+@arun
+async def test_the_open_runs_are_looked_up_once_for_all_runs_of_a_scoring(desk: JobDesk) -> None:
+    views = await desk.start_runs(ANA_ACTOR, request("bare", "harness"))
+    ids = []
+    for view in views:
+        await finished(desk, view)
+        ids.append(view.job.artifact_id or "")
+    score = await desk.start_score(ANA_ACTOR, ScoreRequest(DEMO, tuple(ids)))
+    await finished(desk, score)
+    job = desk._repo.get(score.job.id)
+    assert job is not None
+    lookups: list[object] = []
+    real = desk._open_run_ids
+
+    def counted() -> set[str]:
+        lookups.append(1)
+        return real()
+
+    desk._open_run_ids = counted  # type: ignore[method-assign]
+    desk._refuse_open_runs(job)
+    assert len(ids) == 2 and len(lookups) == 1

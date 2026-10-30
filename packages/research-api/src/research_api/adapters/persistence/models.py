@@ -13,7 +13,9 @@ from sqlalchemy import (
     Integer,
     MetaData,
     String,
+    Text,
     TypeDecorator,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -91,3 +93,67 @@ class LoginAttemptRow(Base):
     username: Mapped[str] = mapped_column(String(64))
     address: Mapped[str] = mapped_column(String(64))
     at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+
+
+class ArtifactRow(Base):
+    """The catalog of the files under ``data_dir``: one row per set version (kind ``qset``).
+
+    The file is the content and its md5 is the identity; this row says who owns it, whether it is
+    still a draft, and what the catalog shows without reading the file.
+    """
+
+    __tablename__ = "artifacts"
+    __table_args__ = (
+        UniqueConstraint("kind", "name", "version", name="uq_artifacts_kind_name_version"),
+        CheckConstraint("kind IN ('qset')", name="kind"),
+        CheckConstraint("status IN ('draft', 'frozen')", name="status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(64))
+    version: Mapped[str] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(8))
+    owner: Mapped[str] = mapped_column(String(32))
+    md5: Mapped[str] = mapped_column(String(32))
+    items: Mapped[int] = mapped_column(Integer)
+    corpus: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+    updated_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+    frozen_at: Mapped[dt.datetime | None] = mapped_column(UtcDateTime)
+
+
+class JobRow(Base):
+    """A benchmark job: a run (GPU lane) or a scoring (CPU lane). The files hold the results.
+
+    ``params`` is the request as JSON text (what ``RunParams`` or ``ScoreParams`` say), so the
+    table needs no column for each setting. ``artifact_id`` is the run id or score id of the
+    file the job writes.
+    """
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        CheckConstraint("kind IN ('run', 'score')", name="kind"),
+        CheckConstraint(
+            "state IN ('queued', 'running', 'cancelling', 'cancelled', 'done', 'failed',"
+            " 'interrupted')",
+            name="state",
+        ),
+        Index("ix_jobs_state_kind_queued_at", "state", "kind", "queued_at"),
+        Index("ix_jobs_owner_state", "owner", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    state: Mapped[str] = mapped_column(String(12))
+    owner: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+    queued_at: Mapped[dt.datetime] = mapped_column(UtcDateTime)
+    started_at: Mapped[dt.datetime | None] = mapped_column(UtcDateTime)
+    ended_at: Mapped[dt.datetime | None] = mapped_column(UtcDateTime)
+    params: Mapped[str] = mapped_column(Text)
+    done: Mapped[int] = mapped_column(Integer)
+    total: Mapped[int] = mapped_column(Integer)
+    artifact_id: Mapped[str | None] = mapped_column(String(128))
+    error_kind: Mapped[str | None] = mapped_column(String(32))
+    error_message: Mapped[str | None] = mapped_column(String(500))

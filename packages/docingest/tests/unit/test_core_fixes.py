@@ -120,6 +120,22 @@ def test_the_temperature_is_sent_on_every_request_and_defaults_to_zero(qa_env):
     assert paperqa.llm_params(_cfg(llm="openai/gpt-4o-mini", temperature=0.3))["temperature"] == 0.3
 
 
+def test_the_answer_model_is_the_pinned_one_or_the_litellm_string_without_address_or_key(qa_env):
+    cfg = _cfg()
+    pinned = paperqa.answer_model(cfg)
+    assert (pinned.name, pinned.revision) == (cfg.ocr.repo_id, cfg.ocr.revision)
+    other = paperqa.answer_model(_cfg(llm_revision="abc123"))
+    assert (other.name, other.revision) == (cfg.ocr.repo_id, "abc123")
+    custom = paperqa.answer_model(
+        _cfg(llm="openai/local-model", llm_base="http://127.0.0.1:1234/v1")
+    )
+    assert (custom.name, custom.revision) == ("openai/local-model", None)
+    qa_env.setenv("DOCINGEST_LLM", "ollama/llama3.1")  # as llm_params reads it, over [qa] llm
+    assert paperqa.answer_model(_cfg(llm="openai/local-model")).name == "ollama/llama3.1"
+    for model in (pinned, custom):
+        assert set(model.model_dump()) == {"name", "revision"}
+
+
 def test_skip_summary_defaults_to_false_and_parses_booleans():
     assert AppConfig().qa.skip_summary is False
     assert _cfg(skip_summary=True).qa.skip_summary is True

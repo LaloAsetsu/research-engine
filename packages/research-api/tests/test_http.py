@@ -16,10 +16,12 @@ from research_api.bootstrap import Container
 from research_api.domain.errors import (
     BadRequestError,
     ConflictError,
+    CorruptStoreError,
     FieldError,
     ForbiddenError,
     InvalidInputError,
     NotFoundError,
+    PreconditionRequiredError,
     RateLimitedError,
     ResearchApiError,
     TooLargeError,
@@ -111,6 +113,8 @@ def app_with_routes(container: Container):
             "missing": NotFoundError("no such set"),
             "conflict": ConflictError("changed"),
             "big": TooLargeError("body over the cap"),
+            "needs-if-match": PreconditionRequiredError("send If-Match"),
+            "corrupt": CorruptStoreError("a stored file is unreadable"),
             "invalid": InvalidInputError(
                 "bad item", (FieldError("/key_facts/0", "required"), FieldError("/a~b", "x"))
             ),
@@ -140,11 +144,13 @@ def probe(app_with_routes, client_for: ClientFor) -> TestClient:
         ("missing", 404, "not-found"),
         ("conflict", 409, "conflict"),
         ("big", 413, "too-large"),
+        ("needs-if-match", 428, "precondition-required"),
         ("invalid", 422, "invalid-input"),
         ("limited", 429, "rate-limited"),
         ("upstream", 502, "upstream-error"),
         ("down", 503, "unavailable"),
         ("other", 500, "internal"),
+        ("corrupt", 500, "internal"),
     ],
 )
 def test_domain_errors_map_to_their_status(

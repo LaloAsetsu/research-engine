@@ -19,6 +19,7 @@ from pydantic import (
 
 from ...application.ask import DeskStatus
 from ...application.auth import SessionInfo
+from ...application.jobs import BenchStatus
 from ...domain.ask import (
     MAX_QUESTION_CHARS,
     AskAnswer,
@@ -74,6 +75,24 @@ class AskStatus(BaseModel):
         )
 
 
+class BenchStatusOut(BaseModel):
+    """The benchmark lanes. Nothing here names a person or a question."""
+
+    running_job: str | None = Field(description="The run on the GPU lane now, by job id.")
+    queued_runs: int = Field(description="Runs waiting for the GPU lane.")
+    scoring: bool = Field(description="True while a scoring runs on the CPU lane.")
+    queued_scores: int = Field(description="Scorings waiting for the CPU lane.")
+
+    @classmethod
+    def from_domain(cls, s: BenchStatus) -> BenchStatusOut:
+        return cls(
+            running_job=s.running_job,
+            queued_runs=s.queued_runs,
+            scoring=s.scoring,
+            queued_scores=s.queued_scores,
+        )
+
+
 class Status(BaseModel):
     mode: Mode = Field(description="`live`, or `fake` when the service runs on test data.")
     api_version: str
@@ -81,9 +100,10 @@ class Status(BaseModel):
     uptime_s: float
     ready: bool
     ask: AskStatus
+    bench: BenchStatusOut
 
     @classmethod
-    def from_domain(cls, status: ServerStatus, desk: DeskStatus) -> Status:
+    def from_domain(cls, status: ServerStatus, desk: DeskStatus, bench: BenchStatus) -> Status:
         return cls(
             mode=status.mode,
             api_version=status.version,
@@ -91,6 +111,7 @@ class Status(BaseModel):
             uptime_s=status.uptime_s,
             ready=status.ready,
             ask=AskStatus.from_domain(desk),
+            bench=BenchStatusOut.from_domain(bench),
         )
 
 

@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from scoredata import DOC_A, DOC_B, answer, expr_key, num_key, question, text_key
+from scoredata import DOC_A, answer, expr_key, num_key, question, text_key
 
 from qa_bench.score import keys, mathnorm
 from qa_bench.score.keys import MATHNORM_CODE_MD5, Match, key_scores, match_key
@@ -19,14 +19,14 @@ def test_the_vendored_matcher_is_the_code_of_version_2():
 @pytest.mark.parametrize(
     ("value", "text", "expected"),
     [
-        ("sigma_z", r"the coupling $\sigma_{z}$ survives", True),
-        ("sigma_z", "the coupling \u03c3_z survives", True),
-        ("sigma_z", r"the coupling $\sigma_{x}$ is dropped", False),
-        ("R_z", "the gate R _ { z } is virtual", True),
-        ("R_z", r"the gate $R_{zz}(\theta)$", False),
-        ("Bell pair", "a BELL, pair state", True),
-        ("Phi^+", "the phase phi", False),
-        ("Phi^+", r"$\Phi^{+}$", True),
+        ("tau_x", r"the coupling $\tau_{x}$ survives", True),
+        ("tau_x", "the coupling \u03c4_x survives", True),
+        ("tau_x", r"the coupling $\tau_{y}$ is dropped", False),
+        ("S_k", "the gate S _ { k } is idle", True),
+        ("S_k", r"the gate $S_{kk}(\theta)$", False),
+        ("twin cell", "a TWIN, cell state", True),
+        ("psi^+", "the phase psi", False),
+        ("psi^+", r"$\psi^{+}$", True),
     ],
 )
 def test_text_keys_ignore_latex_braces_greek_spelling_and_case(value, text, expected):
@@ -34,8 +34,8 @@ def test_text_keys_ignore_latex_braces_greek_spelling_and_case(value, text, expe
 
 
 def test_text_keys_try_their_alternatives():
-    key = text_key("dephasing", alts=["desfase"])
-    assert match_key(key, "solo el desfase importa", number_words=False).exact
+    key = text_key("relaxation", alts=["relajacion"])
+    assert match_key(key, "solo la relajacion importa", number_words=False).exact
 
 
 @pytest.mark.parametrize(
@@ -95,16 +95,16 @@ def _score(keys_, text, *, category="a", number_words=False, **extra):
 
 
 def test_all_keys_and_the_key_share():
-    metrics, rows = _score([text_key("entropy"), num_key(8)], "The entropy is about 8 units.")
+    metrics, rows = _score([text_key("enthalpy"), num_key(8)], "The enthalpy is about 8 units.")
     assert metrics["all_keys"] is True
     assert metrics["key_share"] == 1.0
-    metrics, rows = _score([text_key("entropy"), num_key(8)], "The entropy is 9.")
+    metrics, rows = _score([text_key("enthalpy"), num_key(8)], "The enthalpy is 9.")
     assert (metrics["all_keys"], metrics["key_share"]) == (False, 0.5)
     assert [(r["i"], r["exact"]) for r in rows] == [(0, True), (1, False)]
 
 
 def test_a_key_record_names_the_paper_of_a_key_that_has_one():
-    _, rows = _score([text_key("entropy", paper=DOC_A)], "entropy")
+    _, rows = _score([text_key("enthalpy", paper=DOC_A)], "enthalpy")
     assert rows[0]["paper"] == DOC_A
 
 
@@ -139,31 +139,28 @@ def test_digits_are_never_word_only():
 LENIENT_ONLY = "the relation among a b c d e holds"
 
 
-def test_a_lenient_f_hit_without_a_gold_paper_is_flagged_and_not_counted():
+def test_a_lenient_only_f_hit_does_not_count_and_is_flagged():
     metrics, rows = _score([expr_key("a+b+c+d+e")], LENIENT_ONLY, category="f")
     assert metrics["all_keys"] is False
     assert metrics["all_keys_lenient"] is False
+    assert metrics["key_share_lenient"] == 0.0
     assert metrics["lenient_unchecked"] is True
     assert rows[0]["unchecked"] is True
     assert rows[0]["lenient"] is False
     assert metrics["all_keys_lenient_words"] is False
+    assert metrics["key_share_lenient_words"] == 0.0
 
 
-def test_a_lenient_f_hit_counts_when_the_answer_cites_a_gold_paper():
-    in_text, _ = _score(
+def test_a_lenient_only_f_hit_does_not_count_even_when_the_gold_paper_is_cited():
+    in_text, rows = _score(
         [expr_key("a+b+c+d+e")], f"{LENIENT_ONLY} ({DOC_A[:16]} pages 2-2)", category="f"
     )
-    assert in_text["all_keys_lenient"] is True
-    assert in_text["lenient_unchecked"] is False
+    assert in_text["all_keys_lenient"] is False
+    assert in_text["lenient_unchecked"] is True
+    assert rows[0]["unchecked"] is True
     citation = {"key": "k", "doc_id": DOC_A, "first_page": 1, "last_page": 1}
     in_list, _ = _score([expr_key("a+b+c+d+e")], LENIENT_ONLY, category="f", citations=[citation])
-    assert in_list["all_keys_lenient"] is True
-
-
-def test_a_citation_of_another_paper_does_not_count():
-    other = {"key": "k", "doc_id": DOC_B, "first_page": 1, "last_page": 1}
-    metrics, _ = _score([expr_key("a+b+c+d+e")], LENIENT_ONLY, category="f", citations=[other])
-    assert metrics["lenient_unchecked"] is True
+    assert in_list["all_keys_lenient"] is False
 
 
 def test_other_categories_keep_the_plain_lenient_rule_and_an_exact_f_hit_is_untouched():
@@ -172,28 +169,123 @@ def test_other_categories_keep_the_plain_lenient_rule_and_an_exact_f_hit_is_unto
     assert "unchecked" not in rows[0]
     exact, rows = _score([expr_key("a+b+c+d+e")], "it is $a+b+c+d+e$", category="f")
     assert exact["all_keys"] is True
+    assert exact["all_keys_lenient"] is True
     assert exact["lenient_unchecked"] is False
+    assert "unchecked" not in rows[0]
+
+
+@pytest.mark.parametrize(
+    ("text", "hit"),
+    [
+        ("see (0f1e2d3c4b5a6978 pages 3-4) for it", False),
+        ("see (0f1e2d3c4b5a6978 pages 3-4, 0123456789abcdef pages 12-13) for it", False),
+        ("see (0f1e2d3c4b5a6978 pages 3-4; 0123456789abcdef pages 5-6) for it", False),
+        ("see (0F1E2D3C4B5A6978 Pages 3-4) for it", False),
+        ("see (0f1e2d3c4b5a6978 pages 3\u20134)", False),
+        ("see (0f1e2d3c4b5a6978 page 3)", False),
+        ("three gates (0f1e2d3c4b5a6978 pages 3-4), 3 of them", True),
+        ("see 3 in (0f1e2d3c4b5a6978 pages 7-8)", True),
+        ("see the doc 0f1e2d3c4b5a6978 on page 3", True),
+        ("see (0f1e2d3c4b5a6978 pages 3-4", True),  # not a complete citation key
+    ],
+)
+def test_the_digits_of_a_citation_key_are_not_numbers(text, hit):
+    assert match_key(num_key(3), text, number_words=False).exact is hit
+
+
+def test_a_citation_key_is_still_read_by_text_and_expression_keys():
+    cited = "(0f1e2d3c4b5a6978 pages 3-4)"
+    assert match_key(text_key("pages 3"), cited, number_words=False).exact
+    assert match_key(expr_key("0f1e2d3c4b5a6978"), cited, number_words=False).exact
+
+
+def test_a_number_hidden_in_a_citation_does_not_make_an_answer_right():
+    answer_text = "It uses two gates (0f1e2d3c4b5a6978 pages 3-4)."
+    metrics, rows = _score([num_key(3)], answer_text)
+    assert metrics["all_keys"] is False
+    assert rows[0]["exact"] is False
+
+
+@pytest.mark.parametrize(
+    ("value", "text", "hit"),
+    [
+        ("U_k", r"the gate $U_k^\dagger$ is used", True),
+        ("U_k", r"the gate $U_{k}^{(j)}$ is used", True),
+        ("U_k", "the gate U_k ^ dagger", True),
+        ("U_k", "the gate U_kk^2 is not it", False),
+        ("U_k", "the gate xU_k^2 is not it", False),
+        ("U_k", "the gate U_k is used", True),
+        ("psi^+", r"the state $\psi^{+}$ is", True),
+    ],
+)
+def test_a_text_key_may_be_followed_by_a_caret(value, text, hit):
+    assert match_key(text_key(value), text, number_words=False).exact is hit
+
+
+@pytest.mark.parametrize(
+    ("alt", "generic"),
+    [
+        ("\u03c8+", True),
+        ("\\Phi", True),
+        ("sigma", True),
+        ("Omega", True),
+        ("\u2212\u03b2", True),
+        ("\\varphi", True),
+        ("\\varepsilon", True),
+        ("\\varpi", True),
+        ("varrho", True),
+        ("varsigma", True),
+        ("WX", False),
+        ("WG", False),
+        ("7 ", False),
+        ("kx", False),
+        ("+ mode", False),
+        ("tau_3", False),
+        ("Y45", False),
+        ("two words", False),
+        ("phi nu", False),
+    ],
+)
+def test_which_alternatives_are_generic(alt, generic):
+    assert keys.is_generic_alt(alt) is generic
+
+
+def test_a_lone_greek_name_alternative_does_not_count_but_the_value_always_does():
+    key = text_key("psi^+", alts=["\u03c8+", "paired state"])
+    assert not match_key(key, "the phase psi of the pair", number_words=False).exact
+    assert match_key(key, "a paired state", number_words=False).exact
+    assert match_key(key, r"the state $\psi^{+}$", number_words=False).exact
+    assert match_key(text_key("psi"), "the phase psi", number_words=False).exact
+
+
+def test_a_short_alternative_still_counts():
+    key = text_key("widget gate", alts=["WG", "W3"])
+    assert match_key(key, "a WG in the circuit", number_words=False).exact
+    assert match_key(key, "the W3 element", number_words=False).exact
+    kept = text_key("tau_x", alts=["tau_1", "relaxation"])
+    assert match_key(kept, "H with tau_1", number_words=False).exact
+    assert match_key(kept, "pure relaxation", number_words=False).exact
 
 
 def test_the_funnel_stages_need_the_text_the_model_was_given():
     ext = {
-        "given": [{"text": "entropy appears here"}],
-        "answer_prompt": "prompt with entropy and 8",
+        "given": [{"text": "enthalpy appears here"}],
+        "answer_prompt": "prompt with enthalpy and 8",
     }
-    metrics, rows = _score([text_key("entropy"), num_key(8)], "entropy", ext=ext)
+    metrics, rows = _score([text_key("enthalpy"), num_key(8)], "enthalpy", ext=ext)
     assert metrics["chunks"] == 0.5
     assert metrics["evidence"] == 1.0
     assert [r["in_contexts"] for r in rows] == [True, False]
 
 
 def test_summaries_stand_in_for_the_answer_prompt():
-    ext = {"given": [{"text": "x"}], "summaries": ["entropy", None]}
-    metrics, _ = _score([text_key("entropy")], "entropy", ext=ext)
+    ext = {"given": [{"text": "x"}], "summaries": ["enthalpy", None]}
+    metrics, _ = _score([text_key("enthalpy")], "enthalpy", ext=ext)
     assert metrics["evidence"] == 1.0
 
 
 def test_stages_are_none_when_the_run_kept_no_text():
-    metrics, rows = _score([text_key("entropy")], "entropy", ext={"given": [{"doc_id": DOC_A}]})
+    metrics, rows = _score([text_key("enthalpy")], "enthalpy", ext={"given": [{"doc_id": DOC_A}]})
     assert metrics["chunks"] is None
     assert metrics["evidence"] is None
     assert metrics["math_spans"] is None
@@ -230,6 +322,6 @@ def test_the_cannot_answer_pattern(text, cannot):
 
 
 def test_an_empty_or_missing_answer_scores_nothing_without_failing():
-    metrics, rows = _score([text_key("entropy")], None)
+    metrics, rows = _score([text_key("enthalpy")], None)
     assert (metrics["all_keys"], metrics["answer_chars"]) == (False, 0)
     assert rows[0]["exact"] is False

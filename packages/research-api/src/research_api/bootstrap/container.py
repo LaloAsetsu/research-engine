@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import tempfile
@@ -12,6 +13,9 @@ from datetime import timedelta
 from importlib.metadata import version
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from ..adapters.bench import QaBenchRunFormats, QaBenchScorer, QaBenchSetFormats
 from ..adapters.circuits import CircuitsAdapter
 from ..adapters.clock import SystemClock
 from ..adapters.docingest_ask import (
@@ -19,9 +23,12 @@ from ..adapters.docingest_ask import (
     OfflineDocumentReader,
     open_docingest,
 )
-from ..adapters.fake import FakeAskEngine, FakeDocumentReader, FixedClock
+from ..adapters.fake import FakeArms, FakeAskEngine, FakeDocumentReader, FakeModelServer, FixedClock
+from ..adapters.files import BenchFileStore, SetFileStore
 from ..adapters.hashing import ArgonPasswordHasher
+from ..adapters.models import OpenAiModels
 from ..adapters.persistence import Database
+from ..application.arms import LiveArms
 from ..application.ask import AskDesk
 from ..application.auth import (
     Authenticate,
@@ -41,6 +48,10 @@ from ..application.circuits import (
     ShowCircuitConventions,
 )
 from ..application.documents import DocumentServices
+from ..application.jobs import RECHECK_S, JobDesk
+from ..application.lanes import Lane
+from ..application.results import RunsDesk, ScoresDesk
+from ..application.sets import SetServices, build_set_services
 from ..application.status import ReportStatus
 from ..domain.auth import LoginPolicy, SessionPolicy
 from ..domain.status import Mode
@@ -48,15 +59,33 @@ from ..ports.ask import AskEngine
 from ..ports.auth import PasswordHasher
 from ..ports.clock import Clock
 from ..ports.documents import DocumentReader
+from ..ports.jobs import Arms
+from ..ports.models import ModelEntry, ModelServer
+from .demo_sets import seed_demo_sets
 from .seed import SeedUser, default_seed_users
 from .settings import Settings, SettingsError, is_loopback
-from .storage import load_private_settings, open_current_database
+from .storage import load_private_settings, open_current_database, storage_paths
 
 CONFIG_ENV = "RESEARCH_API_CONFIG"
 FAKE_ENV = "RESEARCH_API_FAKE"
 FAKE_ASK_PAUSE_ENV = "RESEARCH_API_FAKE_ASK_PAUSE"
 DEFAULT_FAKE_ASK_PAUSE_S = 0.6
 MAX_FAKE_ASK_PAUSE_S = 10.0
+FAKE_BENCH_PAUSE_ENV = "RESEARCH_API_FAKE_BENCH_PAUSE"
+DEFAULT_FAKE_BENCH_PAUSE_S = 0.25
+MAX_FAKE_BENCH_PAUSE_S = 10.0
+WEB_DIR_ENV = "RESEARCH_API_WEB_DIR"
+
+
+@dataclass(frozen=True)
+class BenchServices:
+    """The benchmark: the job desk (runs and scorings), the readers of runs and scores, and the
+    model servers the runs may ask."""
+
+    jobs: JobDesk
+    runs: RunsDesk
+    scores: ScoresDesk
+    models: ModelServer
 
 
 @dataclass(frozen=True)
@@ -73,6 +102,8 @@ class Container:
     auth: AuthServices
     asks: AskDesk
     documents: DocumentServices
+    sets: SetServices
+    bench: BenchServices
     close: Callable[[], None]
     """Release the database. Idempotent; the HTTP app calls it when it shuts down."""
 
@@ -134,17 +165,98 @@ def _live_ask_parts(settings: Settings) -> tuple[AskEngine, DocumentReader]:
         raise SettingsError(f"docingest_config {path} cannot be used: {e}") from e
 
 
-def _fake_database() -> tuple[Database, Callable[[], None]]:
-    """A throwaway database in a private temporary folder, removed when the process ends."""
+def _release_quietly(*releases: Callable[[], None]) -> None:
+    """Run the releases in the order given, each one even if an earlier one fails.
+
+    For a start that failed: the caller raises the error that made it necessary, and an error
+    from a release must not take its place.
+    """
+    for release in releases:
+        with contextlib.suppress(Exception):
+            release()
+
+
+def _fake_storage() -> tuple[Database, Path, Callable[[], None]]:
+    """A throwaway database and data folder in a private temporary folder, removed at the end."""
     folder = Path(tempfile.mkdtemp(prefix="research-api-fake-"))
-    database = Database.open(folder / "fake.sqlite3")
-    database.create_all()
+    try:
+        database = Database.open(folder / "fake.sqlite3")
+        try:
+            database.create_all()
+        except Exception:
+            _release_quietly(database.close)
+            raise
+    except Exception:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
 
     def cleanup() -> None:
-        database.close()
-        shutil.rmtree(folder, ignore_errors=True)
+        try:
+            database.close()
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
 
-    return database, cleanup
+    return database, folder / "data", cleanup
+
+
+def build_sets(database: Database, data_dir: Path, clock: Clock) -> SetServices:
+    return build_set_services(
+        catalog=database.sets,
+        files=SetFileStore(data_dir / "sets"),
+        formats=QaBenchSetFormats(),
+        clock=clock,
+    )
+
+
+def build_bench(
+    *,
+    database: Database,
+    data_dir: Path,
+    sets: SetServices,
+    arms: Arms,
+    engine: AskEngine,
+    models: ModelServer,
+    clock: Clock,
+    lane: Lane,
+    api_version: str,
+    recheck_s: float | None = None,
+) -> BenchServices:
+    files = BenchFileStore(data_dir)
+    formats = QaBenchRunFormats()
+    scorer = QaBenchScorer()
+    set_formats = QaBenchSetFormats()
+    return BenchServices(
+        jobs=JobDesk(
+            repo=database.jobs,
+            files=files,
+            formats=formats,
+            scorer=scorer,
+            sets=sets.manage,
+            set_formats=set_formats,
+            arms=arms,
+            engine=engine,
+            models=models,
+            clock=clock,
+            gpu=lane,
+            runner=f"research-api {api_version}",
+            recheck_s=RECHECK_S if recheck_s is None else recheck_s,
+        ),
+        runs=RunsDesk(
+            files=files,
+            formats=formats,
+            repo=database.jobs,
+            sets=sets.manage,
+            set_formats=set_formats,
+        ),
+        scores=ScoresDesk(files=files, scorer=scorer, repo=database.jobs),
+        models=models,
+    )
+
+
+def _model_server(settings: Settings) -> ModelServer:
+    return OpenAiModels(
+        [ModelEntry(m.name, m.endpoint, m.label or m.name, m.revision) for m in settings.models]
+    )
 
 
 def build_container(
@@ -157,6 +269,10 @@ def build_container(
     fake_ask_pause_s: float = 0.0,
     ask_engine: AskEngine | None = None,
     document_reader: DocumentReader | None = None,
+    fake_bench_pause_s: float = 0.0,
+    bench_arms: Arms | None = None,
+    model_server: ModelServer | None = None,
+    bench_recheck_s: float | None = None,
 ) -> Container:
     """Wire the service.
 
@@ -167,7 +283,9 @@ def build_container(
     replaces the time source (to cross a session or rate-limit window); nothing else changes.
     In fake mode ``fake_ask_pause_s`` is the time the stand-in engine takes between the phases of
     an ask (so a screen shows them), and ``ask_engine`` and ``document_reader`` replace the
-    stand-ins (tests).
+    stand-ins (tests). ``fake_bench_pause_s`` is the time a fake benchmark answer takes;
+    ``bench_arms``, ``model_server`` and ``bench_recheck_s`` (how often a run waiting for a model
+    server looks again) replace the stand-ins and the default for tests.
     """
     if fake and not is_loopback(settings.bind_host):
         raise SettingsError("fake mode serves test data and may only bind a loopback address")
@@ -183,79 +301,142 @@ def build_container(
     if fake:
         engine = ask_engine or FakeAskEngine(pause_s=fake_ask_pause_s)
         reader = document_reader or FakeDocumentReader()
-        database, release = _fake_database()
     else:
         engine, reader = _live_ask_parts(settings)
-        database = open_current_database(settings)
-        release = database.close
+    try:
+        if fake:
+            database, data_dir, release = _fake_storage()
+        else:
+            data_dir = storage_paths(settings)[0]
+            database = open_current_database(settings)
+            release = database.close
+    except Exception:
+        _release_quietly(engine.close)  # the storage failed to open: the engine is all there is
+        raise
 
     def cleanup() -> None:
         engine.close()
         release()
 
-    auth = build_auth(database, settings, clock, ArgonPasswordHasher(cheap=cheap_hashing))
-    for account in seed:
-        auth.users.create(
-            account.username,
-            account.display_name,
-            account.role,
-            password=account.password,
-            must_change_password=account.must_change_password,
-            language=account.language,
+    try:
+        auth = build_auth(database, settings, clock, ArgonPasswordHasher(cheap=cheap_hashing))
+        for account in seed:
+            auth.users.create(
+                account.username,
+                account.display_name,
+                account.role,
+                password=account.password,
+                must_change_password=account.must_change_password,
+                language=account.language,
+            )
+        caps = settings.circuit_caps.caps()
+        # quantum-sim and docingest's gate lists do no I/O, so fake mode runs the real engine.
+        circuits = CircuitsAdapter(timeout_s=caps.timeout_s)
+        sets = build_sets(database, data_dir, clock)
+        if fake:
+            seed_demo_sets(sets)
+        models = model_server or (FakeModelServer() if fake else _model_server(settings))
+        arms: Arms
+        if bench_arms is not None:
+            arms = bench_arms
+        elif fake:
+            arms = FakeArms(pause_s=fake_bench_pause_s)
+        else:
+            arms = LiveArms(engine=engine, models=models)
+        asks = AskDesk(engine=engine, clock=ask_clock)
+        bench = build_bench(
+            database=database,
+            data_dir=data_dir,
+            sets=sets,
+            arms=arms,
+            engine=engine,
+            models=models,
+            clock=ask_clock,
+            lane=asks.lane,
+            api_version=api_version,
+            recheck_s=bench_recheck_s,
         )
-    caps = settings.circuit_caps.caps()
-    # quantum-sim and docingest's gate lists do no I/O, so fake mode runs the real engine.
-    circuits = CircuitsAdapter(timeout_s=caps.timeout_s)
-    container = Container(
-        mode=mode,
-        settings=settings,
-        version=api_version,
-        clock=clock,
-        report_status=ReportStatus(
-            clock=clock, mode=mode, version=api_version, started_at=clock.now()
-        ),
-        parse_circuit=ParseCircuit(engine=circuits),
-        run_circuit=RunCircuit(engine=circuits, caps=caps),
-        check_circuit=CheckCircuit(engine=circuits, caps=caps),
-        circuit_conventions=ShowCircuitConventions(engine=circuits),
-        auth=auth,
-        asks=AskDesk(engine=engine, clock=ask_clock),
-        documents=DocumentServices(reader=reader),
-        close=cleanup,
-    )
-    # A process that exits without a clean shutdown still removes the fake database's folder.
-    weakref.finalize(container, cleanup)
-    return container
+        container = Container(
+            mode=mode,
+            settings=settings,
+            version=api_version,
+            clock=clock,
+            report_status=ReportStatus(
+                clock=clock, mode=mode, version=api_version, started_at=clock.now()
+            ),
+            parse_circuit=ParseCircuit(engine=circuits),
+            run_circuit=RunCircuit(engine=circuits, caps=caps),
+            check_circuit=CheckCircuit(engine=circuits, caps=caps),
+            circuit_conventions=ShowCircuitConventions(engine=circuits),
+            auth=auth,
+            asks=asks,
+            documents=DocumentServices(reader=reader),
+            sets=sets,
+            bench=bench,
+            close=cleanup,
+        )
+        # A process that exits without a clean shutdown still removes the fake database's folder.
+        weakref.finalize(container, cleanup)
+        return container
+    except Exception:
+        # A failed start must not leave the throwaway folder, the open database or the engine.
+        _release_quietly(release, engine.close)
+        raise
 
 
-def _fake_pause(text: str | None) -> float:
+def _fake_pause(text: str | None, *, name: str, default: float, limit: float) -> float:
     if text is None:
-        return DEFAULT_FAKE_ASK_PAUSE_S
+        return default
     try:
         pause = float(text)
     except ValueError:
         pause = -1.0
-    if not 0 <= pause <= MAX_FAKE_ASK_PAUSE_S:
-        raise SettingsError(
-            f"{FAKE_ASK_PAUSE_ENV} must be a number from 0 to {MAX_FAKE_ASK_PAUSE_S:g}"
-        )
+    if not 0 <= pause <= limit:
+        raise SettingsError(f"{name} must be a number from 0 to {limit:g}")
     return pause
 
 
+def _with_web_dir(settings: Settings, env: Mapping[str, str]) -> Settings:
+    """The settings, with ``web_dir`` taken from the environment when it is set there."""
+    folder = env.get(WEB_DIR_ENV)
+    if not folder:
+        return settings
+    try:
+        return Settings.model_validate({**settings.model_dump(), "web_dir": folder})
+    except ValidationError:
+        raise SettingsError(f"{WEB_DIR_ENV} must be an absolute path") from None
+
+
 def container_from_env(environ: Mapping[str, str] | None = None) -> Container:
-    """The container for ``uvicorn --factory``: fake mode, or the settings file named in the env."""
+    """The container for ``uvicorn --factory``: fake mode, or the settings file named in the env.
+
+    ``RESEARCH_API_WEB_DIR`` names the built web app and wins over the ``web_dir`` setting, so
+    fake mode can serve it too.
+    """
     env = os.environ if environ is None else environ
     if env.get(FAKE_ENV) == "1":
+        settings = _with_web_dir(Settings.defaults(), env)
         return build_container(
-            Settings.defaults(),
+            settings,
             fake=True,
             seed=default_seed_users(),
-            fake_ask_pause_s=_fake_pause(env.get(FAKE_ASK_PAUSE_ENV)),
+            fake_ask_pause_s=_fake_pause(
+                env.get(FAKE_ASK_PAUSE_ENV),
+                name=FAKE_ASK_PAUSE_ENV,
+                default=DEFAULT_FAKE_ASK_PAUSE_S,
+                limit=MAX_FAKE_ASK_PAUSE_S,
+            ),
+            fake_bench_pause_s=_fake_pause(
+                env.get(FAKE_BENCH_PAUSE_ENV),
+                name=FAKE_BENCH_PAUSE_ENV,
+                default=DEFAULT_FAKE_BENCH_PAUSE_S,
+                limit=MAX_FAKE_BENCH_PAUSE_S,
+            ),
         )
     path = env.get(CONFIG_ENV)
     if not path:
         raise SettingsError(f"set {CONFIG_ENV} to a settings file, or {FAKE_ENV}=1 for fake mode")
-    return build_container(load_private_settings(Path(path)))
+    return build_container(_with_web_dir(load_private_settings(Path(path)), env))
 
 
 @dataclass(frozen=True)

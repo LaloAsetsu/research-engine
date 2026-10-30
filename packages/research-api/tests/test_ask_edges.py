@@ -6,11 +6,10 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from ask_helpers import ScriptedEngine, settle
+from ask_helpers import ScriptedEngine, engine_over, settle
 from helpers import arun
 from test_ask_desk import make, q
 
-from research_api.adapters.docingest_ask import DocingestAskEngine
 from research_api.adapters.fake import FakeAskEngine, FakeDocumentReader
 from research_api.adapters.fake.answers import render
 from research_api.application.documents import DocumentServices
@@ -65,7 +64,7 @@ async def test_a_warm_up_that_is_cancelled_is_not_swallowed() -> None:
         def close(self) -> None:
             return None
 
-    engine = DocingestAskEngine(Hanging)  # type: ignore[arg-type]
+    engine = engine_over(Hanging)  # type: ignore[arg-type]
     task = asyncio.ensure_future(engine.warm_up())
     await asyncio.sleep(0.05)
     task.cancel()

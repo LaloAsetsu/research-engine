@@ -48,6 +48,17 @@ jobs:
       - run: uv run --frozen pyright
       - run: uv run --frozen pytest -q --cov
 
+  shell:
+    # The shared-server script passes shellcheck. The version is pinned so that a new runner
+    # image cannot add checks and turn the job red; raise it on purpose. scripts/check.sh runs
+    # the same command and skips it where shellcheck is missing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uvx --from shellcheck-py==0.11.0.1 shellcheck --version
+      - run: uvx --from shellcheck-py==0.11.0.1 shellcheck deploy/research-api.sh
+
   web:
     # The web app: lint, format, types, unit tests, build, bundle budget, dependency audit.
     runs-on: ubuntu-latest

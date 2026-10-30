@@ -13,7 +13,7 @@ vi.mock("@/features/circuits/CircuitsPage", () => ({
     throw new Error("boom");
   },
 }));
-vi.mock("@/features/qsets/QSetsPage", () => {
+vi.mock("@/features/qsets/SetsPage", () => {
   throw new TypeError("Failed to fetch dynamically imported module");
 });
 

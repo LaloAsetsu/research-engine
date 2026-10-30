@@ -33,7 +33,7 @@ case.
 |---|---|---|---|
 | `ingest.py` | `IngestService`, `IngestOptions`, `PIPELINE_VERSION`, `SIDECAR_SUFFIX`, `sha256_file`, `read_sidecar`, `retitle_markdown`, `Log` | Turn one file (PDF, image, office, LaTeX, text) into Markdown plus a `DocumentManifest`, with a content-addressed cache | `bootstrap.Container.ingest`, `docingest ingest`, `docingest eval-ocr`, the PaperQA2 hook, `CrawlService` |
 | `crawl.py` | `CrawlService`, `CrawlReport` | Search a remote source, download each record, write a metadata sidecar, ingest it | `bootstrap.Container.crawl`, `docingest crawl` |
-| `ask.py` | `AskService`, `AskSession`, `AskOptions`, `AskResult`, `AskTimings`, `Retrieval`, `EquationLookup`, `WholeBlocks`, `retrieve`, `cap_per_paper`, `with_whole_blocks`, `with_gate_lists`, `with_equation_lookup`, `with_block_notes`, `with_equation_headers`, `MAX_PER_NUMBER`, `MAX_ADDED`, `BLOCK_CHUNKS` | Answer a question over every stored document, or from the chunk index when one is configured | `bootstrap.Container.ask`, `Container.ask_session`, `docingest ask` |
+| `ask.py` | `AskService`, `AskSession`, `AskOptions`, `AskResult`, `AskTimings`, `GivenPassage`, `Retrieval`, `EquationLookup`, `WholeBlocks`, `retrieve`, `cap_per_paper`, `with_whole_blocks`, `with_gate_lists`, `with_equation_lookup`, `with_block_notes`, `with_equation_headers`, `MAX_PER_NUMBER`, `MAX_ADDED`, `BLOCK_CHUNKS`, `UNPLACED_WARNING` | Answer a question over every stored document, from the chunk index when one is configured, or from passages the caller gives | `bootstrap.Container.ask`, `Container.ask_session`, `docingest ask` |
 | `index.py` | `IndexService`, `IndexStatus`, `BuildReport`, `content_key`, `document_chunks`, `BATCH_CHUNKS` | Chunk every stored document like `ask` does, embed the new and changed ones, drop the vanished ones, and report the state of the index | `bootstrap.Container.index_service`, `docingest index` |
 | `benchmark.py` | `BenchmarkRunner`, `CandidateRun`, `RunMismatchError`, `score_run`, `needs_scoring`, `load_scores`, `rank`, `compare`, `throughput`, `build_summary`, `render_report`, `write_report`, `read_manifest`, `read_telemetry`, `telemetry_path`, `telemetry_stamp`, `latest_by_sample`, `machine_info`, `library_versions` | Transcribe benchmark samples with each OCR candidate (resumable), record telemetry, score, and write `summary.json` and `report.md` | `docingest bench run`, `bench score`, `bench report` (in `entrypoints/bench_cli.py`); `scripts/bench_docs.py` reads `load_scores` and `compare` |
 | `metrics.py` | `score`, `normalize`, `plain_text`, `latex_to_text`, `word_f1`, `char3_f1`, `running_lines`, `strip_furniture`, `bootstrap_ci`, `FURNITURE_ZONE` | Format-neutral text comparison: CER, WER, word F1, character 3-gram F1 | the synthetic benchmark suite, `docingest eval-ocr` |
@@ -1007,6 +1007,7 @@ questions (`Container.ask_session`, one per container, so it reads the configura
 | Concurrency | The listing, the readiness check, the query embedding, the search and the reranking run one question at a time, in a worker thread, behind a lock. The completion of the chunks (it reads the cited papers' Markdown) and, for a question that does not use the index, the listing and the reading of every paper run in a worker thread too, outside the lock, so a caller's event loop never waits for the disk. The answerer runs outside the lock, so a caller can have several answers pending; it should not when the numbers are compared, because a model server that batches requests changes them. `warn` may therefore be called from a worker thread |
 | `warm_up()` | Opens the index, lists the corpus and makes the float32 copy with one search, so that the first question does not pay for it; does nothing without an index |
 | `reload()`, `close()` | Forget the listing and close the index; the session stays usable |
+| `answer_from_passages(question, passages, warn=None, on_phase=None)` | Answer from the given passages and retrieve nothing; see below |
 | Errors | Raised as `AskService.ask` raises them; the session stays usable |
 
 `retrieve_s` runs from taking the lock to the start of the answerer: the search and the
@@ -1017,6 +1018,38 @@ that opens the index (the first question, or the first after a reload) a commit 
 between the read and the open is searched but named by the older generation, and the next question
 reloads once for nothing; the answer is not affected. Nothing is stored: no request log and no
 answer cache.
+
+#### `answer_from_passages`: answer from evidence the caller chose
+
+`async answer_from_passages(question, passages, warn=None, on_phase=None) -> AskResult` takes
+`GivenPassage(doc_id, text)` values: the full id of a paper in the corpus and a passage of its
+text, for a caller that already knows the evidence (a measurement that hands the answer model the
+gold passages, to tell a retrieval failure from an answering one). No index, embedder or reranker
+is touched, and the retrieval lock is not taken, so it works with or without an index and does not
+wait for a question that is searching. It lists the corpus in a worker thread, as a question that
+does not use the index does.
+
+| Part | Behaviour |
+|---|---|
+| Contexts | The passages, in the given order, with their text unchanged. Whole blocks, gate lists and the equation lookup are not applied, even when `[qa] skip_summary` has them on for the index path. The answer model reads exactly this text only with `[qa] skip_summary`; without it PaperQA2 summarizes each passage, as on the index path, and the model reads the summaries (`AskResult.contexts` holds the given text either way) |
+| Placing | Each passage is looked for in the pages of its paper (`split_pages` of the stored Markdown, joined by `PAGE_BREAK` as the chunker joins them); the first tier that finds it wins, and its first occurrence gives `first_page`, `last_page`, `start` and the cited name `"<16 hex> pages a-b"` of the `Chunk`. Tiers: the text as it is; any run of white space matching any other; and, on both sides, white space, `$`, `\tag{..}`, `\begin{..}` / `\end{..}` and page markers left out and every character put in Unicode compatibility form (NFKC) with curly quotes, en and em dashes and the minus sign unified. The third finds a passage taken from a conversion that wrote the display equations differently; its `start` is the first character that is not left out. Characters are put in NFKC form one at a time, so an accent written composed in one text and decomposed in the other does not match, and a space that NFKC produces is kept. A passage that crosses a page break spans both pages |
+| Not found | A passage no tier finds is not an error: it is cited with all the pages of its paper (`pages 1-N`; `pages 1-1` for a paper with no page marker), its `start` is 0, and `warn` is called once for it with `UNPLACED_WARNING` (`"a given passage was not found in"`, a module constant of `ask.py`), the paper's 16-character id and the pages. The rule is one function, `_unplaced`. The text is kept as given in every case |
+| Errors | `ValueError`, before the answerer is called, for a paper that is not in the corpus; the message names the paper by the first 16 characters of its id |
+| No passages | An empty list is allowed: a question with no evidence, such as one whose gold paper list is empty. The corpus is not listed, nothing is placed and the answerer is called with an empty `contexts`. PaperQA2 does not call the model for it: with nothing to read it answers with its own text, `I cannot answer this question due to having no papers.`, after the `Question:` line, whatever `[qa] skip_summary` says. docingest adds nothing to it. `AskResult.contexts` and `sources` are empty |
+| Result | `AskResult` as for `ask`: `answer`, `contexts` (the placed passages), `sources` (doc ids by first appearance), `warnings` (the listing's, the unplaced passages' and the answerer's), `index_generation` (always `None`) and `timings` (`retrieve_s` is the time spent listing the corpus and placing the passages, so it is not comparable with the retrieval time of `ask`) |
+| `on_phase` | Only `"answering"`, in the caller's event loop, once every passage is placed |
+
+The answerer may still cut the passages: PaperQA2 drops a repeated text under `skip_summary` and
+halves `answer_max_sources` when the prompt overflows, and says so in `warnings`.
+
+#### The answer model
+
+`Container.answer_model` returns an `AnswerModel(name, revision)` (`domain.models`) that names
+the model writing the answers, chosen by the rule `adapters.qa.paperqa.llm_params` uses:
+`DOCINGEST_LLM`, else `[qa] llm`, else the pinned `[ocr]` model. For the pinned model `name` is
+its repository and `revision` its commit (`[qa] llm_revision`, else `[ocr] revision`); for a
+litellm model `name` is its string and `revision` is `None`. It holds no address and no key, so a
+caller can record it. It raises `NotConfiguredError` when `[adapters] qa` is not `paperqa`.
 
 ## `index.py`: keep the chunk index in step with the corpus
 

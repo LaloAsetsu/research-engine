@@ -1,6 +1,7 @@
 """The ``research-api`` command.
 
-    research-api serve [--config FILE | --fake [--seed FILE] [--ask-pause S]] [--port N]
+    research-api serve [--config FILE | --fake [--seed FILE] [--ask-pause S] [--bench-pause S]]
+                       [--port N]
                                                   run the API (file: $RESEARCH_API_CONFIG)
     research-api openapi [--output FILE]          print the OpenAPI 3.1 document (sorted keys)
     research-api db upgrade [--config FILE]       make or update the database tables
@@ -35,7 +36,13 @@ from ..bootstrap import (
     open_database,
     open_user_admin,
 )
-from ..bootstrap.container import CONFIG_ENV, DEFAULT_FAKE_ASK_PAUSE_S, MAX_FAKE_ASK_PAUSE_S
+from ..bootstrap.container import (
+    CONFIG_ENV,
+    DEFAULT_FAKE_ASK_PAUSE_S,
+    DEFAULT_FAKE_BENCH_PAUSE_S,
+    MAX_FAKE_ASK_PAUSE_S,
+    MAX_FAKE_BENCH_PAUSE_S,
+)
 from ..bootstrap.seed import default_seed_users, load_seed_users
 from ..domain.auth import LANGUAGES, Role
 from ..domain.errors import ResearchApiError
@@ -81,6 +88,14 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="with --fake: seconds the stand-in engine takes per phase of an ask (default: "
         f"{DEFAULT_FAKE_ASK_PAUSE_S}; 0 answers at once)",
+    )
+
+    serve.add_argument(
+        "--bench-pause",
+        type=float,
+        default=None,
+        help="with --fake: seconds a stand-in benchmark answer takes (default: "
+        f"{DEFAULT_FAKE_BENCH_PAUSE_S}; 0 answers at once)",
     )
 
     spec = sub.add_parser("openapi", help="print the OpenAPI document")
@@ -135,7 +150,9 @@ def _container_for(
     fake: bool,
     port: int | None,
     seed: Path | None,
+    *,
     ask_pause: float | None = None,
+    bench_pause: float | None = None,
 ) -> Container:
     if fake:
         accounts = load_seed_users(seed) if seed else default_seed_users()
@@ -147,16 +164,23 @@ def _container_for(
             ask_pause = DEFAULT_FAKE_ASK_PAUSE_S
         if not 0 <= ask_pause <= MAX_FAKE_ASK_PAUSE_S:
             raise SettingsError(f"--ask-pause must be between 0 and {MAX_FAKE_ASK_PAUSE_S:g}")
+        if bench_pause is None:
+            bench_pause = DEFAULT_FAKE_BENCH_PAUSE_S
+        if not 0 <= bench_pause <= MAX_FAKE_BENCH_PAUSE_S:
+            raise SettingsError(f"--bench-pause must be between 0 and {MAX_FAKE_BENCH_PAUSE_S:g}")
         return build_container(
             _with_port(Settings.defaults(), port),
             fake=True,
             seed=accounts,
             fake_ask_pause_s=ask_pause,
+            fake_bench_pause_s=bench_pause,
         )
     if seed is not None:
         raise SettingsError("--seed only works with --fake")
     if ask_pause is not None:
         raise SettingsError("--ask-pause only works with --fake")
+    if bench_pause is not None:
+        raise SettingsError("--bench-pause only works with --fake")
     if config is None and not os.environ.get(CONFIG_ENV):
         raise SettingsError(f"give --config FILE, set {CONFIG_ENV}, or use --fake")
     return build_container(_with_port(_settings_from(config), port))
@@ -248,7 +272,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _run_users(args)
             case _:
                 container = _container_for(
-                    args.config, args.fake, args.port, args.seed, args.ask_pause
+                    args.config,
+                    args.fake,
+                    args.port,
+                    args.seed,
+                    ask_pause=args.ask_pause,
+                    bench_pause=args.bench_pause,
                 )
                 try:
                     configure_logging(

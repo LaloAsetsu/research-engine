@@ -1,6 +1,80 @@
 {
   "components": {
     "schemas": {
+      "ArmIn": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "`bare`: the model alone, no papers (the closed-book prompt). `harness`: through docingest, as an ask. `oracle`: the model gets the gold passages of each question (`md_text`, in set order) and nothing else; a set with a gold passage that has no text is a `422` at `/arms/{i}`, and a question with no gold paper gets no passage.",
+            "enum": [
+              "bare",
+              "harness",
+              "oracle"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "overrides": {
+            "additionalProperties": true,
+            "description": "Harness only: `use_index` (bool), `whole_blocks` (bool), `bm25` (`english`, `always` or `never`) for every question of the run.",
+            "title": "Overrides",
+            "type": "object"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A label for the run.",
+            "title": "Variant"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ArmIn",
+        "type": "object"
+      },
+      "ArmOut": {
+        "properties": {
+          "name": {
+            "enum": [
+              "bare",
+              "harness",
+              "oracle"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "overrides": {
+            "additionalProperties": true,
+            "title": "Overrides",
+            "type": "object"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ArmOut",
+        "type": "object"
+      },
       "AskAccepted": {
         "properties": {
           "ask_id": {
@@ -325,6 +399,46 @@
           "state"
         ],
         "title": "AskView",
+        "type": "object"
+      },
+      "BenchStatusOut": {
+        "description": "The benchmark lanes. Nothing here names a person or a question.",
+        "properties": {
+          "queued_runs": {
+            "description": "Runs waiting for the GPU lane.",
+            "title": "Queued Runs",
+            "type": "integer"
+          },
+          "queued_scores": {
+            "description": "Scorings waiting for the CPU lane.",
+            "title": "Queued Scores",
+            "type": "integer"
+          },
+          "running_job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run on the GPU lane now, by job id.",
+            "title": "Running Job"
+          },
+          "scoring": {
+            "description": "True while a scoring runs on the CPU lane.",
+            "title": "Scoring",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "running_job",
+          "queued_runs",
+          "scoring",
+          "queued_scores"
+        ],
+        "title": "BenchStatusOut",
         "type": "object"
       },
       "CheckRequest": {
@@ -721,6 +835,122 @@
         "title": "DocumentSummaryOut",
         "type": "object"
       },
+      "FreezePlanOut": {
+        "description": "What freezing does, by item id.",
+        "properties": {
+          "accepted": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted",
+            "type": "array"
+          },
+          "edited": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Edited",
+            "type": "array"
+          },
+          "etag": {
+            "description": "Names this plan (the `ETag` header, quoted). The freeze must send it in `If-Match`; a decision added or an item changed since gives another one (`409`).",
+            "title": "Etag",
+            "type": "string"
+          },
+          "items_after": {
+            "title": "Items After",
+            "type": "integer"
+          },
+          "items_before": {
+            "title": "Items Before",
+            "type": "integer"
+          },
+          "needs_second": {
+            "description": "Accepted by one person only; still kept.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Needs Second",
+            "type": "array"
+          },
+          "rejected": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rejected",
+            "type": "array"
+          },
+          "stale": {
+            "description": "Decided on an earlier state of the draft.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Stale",
+            "type": "array"
+          },
+          "unknown": {
+            "description": "Decisions about items the draft no longer has.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unknown",
+            "type": "array"
+          },
+          "unreviewed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unreviewed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items_before",
+          "items_after",
+          "accepted",
+          "edited",
+          "rejected",
+          "unreviewed",
+          "needs_second",
+          "stale",
+          "unknown",
+          "etag"
+        ],
+        "title": "FreezePlanOut",
+        "type": "object"
+      },
+      "FreezePreview": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/FreezePlanOut"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "plan"
+        ],
+        "title": "FreezePreview",
+        "type": "object"
+      },
+      "FreezeResult": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/FreezePlanOut"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "plan"
+        ],
+        "title": "FreezeResult",
+        "type": "object"
+      },
       "GateListResponse": {
         "properties": {
           "circuits": {
@@ -768,6 +998,455 @@
         ],
         "title": "Health",
         "type": "object"
+      },
+      "ImportResult": {
+        "properties": {
+          "items_read": {
+            "title": "Items Read",
+            "type": "integer"
+          },
+          "shape": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The older shape that was converted, if any.",
+            "title": "Shape"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "items_read",
+          "shape"
+        ],
+        "title": "ImportResult",
+        "type": "object"
+      },
+      "ImportShapeOut": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "needs_corpus": {
+            "title": "Needs Corpus",
+            "type": "boolean"
+          },
+          "suffix": {
+            "title": "Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "suffix",
+          "needs_corpus"
+        ],
+        "title": "ImportShapeOut",
+        "type": "object"
+      },
+      "ItemDetail": {
+        "properties": {
+          "item": {
+            "additionalProperties": true,
+            "description": "The `qset/1` item as stored.",
+            "title": "Item",
+            "type": "object"
+          },
+          "review": {
+            "$ref": "#/components/schemas/ItemReviewOut"
+          },
+          "reviews": {
+            "description": "Every decision on this item, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ReviewLine"
+            },
+            "title": "Reviews",
+            "type": "array"
+          },
+          "validation": {
+            "description": "What `qset/1` says about the item. Empty when valid.",
+            "items": {
+              "$ref": "#/components/schemas/ProblemAt"
+            },
+            "title": "Validation",
+            "type": "array"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "item",
+          "review",
+          "reviews",
+          "validation"
+        ],
+        "title": "ItemDetail",
+        "type": "object"
+      },
+      "ItemPage": {
+        "properties": {
+          "header": {
+            "$ref": "#/components/schemas/QSetHeader"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemSummaryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "review": {
+            "$ref": "#/components/schemas/ReviewProgressOut"
+          },
+          "total": {
+            "description": "Items matching the filters, before paging.",
+            "title": "Total",
+            "type": "integer"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SetVersionOut"
+          }
+        },
+        "required": [
+          "version",
+          "header",
+          "review",
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "ItemPage",
+        "type": "object"
+      },
+      "ItemReviewOut": {
+        "properties": {
+          "accepted_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted By",
+            "type": "array"
+          },
+          "deciding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewLine"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The latest decision, which freezing applies."
+          },
+          "gold": {
+            "description": "True when two different people accepted it.",
+            "title": "Gold",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "none",
+              "needs_second",
+              "accepted",
+              "edited",
+              "rejected"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "gold",
+          "accepted_by",
+          "deciding"
+        ],
+        "title": "ItemReviewOut",
+        "type": "object"
+      },
+      "ItemSummaryOut": {
+        "properties": {
+          "accepted_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted By",
+            "type": "array"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "corpus": {
+            "title": "Corpus",
+            "type": "string"
+          },
+          "form": {
+            "title": "Form",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lang": {
+            "title": "Lang",
+            "type": "string"
+          },
+          "mirror_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mirror Of"
+          },
+          "question": {
+            "description": "The question, cut to 240 characters.",
+            "title": "Question",
+            "type": "string"
+          },
+          "review": {
+            "enum": [
+              "none",
+              "needs_second",
+              "accepted",
+              "edited",
+              "rejected"
+            ],
+            "title": "Review",
+            "type": "string"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "lang",
+          "form",
+          "content",
+          "corpus",
+          "split",
+          "question",
+          "tags",
+          "mirror_of",
+          "review",
+          "accepted_by"
+        ],
+        "title": "ItemSummaryOut",
+        "type": "object"
+      },
+      "JobErrorOut": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message"
+        ],
+        "title": "JobErrorOut",
+        "type": "object"
+      },
+      "JobOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobErrorOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "run",
+              "score"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A queued run: how many jobs are ahead of it (the running one counts).",
+            "title": "Position"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ProgressOut"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunJobOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoreJobOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "set": {
+            "$ref": "#/components/schemas/SetRefOut"
+          },
+          "settled": {
+            "description": "True when the job is not going to change by itself (a cancelled or interrupted job waits for a resume): the client can stop polling.",
+            "title": "Settled",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "waiting_for": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A queued run that is first but has not started: why (a model server that does not answer). Fixed text.",
+            "title": "Waiting For"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "settled",
+          "owner",
+          "created_at",
+          "started_at",
+          "ended_at",
+          "progress",
+          "set"
+        ],
+        "title": "JobOut",
+        "type": "object"
+      },
+      "JobState": {
+        "enum": [
+          "queued",
+          "running",
+          "cancelling",
+          "cancelled",
+          "done",
+          "failed",
+          "interrupted"
+        ],
+        "title": "JobState",
+        "type": "string"
       },
       "LoginRequest": {
         "additionalProperties": false,
@@ -829,6 +1508,136 @@
         "title": "Me",
         "type": "object"
       },
+      "ModelOut": {
+        "properties": {
+          "available": {
+            "description": "Whether its server answered a moment ago.",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name to send in a run request.",
+            "title": "Name",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "available"
+        ],
+        "title": "ModelOut",
+        "type": "object"
+      },
+      "NewReview": {
+        "additionalProperties": false,
+        "description": "The server adds the reviewer (you), the role (`human`), the date and the set md5.",
+        "properties": {
+          "edit": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For `edit`: the item fields to replace, with their new values.",
+            "title": "Edit"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for edit and reject.",
+            "title": "Note"
+          },
+          "verdict": {
+            "enum": [
+              "accept",
+              "edit",
+              "reject"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "verdict"
+        ],
+        "title": "NewReview",
+        "type": "object"
+      },
+      "NewSet": {
+        "additionalProperties": false,
+        "properties": {
+          "copy_from": {
+            "anyOf": [
+              {
+                "pattern": "^v[1-9][0-9]{0,5}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start the next version of an existing set as a copy of this version.",
+            "title": "Copy From"
+          },
+          "corpus": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The corpus new items name when they leave it out.",
+            "title": "Corpus"
+          },
+          "name": {
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "NewSet",
+        "type": "object"
+      },
       "PageInfoOut": {
         "properties": {
           "method": {
@@ -858,6 +1667,24 @@
           "method"
         ],
         "title": "PageInfoOut",
+        "type": "object"
+      },
+      "PairOut": {
+        "properties": {
+          "base_run": {
+            "title": "Base Run",
+            "type": "string"
+          },
+          "var_run": {
+            "title": "Var Run",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_run",
+          "var_run"
+        ],
+        "title": "PairOut",
         "type": "object"
       },
       "ParseRequest": {
@@ -945,6 +1772,25 @@
         "title": "Problem",
         "type": "object"
       },
+      "ProblemAt": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "description": "JSON pointer to the value (`/lines/N/...` for a file).",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "title": "ProblemAt",
+        "type": "object"
+      },
       "ProblemField": {
         "properties": {
           "message": {
@@ -964,6 +1810,202 @@
         "title": "ProblemField",
         "type": "object"
       },
+      "ProgressOut": {
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "done",
+          "total"
+        ],
+        "title": "ProgressOut",
+        "type": "object"
+      },
+      "QSetHeader": {
+        "additionalProperties": true,
+        "description": "Line 1 of a `qset/1` file.",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "set": {
+            "title": "Set",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "format",
+          "set",
+          "created"
+        ],
+        "title": "QSetHeader",
+        "type": "object"
+      },
+      "ReviewLine": {
+        "additionalProperties": true,
+        "description": "One `reviews/1` decision on an item, as stored.",
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "edit": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edit"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reviewer": {
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "human",
+              "checker"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "set_md5": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Md5"
+          },
+          "target": {
+            "const": "item",
+            "title": "Target",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "accept",
+              "edit",
+              "reject"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "target",
+          "reviewer",
+          "role",
+          "verdict",
+          "date"
+        ],
+        "title": "ReviewLine",
+        "type": "object"
+      },
+      "ReviewProgressOut": {
+        "description": "How many items are in each review state.",
+        "properties": {
+          "accepted": {
+            "description": "Accepted by two different people (gold).",
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "edited": {
+            "description": "The latest decision is an edit.",
+            "title": "Edited",
+            "type": "integer"
+          },
+          "items": {
+            "title": "Items",
+            "type": "integer"
+          },
+          "needs_second": {
+            "description": "Accepted by one person; a second is needed.",
+            "title": "Needs Second",
+            "type": "integer"
+          },
+          "none": {
+            "description": "No human has decided yet.",
+            "title": "None",
+            "type": "integer"
+          },
+          "rejected": {
+            "description": "The latest decision is a reject.",
+            "title": "Rejected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "none",
+          "needs_second",
+          "accepted",
+          "edited",
+          "rejected"
+        ],
+        "title": "ReviewProgressOut",
+        "type": "object"
+      },
       "Role": {
         "enum": [
           "admin",
@@ -971,6 +2013,340 @@
         ],
         "title": "Role",
         "type": "string"
+      },
+      "RunCitationOut": {
+        "properties": {
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "first_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Page"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "last_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Page"
+          }
+        },
+        "required": [
+          "key",
+          "doc_id"
+        ],
+        "title": "RunCitationOut",
+        "type": "object"
+      },
+      "RunContextOut": {
+        "properties": {
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "first_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Page"
+          },
+          "is_reference": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Reference"
+          },
+          "last_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Page"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "doc_id"
+        ],
+        "title": "RunContextOut",
+        "type": "object"
+      },
+      "RunItemErrorOut": {
+        "properties": {
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "RunItemErrorOut",
+        "type": "object"
+      },
+      "RunItemOut": {
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/RunCitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "contexts": {
+            "items": {
+              "$ref": "#/components/schemas/RunContextOut"
+            },
+            "title": "Contexts",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunItemErrorOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the set; null when the set is gone.",
+            "title": "Question"
+          },
+          "reference_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Answer"
+          },
+          "repeat": {
+            "title": "Repeat",
+            "type": "integer"
+          },
+          "timings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunTimingsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunUsageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "repeat",
+          "question",
+          "answer",
+          "citations",
+          "contexts"
+        ],
+        "title": "RunItemOut",
+        "type": "object"
+      },
+      "RunItemsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunSummaryOut"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run",
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "RunItemsOut",
+        "type": "object"
+      },
+      "RunJobOut": {
+        "description": "What a run job asks for.",
+        "properties": {
+          "arm": {
+            "$ref": "#/components/schemas/ArmOut"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "repeats": {
+            "title": "Repeats",
+            "type": "integer"
+          },
+          "run_id": {
+            "description": "The `qa-run/1` file it writes (it exists once the job starts).",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "arm",
+          "model",
+          "repeats",
+          "notes"
+        ],
+        "title": "RunJobOut",
+        "type": "object"
       },
       "RunRequest": {
         "additionalProperties": false,
@@ -1034,6 +2410,895 @@
         "title": "RunRequest",
         "type": "object"
       },
+      "RunRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "arms": {
+            "items": {
+              "$ref": "#/components/schemas/ArmIn"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Arms",
+            "type": "array"
+          },
+          "models": {
+            "description": "Names from `GET /models`. One job is made for each arm and model. The `harness` and `oracle` arms answer with docingest's own model and accept only that one (a `422` at `/arms/{i}` names it); `bare` takes any.",
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Models",
+            "type": "array"
+          },
+          "notes": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Notes",
+            "type": "string"
+          },
+          "repeats": {
+            "default": 1,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Repeats",
+            "type": "integer"
+          },
+          "set": {
+            "$ref": "#/components/schemas/SetRefIn"
+          }
+        },
+        "required": [
+          "set",
+          "arms",
+          "models"
+        ],
+        "title": "RunRequestBody",
+        "type": "object"
+      },
+      "RunSummaryOut": {
+        "properties": {
+          "answers": {
+            "description": "Answer lines in the file, errors included.",
+            "title": "Answers",
+            "type": "integer"
+          },
+          "arm": {
+            "title": "Arm",
+            "type": "string"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "ended": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only a run that went to its end has it.",
+            "title": "Ended"
+          },
+          "errors": {
+            "description": "Of those, how many are an error and not an answer.",
+            "title": "Errors",
+            "type": "integer"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Questions times repeats, when a job of this service made it.",
+            "title": "Expected"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "md5": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The md5 of the run file's bytes as read (unzipped when gzip): the value `ScoreRunOut.md5` records when the run is scored, so a score is of this version of the run when the two are equal.",
+            "title": "Md5"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "repeats": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repeats"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "set_md5": {
+            "title": "Set Md5",
+            "type": "string"
+          },
+          "set_name": {
+            "description": "The set as its header names it: `name/version`.",
+            "title": "Set Name",
+            "type": "string"
+          },
+          "started": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant"
+          }
+        },
+        "required": [
+          "run_id",
+          "set_name",
+          "set_md5",
+          "arm",
+          "model",
+          "created",
+          "answers",
+          "errors",
+          "complete",
+          "notes"
+        ],
+        "title": "RunSummaryOut",
+        "type": "object"
+      },
+      "RunTimingsOut": {
+        "properties": {
+          "answer_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer S"
+          },
+          "rerank_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank S"
+          },
+          "retrieve_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieve S"
+          },
+          "wall_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall S"
+          }
+        },
+        "title": "RunTimingsOut",
+        "type": "object"
+      },
+      "RunUsageOut": {
+        "properties": {
+          "completion_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion Tokens"
+          },
+          "llm_requests": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Requests"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "rerank_requests": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Requests"
+          },
+          "retries": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retries"
+          },
+          "truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncated"
+          }
+        },
+        "title": "RunUsageOut",
+        "type": "object"
+      },
+      "ScoreCompareOut": {
+        "properties": {
+          "base": {
+            "title": "Base",
+            "type": "number"
+          },
+          "base_run": {
+            "title": "Base Run",
+            "type": "string"
+          },
+          "ci": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Ci",
+            "type": "array"
+          },
+          "counts": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the difference is outside the interval and the floor.",
+            "title": "Counts"
+          },
+          "diff": {
+            "description": "Variant minus base.",
+            "title": "Diff",
+            "type": "number"
+          },
+          "down": {
+            "title": "Down",
+            "type": "integer"
+          },
+          "floor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The noise floor, when a pair was given.",
+            "title": "Floor"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "up": {
+            "description": "Questions where the variant scored higher.",
+            "title": "Up",
+            "type": "integer"
+          },
+          "var": {
+            "title": "Var",
+            "type": "number"
+          },
+          "var_run": {
+            "title": "Var Run",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_run",
+          "var_run",
+          "group",
+          "metric",
+          "n",
+          "base",
+          "var",
+          "diff",
+          "ci",
+          "up",
+          "down"
+        ],
+        "title": "ScoreCompareOut",
+        "type": "object"
+      },
+      "ScoreGroupOut": {
+        "properties": {
+          "ci": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "95% interval.",
+            "title": "Ci"
+          },
+          "group": {
+            "description": "`all`, or `field=value` (for example `lang=es`).",
+            "title": "Group",
+            "type": "string"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "group",
+          "metric",
+          "n",
+          "mean"
+        ],
+        "title": "ScoreGroupOut",
+        "type": "object"
+      },
+      "ScoreItemOut": {
+        "properties": {
+          "grades": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grades"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keys"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "repeat": {
+            "title": "Repeat",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "id",
+          "repeat",
+          "metrics"
+        ],
+        "title": "ScoreItemOut",
+        "type": "object"
+      },
+      "ScoreItemsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "ScoreItemsOut",
+        "type": "object"
+      },
+      "ScoreJobOut": {
+        "properties": {
+          "pairs": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Pairs",
+            "type": "array"
+          },
+          "runs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "score_id": {
+            "description": "The `qa-score/1` file it writes.",
+            "title": "Score Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "score_id",
+          "runs",
+          "pairs"
+        ],
+        "title": "ScoreJobOut",
+        "type": "object"
+      },
+      "ScoreOut": {
+        "properties": {
+          "compares": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreCompareOut"
+            },
+            "title": "Compares",
+            "type": "array"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "header": {
+            "additionalProperties": true,
+            "description": "The `qa-score/1` header, as written.",
+            "title": "Header",
+            "type": "object"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ScoreSummaryOut"
+          }
+        },
+        "required": [
+          "summary",
+          "header",
+          "groups",
+          "compares"
+        ],
+        "title": "ScoreOut",
+        "type": "object"
+      },
+      "ScoreRequestBody": {
+        "additionalProperties": false,
+        "properties": {
+          "bootstrap_engine": {
+            "default": "python_random",
+            "enum": [
+              "python_random",
+              "numpy_pcg64"
+            ],
+            "title": "Bootstrap Engine",
+            "type": "string"
+          },
+          "group_by": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set fields (or `tag:NAME`) that split the questions into groups.",
+            "title": "Group By"
+          },
+          "groups": {
+            "description": "Unions written `label=v1|v2`.",
+            "items": {
+              "maxLength": 400,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Groups",
+            "type": "array"
+          },
+          "noise": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Two runs of the same arm: their differences are the noise floor.",
+            "title": "Noise"
+          },
+          "number_words": {
+            "default": false,
+            "title": "Number Words",
+            "type": "boolean"
+          },
+          "pairs": {
+            "description": "`[base, variant]`: the paired bootstrap of variant minus base.",
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 12,
+            "title": "Pairs",
+            "type": "array"
+          },
+          "runs": {
+            "description": "Run ids, all on this set version.",
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "type": "string"
+            },
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Runs",
+            "type": "array"
+          },
+          "set": {
+            "$ref": "#/components/schemas/SetRefIn"
+          }
+        },
+        "required": [
+          "set",
+          "runs"
+        ],
+        "title": "ScoreRequestBody",
+        "type": "object"
+      },
+      "ScoreRunOut": {
+        "properties": {
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "md5": {
+            "title": "Md5",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "file",
+          "md5"
+        ],
+        "title": "ScoreRunOut",
+        "type": "object"
+      },
+      "ScoreSummaryOut": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "pairs": {
+            "items": {
+              "$ref": "#/components/schemas/PairOut"
+            },
+            "title": "Pairs",
+            "type": "array"
+          },
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ScoreRunOut"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "score_id": {
+            "title": "Score Id",
+            "type": "string"
+          },
+          "set_md5": {
+            "title": "Set Md5",
+            "type": "string"
+          },
+          "set_name": {
+            "title": "Set Name",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "score_id",
+          "created",
+          "set_name",
+          "set_md5",
+          "runs",
+          "pairs",
+          "records"
+        ],
+        "title": "ScoreSummaryOut",
+        "type": "object"
+      },
       "SessionOut": {
         "description": "A signed-in browser. The cookie value is never shown.",
         "properties": {
@@ -1077,6 +3342,179 @@
         "title": "SessionOut",
         "type": "object"
       },
+      "SetOut": {
+        "properties": {
+          "corpus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corpus"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/SetVersionOut"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "corpus",
+          "versions"
+        ],
+        "title": "SetOut",
+        "type": "object"
+      },
+      "SetRefIn": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "examples": [
+              "v1"
+            ],
+            "pattern": "^v[1-9][0-9]{0,5}$",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "SetRefIn",
+        "type": "object"
+      },
+      "SetRefOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "SetRefOut",
+        "type": "object"
+      },
+      "SetVersionOut": {
+        "properties": {
+          "corpus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corpus"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "etag": {
+            "description": "Send this in `If-Match` to change a draft.",
+            "title": "Etag",
+            "type": "string"
+          },
+          "frozen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frozen At"
+          },
+          "items": {
+            "title": "Items",
+            "type": "integer"
+          },
+          "md5": {
+            "description": "The md5 of the file: the identity of a frozen version.",
+            "title": "Md5",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewProgressOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Left out when the file could not be read for the count."
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "frozen"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "status",
+          "owner",
+          "md5",
+          "etag",
+          "items",
+          "corpus",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SetVersionOut",
+        "type": "object"
+      },
       "Status": {
         "properties": {
           "api_version": {
@@ -1085,6 +3523,9 @@
           },
           "ask": {
             "$ref": "#/components/schemas/AskStatus"
+          },
+          "bench": {
+            "$ref": "#/components/schemas/BenchStatusOut"
           },
           "mode": {
             "description": "`live`, or `fake` when the service runs on test data.",
@@ -1115,7 +3556,8 @@
           "started_at",
           "uptime_s",
           "ready",
-          "ask"
+          "ask",
+          "bench"
         ],
         "title": "Status",
         "type": "object"
@@ -1141,6 +3583,58 @@
           "wall_s"
         ],
         "title": "TimingsOut",
+        "type": "object"
+      },
+      "ValidateRequest": {
+        "additionalProperties": false,
+        "description": "Give `item` (one item) or `text` (the text of a whole file).",
+        "properties": {
+          "item": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "ValidateRequest",
+        "type": "object"
+      },
+      "Validation": {
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemAt"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "errors"
+        ],
+        "title": "Validation",
         "type": "object"
       }
     },
@@ -2573,6 +5067,3324 @@
           }
         },
         "summary": "Liveness check"
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/JobState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "run",
+                    "score"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "Only the jobs you started.",
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only the jobs you started.",
+              "title": "Mine",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobOut"
+                  },
+                  "title": "Response Listjobs",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Jobs, newest first",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/jobs/{job_id}": {
+      "get": {
+        "description": "Poll this every two seconds until `settled` is true.",
+        "operationId": "getJob",
+        "parameters": [
+          {
+            "description": "A job id.",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "description": "A job id.",
+              "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "One job",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "A queued job is cancelled at once. A running one becomes `cancelling` and stops before its\nnext question; the answers so far stay in the run and the run is marked partial.",
+        "operationId": "cancelJob",
+        "parameters": [
+          {
+            "description": "A job id.",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "description": "A job id.",
+              "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only the job's owner or an admin can do this."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The job is in a state that does not allow it."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Cancel a job",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/jobs/{job_id}/log": {
+      "get": {
+        "description": "Plain text lines with their times, for a live tail: send back `X-Log-Next-Offset`. The log\nnever holds a question or an answer.",
+        "operationId": "getJobLog",
+        "parameters": [
+          {
+            "description": "A job id.",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "description": "A job id.",
+              "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Bytes to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Bytes to skip.",
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Log-Next-Offset": {
+                "description": "Ask for the next part from here.",
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Log-Size": {
+                "description": "The size of the log now, in bytes.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The log of a job, from a byte offset",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/jobs/{job_id}/resume": {
+      "post": {
+        "description": "Queues the job again. The run continues from the first (question, repeat) missing in its\nfile, so every pair ends up once.",
+        "operationId": "resumeJob",
+        "parameters": [
+          {
+            "description": "A job id.",
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "description": "A job id.",
+              "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Only the job's owner or an admin can do this."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The job is in a state that does not allow it."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Resume a cancelled or interrupted job",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "description": "From the settings, each probed with a short timeout. A model whose server does not answer\nhas `available: false` and cannot be chosen for a run.",
+        "operationId": "listModels",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelOut"
+                  },
+                  "title": "Response Listmodels",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The models a run may ask",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/runs": {
+      "get": {
+        "description": "Every `qa-run/1` file in the runs folder, whoever made it, newest first.",
+        "operationId": "listRuns",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RunSummaryOut"
+                  },
+                  "title": "Response Listruns",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Runs, finished and partial",
+        "tags": [
+          "benchmarks"
+        ]
+      },
+      "post": {
+        "description": "One queued job for each arm and model, on a frozen set version. The GPU lane runs one run at\na time and, inside it, one question at a time; asks go before the next question.",
+        "operationId": "startRuns",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobOut"
+                  },
+                  "title": "Response Startruns",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The set version is a draft: freeze it first."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap (32 KiB)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "You have too many jobs waiting."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A model or an arm is not available now."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Start benchmark runs",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}": {
+      "get": {
+        "operationId": "getRun",
+        "parameters": [
+          {
+            "description": "A run id.",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "description": "A run id.",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "One run",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/runs/{run_id}/items": {
+      "get": {
+        "operationId": "listRunItems",
+        "parameters": [
+          {
+            "description": "A run id.",
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "description": "A run id.",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which lines to list.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "Which lines to list.",
+              "enum": [
+                "all",
+                "errors",
+                "answered"
+              ],
+              "title": "Filter",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One question.",
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "One question.",
+              "title": "Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Include the chunks the model read.",
+            "in": "query",
+            "name": "contexts",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "Include the chunks the model read.",
+              "title": "Contexts",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunItemsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The answers of a run, with their questions",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/scores": {
+      "get": {
+        "operationId": "listScores",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScoreSummaryOut"
+                  },
+                  "title": "Response Listscores",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Scores, newest first",
+        "tags": [
+          "benchmarks"
+        ]
+      },
+      "post": {
+        "description": "A job on the CPU lane that runs the qa-bench scorer over the runs and writes one\n`qa-score/1` file, which `GET /scores/{score_id}` reads once the job is `done`.",
+        "operationId": "startScore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A run has not ended yet."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap (32 KiB)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "You have too many jobs waiting."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Score runs and compare them",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/scores/{score_id}": {
+      "get": {
+        "description": "The header, a record per run, group and metric (mean and 95% interval) and a record per\npair, group and metric (difference, interval, up and down, noise floor).",
+        "operationId": "getScore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+              "title": "Score Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The tables of a score",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/scores/{score_id}/items": {
+      "get": {
+        "operationId": "listScoreItems",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "score_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+              "title": "Score Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreItemsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No session, or it has ended."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The CSRF header is missing or wrong, the password must be changed first, or the role is not enough."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such job, run or score."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The metrics of each answer",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/v1/sets": {
+      "get": {
+        "description": "Every set with its versions, each with its status, md5, items, owner and review progress.",
+        "operationId": "listSets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SetOut"
+                  },
+                  "title": "Response Listsets",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The catalog of question sets",
+        "tags": [
+          "sets"
+        ]
+      },
+      "post": {
+        "description": "An empty draft under a new name, or, with `copy_from`, the next version of an existing\nset as a copy of one of its versions.",
+        "operationId": "createSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A set with that name exists (copy it instead)."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Start a draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/import": {
+      "post": {
+        "description": "Nothing is stored unless the whole file is accepted. A `qset/1` file whose header already\nnames the target is stored byte for byte, so its md5 is the one it came with.",
+        "operationId": "importSet",
+        "parameters": [
+          {
+            "description": "The new set's name. Default: the name in the file's header.",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The new set's name. Default: the name in the file's header.",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "Default: the file's, if free, else the next.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^v[1-9][0-9]{0,5}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the file's, if free, else the next.",
+              "title": "Version"
+            }
+          },
+          {
+            "description": "An older shape to convert (see `/sets/import/shapes`).",
+            "in": "query",
+            "name": "shape",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "An older shape to convert (see `/sets/import/shapes`).",
+              "title": "Shape"
+            }
+          },
+          {
+            "description": "For shapes with no corpus.",
+            "in": "query",
+            "name": "corpus",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For shapes with no corpus.",
+              "title": "Corpus"
+            }
+          },
+          {
+            "description": "The original file name, recorded.",
+            "in": "query",
+            "name": "source_file",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The original file name, recorded.",
+              "title": "Source File"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The file itself: a `qset/1` JSON-lines file (plain or gzip), or the file of an older shape named in `shape`.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "That name and version exist."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The file is over the cap (20 MiB)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The file was refused; `errors` says why."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Import a file as a new draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/import/shapes": {
+      "get": {
+        "operationId": "listImportShapes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImportShapeOut"
+                  },
+                  "title": "Response Listimportshapes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Older formats that can be imported",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/validate": {
+      "post": {
+        "description": "A dry run against `qset/1`: every problem with its place, and nothing is stored.",
+        "operationId": "validateSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Validation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Check an item or a file",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}": {
+      "get": {
+        "description": "The header, the review counts and the matching items (id, form, language, tags, the\nquestion's start and the review state). Read one item for all of it.",
+        "operationId": "getSetVersion",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`single`, `multi_chain`, `circuit_verify`...",
+            "in": "query",
+            "name": "form",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`single`, `multi_chain`, `circuit_verify`...",
+              "title": "Form"
+            }
+          },
+          {
+            "description": "`math`, `circuit` or `other`.",
+            "in": "query",
+            "name": "content",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`math`, `circuit` or `other`.",
+              "title": "Content"
+            }
+          },
+          {
+            "description": "`en` or `es`.",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`en` or `es`.",
+              "title": "Lang"
+            }
+          },
+          {
+            "description": "`dev` or `test`.",
+            "in": "query",
+            "name": "split",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`dev` or `test`.",
+              "title": "Split"
+            }
+          },
+          {
+            "description": "`key=value`, or `key` for any value.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`key=value`, or `key` for any value.",
+              "title": "Tag"
+            }
+          },
+          {
+            "description": "The review state.",
+            "in": "query",
+            "name": "review",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "none",
+                    "needs_second",
+                    "accepted",
+                    "edited",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The review state.",
+              "title": "Review"
+            }
+          },
+          {
+            "description": "Text in the id, question, answer or notes.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Text in the id, question, answer or notes.",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemPage"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "A version and a page of its items",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/export": {
+      "get": {
+        "operationId": "exportSetVersion",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/x-ndjson": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The `qset/1` file exactly as stored: its md5 is the version's md5.",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Download the file",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/freeze": {
+      "get": {
+        "description": "The reviews it would apply, by item, and the `etag` of this plan: the freeze must send\nit back in `If-Match`. Nothing changes. It answers `422` where the freeze would (nothing\nleft, or a set that is not valid after the reviews), naming the item by id.",
+        "operationId": "previewFreeze",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreezePreview"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "Names this freeze plan (quoted); send it in `If-Match` to freeze.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen already."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "What freezing would do",
+        "tags": [
+          "sets"
+        ]
+      },
+      "post": {
+        "description": "Owner or admin. The latest human decision of each item is applied (accepted and edited\nitems stay, rejected ones go) and the file gets a new md5 that never changes again. The draft\nas it was is kept beside it on the server. Only the plan that was read is applied.",
+        "operationId": "freezeSetVersion",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the plan you read (`GET .../freeze`). `428` without it, `409` when a decision or an item changed since.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `etag` of the plan you read (`GET .../freeze`). `428` without it, `409` when a decision or an item changed since.",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreezeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`), or the item has review decisions and its text is fixed (type `item-has-decisions`: propose the change with an `edit` decision)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Apply the reviews and freeze a draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/items": {
+      "post": {
+        "operationId": "addSetItem",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since.",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "description": "A `qset/1` item. `corpus` defaults to the set's.",
+                "title": "Item",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDetail"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`), or the item has review decisions and its text is fixed (type `item-has-decisions`: propose the change with an `edit` decision)."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Add an item to a draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/items/{item_id}": {
+      "delete": {
+        "description": "`409` when another item is a mirror of this one.",
+        "operationId": "deleteSetItem",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The item's id.",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "The item's id.",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since.",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`), or the item has review decisions and its text is fixed (type `item-has-decisions`: propose the change with an `edit` decision)."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Remove an item from a draft",
+        "tags": [
+          "sets"
+        ]
+      },
+      "get": {
+        "operationId": "getSetItem",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The item's id.",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "The item's id.",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDetail"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "One item with its reviews and its validation",
+        "tags": [
+          "sets"
+        ]
+      },
+      "put": {
+        "description": "Owner or admin, drafts only. `422` lists each problem with a JSON pointer into the item.\nAn item that people have already decided on (accept, edit or reject) keeps its text: the\nanswer is `409` with the type `item-has-decisions`, because those decisions are about the\ntext they read. Put the change in an `edit` decision, which is applied at the freeze.",
+        "operationId": "putSetItem",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The item's id.",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "description": "The item's id.",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since.",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "description": "The whole item, a `qset/1` item.",
+                "title": "Item",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDetail"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "The version's etag (its md5, quoted).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen, or you are neither its owner nor an admin (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`), or the item has review decisions and its text is fixed (type `item-has-decisions`: propose the change with an `edit` decision)."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Replace one item of a draft",
+        "tags": [
+          "sets"
+        ]
+      }
+    },
+    "/api/v1/sets/{name}/versions/{version}/reviews": {
+      "get": {
+        "description": "Oldest first, as in the `reviews/1` file.",
+        "operationId": "listSetReviews",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this item.",
+            "in": "query",
+            "name": "item_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this item.",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewLine"
+                  },
+                  "title": "Response Listsetreviews",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "The decisions on a version's items",
+        "tags": [
+          "sets"
+        ]
+      },
+      "post": {
+        "description": "Any member may review any item of a draft, with the `etag` of the draft they read in\n`If-Match`: a decision is about the text that was read, so it is refused when the draft has\nchanged since. The file is append only: a new decision replaces yours, it never edits it.\n`edit` and `reject` need a `note`; an `edit` lists the item fields to replace and is applied\nwhen the draft is frozen.",
+        "operationId": "addSetReview",
+        "parameters": [
+          {
+            "description": "The set's name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The set's name.",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The version, like `v1`.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "The version, like `v1`.",
+              "pattern": "^v[1-9][0-9]{0,5}$",
+              "title": "Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `etag` of the draft you read (its `ETag` header). `428` without it (and for `*`, which does not say which version you read), `409` when the draft has changed since.",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewReview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewLine"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is not valid JSON, or a JSON key is written twice."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The version is frozen (or the CSRF header is missing)."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such set, version or item."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The draft changed since you read it (`If-Match`): read it again."
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The body is over the cap."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`If-Match` is missing (or is `*`)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A problem."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Accept, edit or reject an item",
+        "tags": [
+          "sets"
+        ]
       }
     },
     "/api/v1/status": {

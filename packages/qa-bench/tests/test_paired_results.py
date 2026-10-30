@@ -1,8 +1,10 @@
 """A paired comparison of two runs of 101 questions, the shape of a real benchmark table.
 
 The set has seven categories, two languages and three survival tags; the base run has 74 questions
-with every key exact, the variant 76, with 4 questions up and 2 down; counted leniently the base
-has 81 and the variant 80 (2 up, 3 down). A third run repeats the base to give the noise floor.
+with every key exact, the variant 76, with 4 questions up and 2 down. The f questions have answers
+that only the lenient rule would accept; a lenient hit of category f does not count, so counted
+leniently the runs are the same as exact (81 and 80 before that rule). A third run repeats the base
+to give the noise floor.
 Every expected number below is worked out from the status table in ``scoredata`` (E, L, X per
 question and run) or by a copy of the old comparison script, never by the scorer under test.
 """
@@ -10,7 +12,7 @@ question and run) or by a copy of the old comparison script, never by the scorer
 import random
 
 import pytest
-from scoredata import CREATED, big_qset, big_run, category_of, qid, statuses
+from scoredata import CREATED, F_RANGE, big_qset, big_run, category_of, qid, statuses
 
 from qa_bench.score import NamedRun, Options, score
 
@@ -24,7 +26,11 @@ def exact(which: int, flips: dict[int, str] | None = None) -> list[float]:
 
 
 def lenient(which: int) -> list[float]:
-    return [float(STATUS[i][which] in "EL") for i in INDEXES]
+    """Lenient counts E everywhere and L outside category f, where a lenient-only hit is left out."""
+    return [
+        float(STATUS[i][which] == "E" or (STATUS[i][which] == "L" and category_of(i) != "f"))
+        for i in INDEXES
+    ]
 
 
 def reference_boot(diffs: list[float]) -> tuple[float, float]:
@@ -69,7 +75,9 @@ def test_the_set_is_the_shape_it_claims():
     ups = sum(1 for a, b in zip(base, var, strict=True) if b > a)
     downs = sum(1 for a, b in zip(base, var, strict=True) if b < a)
     assert (ups, downs) == (4, 2)
-    assert (sum(lenient(0)), sum(lenient(1))) == (81, 80)
+    assert (sum(lenient(0)), sum(lenient(1))) == (74, 76)
+    lenient_only = [i for i in F_RANGE if "L" in STATUS[i]]
+    assert len(lenient_only) == 9
 
 
 def test_all_keys_exact_over_the_whole_set(result):
@@ -82,10 +90,10 @@ def test_all_keys_exact_over_the_whole_set(result):
 
 def test_all_keys_counted_leniently_over_the_whole_set(result):
     row = compare(result, "all", "all_keys_lenient")
-    assert (row["base"], row["var"], row["diff"]) == (0.802, 0.7921, -0.0099)
-    assert (row["up"], row["down"]) == (2, 3)
+    assert (row["base"], row["var"], row["diff"]) == (0.7327, 0.7525, 0.0198)
+    assert (row["up"], row["down"]) == (4, 2)
     diffs = [b - a for a, b in zip(lenient(0), lenient(1), strict=True)]
-    assert tuple(row["ci"]) == reference_boot(diffs) == (-0.0594, 0.0297)
+    assert tuple(row["ci"]) == reference_boot(diffs) == (-0.0297, 0.0693)
 
 
 def test_the_key_share_equals_the_exact_rate_because_every_answer_is_all_or_nothing(result):
@@ -111,12 +119,15 @@ def test_every_category_is_compared_on_its_own_questions(result):
         assert tuple(row["ci"]) == reference_boot(diffs)
 
 
-def test_f_is_where_the_lenient_rule_matters(result):
+def test_in_f_a_lenient_only_answer_is_not_a_lenient_hit(result):
     row = compare(result, "category=f", "all_keys_lenient")
+    exact_f = compare(result, "category=f", "all_keys")
     members = [i for i in INDEXES if category_of(i) == "f"]
     assert row["base"] == round(sum(lenient(0)[i] for i in members) / 12, 4)
-    exact_f = compare(result, "category=f", "all_keys")
-    assert exact_f["base"] < row["base"]
+    assert row["base"] == exact_f["base"] == 0.25
+    assert row["var"] == exact_f["var"]
+    flagged = compare(result, "category=f", "lenient_unchecked")
+    assert (flagged["base"], flagged["var"]) == (round(7 / 12, 4), round(4 / 12, 4))
 
 
 def test_a_language_and_a_union_group_are_compared_too(result):

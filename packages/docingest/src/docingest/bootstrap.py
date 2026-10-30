@@ -23,7 +23,7 @@ from .application.index import IndexService
 from .application.ingest import IngestService, Log
 from .config import AppConfig, index_config
 from .domain.errors import InvalidConfigError, NotConfiguredError
-from .domain.models import ModelRef, SourceKind
+from .domain.models import AnswerModel, ModelRef, SourceKind
 
 Factory = Callable[[AppConfig], Any]
 
@@ -244,6 +244,18 @@ class Container:
         """Questions over an index that stays open between them (see ``AskSession``). Reads the
         configuration once: edit it and build a new container."""
         return AskSession(self.ask)
+
+    @property
+    def answer_model(self) -> AnswerModel:
+        """The model that writes the answers: name and revision, no address and no key. Read
+        with the rule the PaperQA2 adapter uses to pick its model, ``DOCINGEST_LLM`` included."""
+        if self.cfg.adapters.qa != "paperqa":
+            raise NotConfiguredError(
+                f'[adapters] qa is "{self.cfg.adapters.qa}": only "paperqa" names its model'
+            )
+        from .adapters.qa.paperqa import answer_model
+
+        return answer_model(self.cfg)
 
     def _retrieval(self) -> Retrieval:
         if not self.configured("embedder"):

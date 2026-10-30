@@ -1,1 +1,5 @@
-"""Adapter: probe of the OpenAI-compatible model servers. Empty until a use case needs it."""
+"""Adapter: OpenAI-compatible model servers (vLLM), probed and called with httpx."""
+
+from .openai import OpenAiModels
+
+__all__ = ["OpenAiModels"]

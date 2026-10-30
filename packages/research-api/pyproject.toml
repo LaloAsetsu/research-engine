@@ -12,8 +12,10 @@ dependencies = [
     "alembic>=1.20",
     "docingest",
     "fastapi>=0.159",
+    "httpx>=0.28",
     "pwdlib[argon2]>=0.3.1",
     "pydantic>=2.14",
+    "qa-bench",
     "quantum-sim",
     "sqlalchemy>=2.1",
     "uvicorn>=0.54",
@@ -25,6 +27,7 @@ qa = ["docingest[qa]"]
 
 [tool.uv.sources]
 docingest = { workspace = true }
+qa-bench = { workspace = true }
 quantum-sim = { workspace = true }
 
 [project.scripts]
@@ -36,7 +39,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
     "import-linter>=2.15",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
@@ -74,6 +76,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR0913", "PT018", "E501"]
+# FastAPI fills route parameters by name, never by position
+"src/research_api/entrypoints/http/sets.py" = ["PLR0917"]
+"src/research_api/entrypoints/http/jobs.py" = ["PLR0917"]
 
 [tool.pyright]
 include = ["src"]
@@ -171,6 +176,18 @@ forbidden_modules = ["qa_bench"]
 ignore_imports = [
     "research_api.adapters.bench -> qa_bench",
     "research_api.adapters.bench.** -> qa_bench",
+]
+allow_indirect_imports = true
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+name = "Only the models adapter imports httpx"
+type = "forbidden"
+source_modules = ["research_api"]
+forbidden_modules = ["httpx"]
+ignore_imports = [
+    "research_api.adapters.models -> httpx",
+    "research_api.adapters.models.** -> httpx",
 ]
 allow_indirect_imports = true
 unmatched_ignore_imports_alerting = "none"

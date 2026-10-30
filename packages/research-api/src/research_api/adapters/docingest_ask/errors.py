@@ -7,6 +7,7 @@ prompt holds the question.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from docingest.domain.errors import (
@@ -25,6 +26,9 @@ from ...domain.errors import (
 )
 
 NO_PASSAGE = "the index found no passage for this question"
+# The refusal of ``AskSession.answer_from_passages`` for a passage of a paper that is not in the
+# corpus; it names the paper by the 16 characters of its id, which is all the message may hold.
+UNKNOWN_PAPER = re.compile(r"paper [0-9a-f]{1,16} is not in the corpus")
 # Fixed reasons for /status, which signed-in members read (never a path or a setting value).
 REASON_INDEX = "The search index is not ready."
 REASON_CONFIG = "The answer engine is not configured correctly."
@@ -106,6 +110,18 @@ _RULES: tuple[Rule, ...] = (
 )
 
 
+def _refused(text: str) -> InvalidInputError | None:
+    """What docingest's own checks of a question or of given passages say (their messages are
+    written there and hold no question text)."""
+    if text.startswith(("whole_blocks", "keywords")):
+        return InvalidInputError(text)  # written in docingest's AskService.settle
+    if UNKNOWN_PAPER.fullmatch(text):
+        return InvalidInputError(
+            f"{text[:1].upper()}{text[1:]}, so a gold passage of it cannot be given to the model."
+        )
+    return None
+
+
 def classify(error: Exception) -> ResearchApiError | None:
     """A domain error with a message a member can read, or None when ``error`` is a surprise."""
     for kinds, build in _RULES:
@@ -114,8 +130,8 @@ def classify(error: Exception) -> ResearchApiError | None:
     text = str(error)
     if isinstance(error, RuntimeError) and text.startswith("no ingested documents"):
         return UnavailableError("The corpus is empty: no paper has been ingested yet.")
-    if isinstance(error, ValueError) and text.startswith(("whole_blocks", "keywords")):
-        return InvalidInputError(text)  # written in docingest's AskService.settle
+    if isinstance(error, ValueError) and (refused := _refused(text)) is not None:
+        return refused
     names = _names(error)
     if names & _NO_ANSWER:
         return _no_answer(error)

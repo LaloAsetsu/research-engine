@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
 
+from docingest.application.ask import AskSession
+from docingest.domain.models import AnswerModel
 from fastapi.testclient import TestClient
 from helpers import LOOPBACK, SEED_FILE
 
+from research_api.adapters.docingest_ask import DocingestAskEngine
 from research_api.bootstrap import Container, Settings, build_container
 from research_api.bootstrap.seed import load_seed_users
 from research_api.domain.ask import (
@@ -19,13 +22,26 @@ from research_api.domain.ask import (
     AskContext,
     AskQuestion,
     AskTimings,
+    GoldPassage,
     Phase,
 )
+from research_api.domain.runs import ModelFacts
 from research_api.entrypoints.http import build_app
 from research_api.entrypoints.http.security import CSRF_COOKIE, CSRF_HEADER
 from research_api.ports.ask import AskEngine, EngineHealth, EngineState
 
 DOC = "c" * 64
+LITELLM_MODEL = AnswerModel(name="openai/qwen-local", revision=None)
+
+
+def engine_over(
+    open_session: Callable[[], AskSession],
+    model: AnswerModel = LITELLM_MODEL,
+    **kwargs: Any,
+) -> DocingestAskEngine:
+    """The docingest engine over a stand-in session, naming ``model`` as its answer model."""
+    kwargs.setdefault("answer_max_sources", 3)
+    return DocingestAskEngine(open_session, read_answer_model=lambda: model, **kwargs)
 
 
 def answer_for(text: str) -> AskAnswer:
@@ -47,9 +63,14 @@ class ScriptedEngine:
 
     def __init__(self, state: EngineState = "ready") -> None:
         self.state: EngineState = state
+        self.model = ModelFacts("fake-model")
+        self.model_error: Exception | None = None
         self.reason: str | None = None
         self.asked: list[str] = []
         self.options: list[AskQuestion] = []
+        self.given: list[tuple[str, tuple[GoldPassage, ...]]] = []
+        self.truncated = False
+        self.warnings: tuple[str, ...] = ()
         self.gates: dict[str, threading.Event] = {}
         self.errors: dict[str, Exception] = {}
         self.warmed = 0
@@ -62,6 +83,11 @@ class ScriptedEngine:
 
     def health(self) -> EngineHealth:
         return EngineHealth(self.state, self.reason, "g1")
+
+    def answer_model(self) -> ModelFacts:
+        if self.model_error is not None:
+            raise self.model_error
+        return self.model
 
     async def warm_up(self) -> None:
         self.warmed += 1
@@ -80,6 +106,26 @@ class ScriptedEngine:
         if question.text in self.errors:
             raise self.errors[question.text]
         return answer_for(question.text)
+
+    async def answer_from(self, question: str, passages: Sequence[GoldPassage]) -> AskAnswer:
+        self.given.append((question, tuple(passages)))
+        if question in self.errors:
+            raise self.errors[question]
+        contexts = tuple(
+            AskContext(p.doc_id, f"{p.doc_id[:16]} pages 1-1", 0, 1, 1, False, p.text)
+            for p in passages
+        )
+        return AskAnswer(
+            answer=f"Answer from the passages to: {question}",
+            references_text="",
+            citations=(),
+            contexts=contexts,
+            sources=tuple(dict.fromkeys(p.doc_id for p in passages)),
+            warnings=self.warnings,
+            index_generation=None,
+            timings=AskTimings(0.01, 0.2, 0.21),
+            truncated=self.truncated,
+        )
 
     def close(self) -> None:
         self.closed += 1

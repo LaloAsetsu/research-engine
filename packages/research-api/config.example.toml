@@ -26,6 +26,10 @@ docingest_config = "/path/to/docingest.toml"
 # 0600, rotated at 10 MiB, five kept.
 # log_dir = "/path/to/research-api/logs"
 
+# Optional. The built web app (apps/web/dist, or a link to it). With it the service serves the
+# page from its own origin, so the browser needs no second address and the API needs no CORS.
+# web_dir = "/path/to/research-api/web/current"
+
 # Sessions end after this many hours without a request, or this many days after sign-in.
 session_idle_hours = 12
 session_max_days = 7
@@ -41,3 +45,17 @@ login_window_minutes = 15
 max_body_bytes = 1048576   # request body, in bytes (answer 413 above it)
 max_ops = 2000             # operations in the circuits of one request (answer 422 above it)
 timeout_s = 30             # seconds to wait for one request (answer 422 after it)
+
+# The models a benchmark run may ask (the closed-book arm calls them directly). `name` is what
+# the server serves the model as (vLLM's served name), `endpoint` is the address up to /v1: no
+# key, no query, no fragment, a key never goes in this file. Plain http is for a loopback or
+# Tailscale address only; any other host needs https. `label` and `revision` are shown
+# and written in the run header. A request names one of these models. The harness and oracle
+# arms answer with docingest's own model, so they run only on the entry whose `name` is the last
+# `/` part of docingest's model (`qwen-local` when `[qa] llm` is "openai/qwen-local"); any other
+# model is a 422 for those arms. Without any entry no run can be requested.
+# [[models]]
+# name = "qwen-local"
+# endpoint = "http://127.0.0.1:8001/v1"
+# label = "Qwen (local)"
+# revision = "fill in the weights revision"

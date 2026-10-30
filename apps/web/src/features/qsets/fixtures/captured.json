@@ -1,0 +1,2190 @@
+[
+  {
+    "name": "catalog",
+    "method": "GET",
+    "path": "/sets",
+    "request": null,
+    "status": 200,
+    "response": [
+      {
+        "name": "demo-circuits",
+        "corpus": "demo-corpus",
+        "versions": [
+          {
+            "name": "demo-circuits",
+            "version": "v1",
+            "status": "draft",
+            "owner": "ana",
+            "md5": "9cc451afc01e996f9ca041ae142781cc",
+            "etag": "\"9cc451afc01e996f9ca041ae142781cc\"",
+            "items": 3,
+            "corpus": "demo-corpus",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "frozen_at": null,
+            "review": {
+              "items": 3,
+              "none": 3,
+              "needs_second": 0,
+              "accepted": 0,
+              "edited": 0,
+              "rejected": 0
+            }
+          }
+        ]
+      },
+      {
+        "name": "demo-papers",
+        "corpus": "demo-corpus",
+        "versions": [
+          {
+            "name": "demo-papers",
+            "version": "v1",
+            "status": "frozen",
+            "owner": "ana",
+            "md5": "cb9cb733168663d4b04e75cdf16e5030",
+            "etag": "\"cb9cb733168663d4b04e75cdf16e5030\"",
+            "items": 6,
+            "corpus": "demo-corpus",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "frozen_at": "2026-01-01T00:00:00Z",
+            "review": {
+              "items": 6,
+              "none": 3,
+              "needs_second": 1,
+              "accepted": 2,
+              "edited": 0,
+              "rejected": 0
+            }
+          },
+          {
+            "name": "demo-papers",
+            "version": "v2",
+            "status": "draft",
+            "owner": "beto",
+            "md5": "08ff57f82af04a41374b1f145e868a6b",
+            "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+            "items": 7,
+            "corpus": "demo-corpus",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "frozen_at": null,
+            "review": {
+              "items": 7,
+              "none": 3,
+              "needs_second": 1,
+              "accepted": 1,
+              "edited": 1,
+              "rejected": 1
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "shapes",
+    "method": "GET",
+    "path": "/sets/import/shapes",
+    "request": null,
+    "status": 200,
+    "response": [
+      {
+        "name": "mathcirc-v1",
+        "description": "mathcirc v1 questions: one gold paper per question, key facts, categories",
+        "suffix": ".jsonl",
+        "needs_corpus": true
+      },
+      {
+        "name": "circuit-tasks-v1",
+        "description": "circuit tasks: verify a drawn circuit or create one from a target",
+        "suffix": ".jsonl",
+        "needs_corpus": true
+      },
+      {
+        "name": "circuit-claims-v1",
+        "description": "circuit claims read from papers (TSV: paper_id, block_index, claim, target)",
+        "suffix": ".tsv",
+        "needs_corpus": true
+      },
+      {
+        "name": "qubitqa-pilot",
+        "description": "QubitQA pilot: multiple choice, one gold paper, English and Spanish mirrors",
+        "suffix": ".jsonl",
+        "needs_corpus": false
+      },
+      {
+        "name": "qasper",
+        "description": "QASPER questions with several reference answers each",
+        "suffix": ".jsonl",
+        "needs_corpus": true
+      }
+    ]
+  },
+  {
+    "name": "page demo-circuits/v1",
+    "method": "GET",
+    "path": "/sets/demo-circuits/versions/v1",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-circuits",
+        "version": "v1",
+        "status": "draft",
+        "owner": "ana",
+        "md5": "9cc451afc01e996f9ca041ae142781cc",
+        "etag": "\"9cc451afc01e996f9ca041ae142781cc\"",
+        "items": 3,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "header": {
+        "format": "qset/1",
+        "set": "demo-circuits/v1",
+        "created": "2026-01-01T00:00:00+00:00",
+        "source": null,
+        "notes": "Synthetic: no real paper, question or person. Circuit questions."
+      },
+      "review": {
+        "items": 3,
+        "none": 3,
+        "needs_second": 0,
+        "accepted": 0,
+        "edited": 0,
+        "rejected": 0
+      },
+      "items": [
+        {
+          "id": "DC-001",
+          "lang": "en",
+          "form": "circuit_verify",
+          "content": "circuit",
+          "corpus": "demo-corpus",
+          "split": null,
+          "question": "Is this circuit the identity on two wires?\n\nWires: 1; 2\nStep 1: X: wire 1\nStep 2: CNOT: control wire 1, target wire 2\nStep 3: X: wire 1",
+          "tags": {},
+          "mirror_of": null,
+          "review": "none",
+          "accepted_by": []
+        },
+        {
+          "id": "DC-002",
+          "lang": "en",
+          "form": "circuit_create",
+          "content": "circuit",
+          "corpus": "none",
+          "split": null,
+          "question": "Prepare the basis state |11> from |00> on two wires, using only X gates.",
+          "tags": {},
+          "mirror_of": null,
+          "review": "none",
+          "accepted_by": []
+        },
+        {
+          "id": "CL-b2b2b2b2b2b2b2b2-b2",
+          "lang": "en",
+          "form": "circuit_claim",
+          "content": "circuit",
+          "corpus": "demo-corpus",
+          "split": null,
+          "question": "",
+          "tags": {},
+          "mirror_of": null,
+          "review": "none",
+          "accepted_by": []
+        }
+      ],
+      "total": 3,
+      "offset": 0,
+      "limit": 200
+    }
+  },
+  {
+    "name": "item demo-circuits/v1/DC-001",
+    "method": "GET",
+    "path": "/sets/demo-circuits/versions/v1/items/DC-001",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-circuits",
+        "version": "v1",
+        "status": "draft",
+        "owner": "ana",
+        "md5": "9cc451afc01e996f9ca041ae142781cc",
+        "etag": "\"9cc451afc01e996f9ca041ae142781cc\"",
+        "items": 3,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DC-001",
+        "lang": "en",
+        "question": "Is this circuit the identity on two wires?\n\nWires: 1; 2\nStep 1: X: wire 1\nStep 2: CNOT: control wire 1, target wire 2\nStep 3: X: wire 1",
+        "answer": "no",
+        "rationale": "It flips wire 2 whenever wire 1 starts as 0.",
+        "form": "circuit_verify",
+        "content": "circuit",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1",
+            "passages": [
+              {
+                "block_index": 1
+              }
+            ]
+          }
+        ],
+        "circuit": {
+          "wires": 2
+        },
+        "notes": "Synthetic: no real paper, question or person."
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-circuits/v1/DC-002",
+    "method": "GET",
+    "path": "/sets/demo-circuits/versions/v1/items/DC-002",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-circuits",
+        "version": "v1",
+        "status": "draft",
+        "owner": "ana",
+        "md5": "9cc451afc01e996f9ca041ae142781cc",
+        "etag": "\"9cc451afc01e996f9ca041ae142781cc\"",
+        "items": 3,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DC-002",
+        "lang": "en",
+        "question": "Prepare the basis state |11> from |00> on two wires, using only X gates.",
+        "form": "circuit_create",
+        "content": "circuit",
+        "corpus": "none",
+        "gold_papers": [],
+        "circuit": {
+          "wires": 2,
+          "allowed_gates": ["X"],
+          "target_kind": "state",
+          "target": [
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [1, 0]
+          ],
+          "equality": "exact",
+          "input_state": "|00>"
+        }
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-circuits/v1/CL-b2b2b2b2b2b2b2b2-b2",
+    "method": "GET",
+    "path": "/sets/demo-circuits/versions/v1/items/CL-b2b2b2b2b2b2b2b2-b2",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-circuits",
+        "version": "v1",
+        "status": "draft",
+        "owner": "ana",
+        "md5": "9cc451afc01e996f9ca041ae142781cc",
+        "etag": "\"9cc451afc01e996f9ca041ae142781cc\"",
+        "items": 3,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "CL-b2b2b2b2b2b2b2b2-b2",
+        "lang": "en",
+        "form": "circuit_claim",
+        "content": "circuit",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "b2b2b2b2b2b2b2b2",
+            "passages": [
+              {
+                "block_index": 2
+              }
+            ]
+          }
+        ],
+        "circuit": {
+          "claim": "CZ = (I x H) CNOT (I x H)",
+          "target_kind": "unitary",
+          "target": "CZ (exact)"
+        },
+        "notes": "Synthetic: no real paper, question or person."
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "freeze demo-circuits/v1",
+    "method": "GET",
+    "path": "/sets/demo-circuits/versions/v1/freeze",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-circuits",
+        "version": "v1",
+        "status": "draft",
+        "owner": "ana",
+        "md5": "9cc451afc01e996f9ca041ae142781cc",
+        "etag": "\"9cc451afc01e996f9ca041ae142781cc\"",
+        "items": 3,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "plan": {
+        "items_before": 3,
+        "items_after": 3,
+        "accepted": [],
+        "edited": [],
+        "rejected": [],
+        "unreviewed": ["DC-001", "DC-002", "CL-b2b2b2b2b2b2b2b2-b2"],
+        "needs_second": [],
+        "stale": [],
+        "unknown": [],
+        "etag": "\"51332dd44c0bdee7e7bba6a8a0573606\""
+      }
+    }
+  },
+  {
+    "name": "page demo-papers/v1",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v1",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v1",
+        "status": "frozen",
+        "owner": "ana",
+        "md5": "cb9cb733168663d4b04e75cdf16e5030",
+        "etag": "\"cb9cb733168663d4b04e75cdf16e5030\"",
+        "items": 6,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": "2026-01-01T00:00:00Z",
+        "review": null
+      },
+      "header": {
+        "format": "qset/1",
+        "set": "demo-papers/v1",
+        "created": "2026-01-01T00:00:00+00:00",
+        "source": null,
+        "notes": "demo-papers/v1 (md5 3dcfe5b6abbb5b3cd7cda3c0e75d03bc) with the human reviews applied: 3 accepted, 0 edited, 1 rejected, 3 not reviewed."
+      },
+      "review": {
+        "items": 6,
+        "none": 3,
+        "needs_second": 1,
+        "accepted": 2,
+        "edited": 0,
+        "rejected": 0
+      },
+      "items": [
+        {
+          "id": "DP-001",
+          "lang": "en",
+          "form": "single",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": "dev",
+          "question": "What symbol does the synthetic paper Alpha use for the coupling between its two toy modes?",
+          "tags": {
+            "category": "notation"
+          },
+          "mirror_of": null,
+          "review": "accepted",
+          "accepted_by": ["ana", "beto"]
+        },
+        {
+          "id": "DP-001-es",
+          "lang": "es",
+          "form": "single",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": "dev",
+          "question": "Que simbolo usa el articulo sintetico Alpha para el acoplamiento entre sus dos modos de juguete?",
+          "tags": {
+            "category": "notation"
+          },
+          "mirror_of": "DP-001",
+          "review": "none",
+          "accepted_by": []
+        },
+        {
+          "id": "DP-002",
+          "lang": "en",
+          "form": "multi_chain",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": "test",
+          "question": "What does the synthetic paper Beta change in the coupling that Alpha introduces?",
+          "tags": {
+            "category": "chain"
+          },
+          "mirror_of": null,
+          "review": "accepted",
+          "accepted_by": ["ana", "beto"]
+        },
+        {
+          "id": "DP-003",
+          "lang": "en",
+          "form": "unanswerable",
+          "content": "other",
+          "corpus": "demo-corpus",
+          "split": "test",
+          "question": "Which paper in the demo corpus reports a relaxation time above one hour?",
+          "tags": {},
+          "mirror_of": null,
+          "review": "none",
+          "accepted_by": []
+        },
+        {
+          "id": "DP-004",
+          "lang": "en",
+          "form": "single",
+          "content": "other",
+          "corpus": "demo-corpus",
+          "split": "dev",
+          "question": "What echo time does the synthetic paper Gamma report for its toy qubit?",
+          "tags": {
+            "qtype": "numeric"
+          },
+          "mirror_of": null,
+          "review": "needs_second",
+          "accepted_by": ["ana"]
+        },
+        {
+          "id": "DP-005",
+          "lang": "en",
+          "form": "neardup",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": null,
+          "question": "Which paper reports the three-coupling generalization, Alpha or its follow-up?",
+          "tags": {},
+          "mirror_of": null,
+          "review": "none",
+          "accepted_by": []
+        }
+      ],
+      "total": 6,
+      "offset": 0,
+      "limit": 200
+    }
+  },
+  {
+    "name": "item demo-papers/v1/DP-001",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v1/items/DP-001",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v1",
+        "status": "frozen",
+        "owner": "ana",
+        "md5": "cb9cb733168663d4b04e75cdf16e5030",
+        "etag": "\"cb9cb733168663d4b04e75cdf16e5030\"",
+        "items": 6,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": "2026-01-01T00:00:00Z",
+        "review": null
+      },
+      "item": {
+        "id": "DP-001",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "What symbol does the synthetic paper Alpha use for the coupling between its two toy modes?",
+        "answer": "J, the exchange coupling.",
+        "form": "single",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "arxiv": "0000.00001v1",
+            "doc": "alpha.pdf",
+            "passages": [
+              {
+                "md_file": "demo/alpha/document.md",
+                "md_text": "The exchange coupling between the two toy modes is written J throughout.",
+                "source_text": "The exchange coupling between the two toy modes is written J throughout."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "split": "dev",
+        "key_facts": [
+          {
+            "type": "text",
+            "value": "J",
+            "alts": ["exchange coupling"]
+          }
+        ],
+        "tags": {
+          "category": "notation"
+        },
+        "reviewer": "beto"
+      },
+      "review": {
+        "state": "accepted",
+        "gold": true,
+        "accepted_by": ["ana", "beto"],
+        "deciding": {
+          "item_id": "DP-001",
+          "target": "item",
+          "reviewer": "beto",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "3dcfe5b6abbb5b3cd7cda3c0e75d03bc",
+          "edit": null
+        }
+      },
+      "reviews": [
+        {
+          "item_id": "DP-001",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "3dcfe5b6abbb5b3cd7cda3c0e75d03bc",
+          "edit": null
+        },
+        {
+          "item_id": "DP-001",
+          "target": "item",
+          "reviewer": "beto",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "3dcfe5b6abbb5b3cd7cda3c0e75d03bc",
+          "edit": null
+        }
+      ],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v1/DP-001-es",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v1/items/DP-001-es",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v1",
+        "status": "frozen",
+        "owner": "ana",
+        "md5": "cb9cb733168663d4b04e75cdf16e5030",
+        "etag": "\"cb9cb733168663d4b04e75cdf16e5030\"",
+        "items": 6,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": "2026-01-01T00:00:00Z",
+        "review": null
+      },
+      "item": {
+        "id": "DP-001-es",
+        "lang": "es",
+        "lang_origin": "mirror",
+        "question": "Que simbolo usa el articulo sintetico Alpha para el acoplamiento entre sus dos modos de juguete?",
+        "answer": "J, el acoplamiento de intercambio.",
+        "form": "single",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "arxiv": "0000.00001v1",
+            "doc": "alpha.pdf",
+            "passages": [
+              {
+                "md_file": "demo/alpha/document.md",
+                "md_text": "The exchange coupling between the two toy modes is written J throughout.",
+                "source_text": "The exchange coupling between the two toy modes is written J throughout."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "mirror_of": "DP-001",
+        "split": "dev",
+        "key_facts": [
+          {
+            "type": "text",
+            "value": "J",
+            "alts": ["acoplamiento de intercambio"]
+          }
+        ],
+        "tags": {
+          "category": "notation"
+        }
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v1/DP-002",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v1/items/DP-002",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v1",
+        "status": "frozen",
+        "owner": "ana",
+        "md5": "cb9cb733168663d4b04e75cdf16e5030",
+        "etag": "\"cb9cb733168663d4b04e75cdf16e5030\"",
+        "items": 6,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": "2026-01-01T00:00:00Z",
+        "review": null
+      },
+      "item": {
+        "id": "DP-002",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "What does the synthetic paper Beta change in the coupling that Alpha introduces?",
+        "answer": "Beta replaces the scalar coupling J by a tuple of three couplings.",
+        "form": "multi_chain",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "arxiv": "0000.00001v1",
+            "doc": "alpha.pdf",
+            "passages": [
+              {
+                "md_file": "demo/alpha/document.md",
+                "md_text": "The exchange coupling between the two toy modes is written J throughout.",
+                "source_text": "The exchange coupling between the two toy modes is written J throughout."
+              }
+            ]
+          },
+          {
+            "doc_id": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "arxiv": "0000.00002v1",
+            "doc": "beta.pdf",
+            "passages": [
+              {
+                "md_file": "demo/beta/document.md",
+                "md_text": "The follow-up replaces the single scalar J by a tuple of three couplings.",
+                "source_text": "The follow-up replaces the single scalar J by a tuple of three couplings."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "split": "test",
+        "key_facts": [
+          {
+            "type": "text",
+            "value": "J",
+            "paper": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+          },
+          {
+            "type": "text",
+            "value": "three couplings",
+            "paper": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          }
+        ],
+        "synthesis": {
+          "kind": "chain",
+          "statement": "Beta generalizes the coupling defined in Alpha.",
+          "rubric": "Names both the scalar J and the tuple of three couplings."
+        },
+        "necessity": {
+          "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1": [0],
+          "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2": [1]
+        },
+        "tags": {
+          "category": "chain"
+        },
+        "reviewer": "beto"
+      },
+      "review": {
+        "state": "accepted",
+        "gold": true,
+        "accepted_by": ["ana", "beto"],
+        "deciding": {
+          "item_id": "DP-002",
+          "target": "item",
+          "reviewer": "beto",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "3dcfe5b6abbb5b3cd7cda3c0e75d03bc",
+          "edit": null
+        }
+      },
+      "reviews": [
+        {
+          "item_id": "DP-002",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "3dcfe5b6abbb5b3cd7cda3c0e75d03bc",
+          "edit": null
+        },
+        {
+          "item_id": "DP-002",
+          "target": "item",
+          "reviewer": "beto",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "3dcfe5b6abbb5b3cd7cda3c0e75d03bc",
+          "edit": null
+        }
+      ],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v1/DP-003",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v1/items/DP-003",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v1",
+        "status": "frozen",
+        "owner": "ana",
+        "md5": "cb9cb733168663d4b04e75cdf16e5030",
+        "etag": "\"cb9cb733168663d4b04e75cdf16e5030\"",
+        "items": 6,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": "2026-01-01T00:00:00Z",
+        "review": null
+      },
+      "item": {
+        "id": "DP-003",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "Which paper in the demo corpus reports a relaxation time above one hour?",
+        "answer": "No paper in the corpus reports it.",
+        "form": "unanswerable",
+        "content": "other",
+        "corpus": "demo-corpus",
+        "gold_papers": [],
+        "writer": "ana",
+        "split": "test",
+        "search_record": {
+          "corpus": "demo-corpus",
+          "terms": ["relaxation time", "T1", "hour"],
+          "date": "2026-01-01"
+        }
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v1/DP-004",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v1/items/DP-004",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v1",
+        "status": "frozen",
+        "owner": "ana",
+        "md5": "cb9cb733168663d4b04e75cdf16e5030",
+        "etag": "\"cb9cb733168663d4b04e75cdf16e5030\"",
+        "items": 6,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": "2026-01-01T00:00:00Z",
+        "review": null
+      },
+      "item": {
+        "id": "DP-004",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "What echo time does the synthetic paper Gamma report for its toy qubit?",
+        "answer": "8.6 ms",
+        "form": "single",
+        "content": "other",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+            "arxiv": "0000.00003v1",
+            "doc": "gamma.pdf",
+            "passages": [
+              {
+                "md_file": "demo/gamma/document.md",
+                "md_text": "The echo time of the toy qubit is 8.6 ms, measured once in the methods.",
+                "source_text": "The echo time of the toy qubit is 8.6 ms, measured once in the methods."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "split": "dev",
+        "key_facts": [
+          {
+            "type": "num",
+            "value": 8.6,
+            "unit": "ms",
+            "rel": 0.02
+          }
+        ],
+        "choices": {
+          "distractors": ["0.98 ms", "3.1 ms", "12.5 ms"],
+          "shuffle_seed": 7
+        },
+        "tags": {
+          "qtype": "numeric"
+        },
+        "reviewer": "ana"
+      },
+      "review": {
+        "state": "needs_second",
+        "gold": false,
+        "accepted_by": ["ana"],
+        "deciding": {
+          "item_id": "DP-004",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "3dcfe5b6abbb5b3cd7cda3c0e75d03bc",
+          "edit": null
+        }
+      },
+      "reviews": [
+        {
+          "item_id": "DP-004",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "3dcfe5b6abbb5b3cd7cda3c0e75d03bc",
+          "edit": null
+        }
+      ],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v1/DP-005",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v1/items/DP-005",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v1",
+        "status": "frozen",
+        "owner": "ana",
+        "md5": "cb9cb733168663d4b04e75cdf16e5030",
+        "etag": "\"cb9cb733168663d4b04e75cdf16e5030\"",
+        "items": 6,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": "2026-01-01T00:00:00Z",
+        "review": null
+      },
+      "item": {
+        "id": "DP-005",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "Which paper reports the three-coupling generalization, Alpha or its follow-up?",
+        "answer": "The follow-up (Beta).",
+        "form": "neardup",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "arxiv": "0000.00002v1",
+            "doc": "beta.pdf",
+            "passages": [
+              {
+                "md_file": "demo/beta/document.md",
+                "md_text": "The follow-up replaces the single scalar J by a tuple of three couplings.",
+                "source_text": "The follow-up replaces the single scalar J by a tuple of three couplings."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "confusers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "relation": "follow-up",
+            "answers_too": false
+          }
+        ]
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "freeze demo-papers/v1",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v1/freeze",
+    "request": null,
+    "status": 403,
+    "response": {
+      "type": "urn:research-api:problem:forbidden",
+      "title": "Forbidden",
+      "status": 403,
+      "detail": "This version is frozen: it takes no more changes or reviews.",
+      "instance": "/api/v1/sets/demo-papers/versions/v1/freeze"
+    }
+  },
+  {
+    "name": "page demo-papers/v2",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "header": {
+        "format": "qset/1",
+        "set": "demo-papers/v2",
+        "created": "2026-01-01T00:00:00+00:00",
+        "source": null,
+        "notes": "Copy of demo-papers/v1 (md5 cb9cb733168663d4b04e75cdf16e5030)."
+      },
+      "review": {
+        "items": 7,
+        "none": 3,
+        "needs_second": 1,
+        "accepted": 1,
+        "edited": 1,
+        "rejected": 1
+      },
+      "items": [
+        {
+          "id": "DP-001",
+          "lang": "en",
+          "form": "single",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": "dev",
+          "question": "What symbol does the synthetic paper Alpha use for the coupling between its two toy modes?",
+          "tags": {
+            "category": "notation"
+          },
+          "mirror_of": null,
+          "review": "accepted",
+          "accepted_by": ["ana", "beto"]
+        },
+        {
+          "id": "DP-001-es",
+          "lang": "es",
+          "form": "single",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": "dev",
+          "question": "Que simbolo usa el articulo sintetico Alpha para el acoplamiento entre sus dos modos de juguete?",
+          "tags": {
+            "category": "notation"
+          },
+          "mirror_of": "DP-001",
+          "review": "none",
+          "accepted_by": []
+        },
+        {
+          "id": "DP-002",
+          "lang": "en",
+          "form": "multi_chain",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": "test",
+          "question": "What does the synthetic paper Beta change in the coupling that Alpha introduces?",
+          "tags": {
+            "category": "chain"
+          },
+          "mirror_of": null,
+          "review": "edited",
+          "accepted_by": []
+        },
+        {
+          "id": "DP-003",
+          "lang": "en",
+          "form": "unanswerable",
+          "content": "other",
+          "corpus": "demo-corpus",
+          "split": "test",
+          "question": "Which paper in the demo corpus reports a relaxation time above one hour?",
+          "tags": {},
+          "mirror_of": null,
+          "review": "none",
+          "accepted_by": []
+        },
+        {
+          "id": "DP-004",
+          "lang": "en",
+          "form": "single",
+          "content": "other",
+          "corpus": "demo-corpus",
+          "split": "dev",
+          "question": "What echo time does the synthetic paper Gamma report for its toy qubit?",
+          "tags": {
+            "qtype": "numeric"
+          },
+          "mirror_of": null,
+          "review": "rejected",
+          "accepted_by": []
+        },
+        {
+          "id": "DP-005",
+          "lang": "en",
+          "form": "neardup",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": null,
+          "question": "Which paper reports the three-coupling generalization, Alpha or its follow-up?",
+          "tags": {},
+          "mirror_of": null,
+          "review": "none",
+          "accepted_by": []
+        },
+        {
+          "id": "DP-007",
+          "lang": "en",
+          "form": "single",
+          "content": "math",
+          "corpus": "demo-corpus",
+          "split": null,
+          "question": "How many couplings does the synthetic paper Beta use?",
+          "tags": {},
+          "mirror_of": null,
+          "review": "needs_second",
+          "accepted_by": ["ana"]
+        }
+      ],
+      "total": 7,
+      "offset": 0,
+      "limit": 200
+    }
+  },
+  {
+    "name": "item demo-papers/v2/DP-001",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/items/DP-001",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DP-001",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "What symbol does the synthetic paper Alpha use for the coupling between its two toy modes?",
+        "answer": "J, the exchange coupling.",
+        "form": "single",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "arxiv": "0000.00001v1",
+            "doc": "alpha.pdf",
+            "passages": [
+              {
+                "md_file": "demo/alpha/document.md",
+                "md_text": "The exchange coupling between the two toy modes is written J throughout.",
+                "source_text": "The exchange coupling between the two toy modes is written J throughout."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "split": "dev",
+        "key_facts": [
+          {
+            "type": "text",
+            "value": "J",
+            "alts": ["exchange coupling"]
+          }
+        ],
+        "tags": {
+          "category": "notation"
+        },
+        "reviewer": "beto"
+      },
+      "review": {
+        "state": "accepted",
+        "gold": true,
+        "accepted_by": ["ana", "beto"],
+        "deciding": {
+          "item_id": "DP-001",
+          "target": "item",
+          "reviewer": "beto",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": null
+        }
+      },
+      "reviews": [
+        {
+          "item_id": "DP-001",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": null
+        },
+        {
+          "item_id": "DP-001",
+          "target": "item",
+          "reviewer": "beto",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": null
+        }
+      ],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v2/DP-001-es",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/items/DP-001-es",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DP-001-es",
+        "lang": "es",
+        "lang_origin": "mirror",
+        "question": "Que simbolo usa el articulo sintetico Alpha para el acoplamiento entre sus dos modos de juguete?",
+        "answer": "J, el acoplamiento de intercambio.",
+        "form": "single",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "arxiv": "0000.00001v1",
+            "doc": "alpha.pdf",
+            "passages": [
+              {
+                "md_file": "demo/alpha/document.md",
+                "md_text": "The exchange coupling between the two toy modes is written J throughout.",
+                "source_text": "The exchange coupling between the two toy modes is written J throughout."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "mirror_of": "DP-001",
+        "split": "dev",
+        "key_facts": [
+          {
+            "type": "text",
+            "value": "J",
+            "alts": ["acoplamiento de intercambio"]
+          }
+        ],
+        "tags": {
+          "category": "notation"
+        }
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v2/DP-002",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/items/DP-002",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DP-002",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "What does the synthetic paper Beta change in the coupling that Alpha introduces?",
+        "answer": "Beta replaces the scalar coupling J by a tuple of three couplings.",
+        "form": "multi_chain",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "arxiv": "0000.00001v1",
+            "doc": "alpha.pdf",
+            "passages": [
+              {
+                "md_file": "demo/alpha/document.md",
+                "md_text": "The exchange coupling between the two toy modes is written J throughout.",
+                "source_text": "The exchange coupling between the two toy modes is written J throughout."
+              }
+            ]
+          },
+          {
+            "doc_id": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "arxiv": "0000.00002v1",
+            "doc": "beta.pdf",
+            "passages": [
+              {
+                "md_file": "demo/beta/document.md",
+                "md_text": "The follow-up replaces the single scalar J by a tuple of three couplings.",
+                "source_text": "The follow-up replaces the single scalar J by a tuple of three couplings."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "split": "test",
+        "key_facts": [
+          {
+            "type": "text",
+            "value": "J",
+            "paper": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+          },
+          {
+            "type": "text",
+            "value": "three couplings",
+            "paper": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          }
+        ],
+        "synthesis": {
+          "kind": "chain",
+          "statement": "Beta generalizes the coupling defined in Alpha.",
+          "rubric": "Names both the scalar J and the tuple of three couplings."
+        },
+        "necessity": {
+          "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1": [0],
+          "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2": [1]
+        },
+        "tags": {
+          "category": "chain"
+        },
+        "reviewer": "beto"
+      },
+      "review": {
+        "state": "edited",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": {
+          "item_id": "DP-002",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "edit",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": "Name the paper that introduces J.",
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": {
+            "answer": "Beta replaces the scalar coupling J of Alpha by a tuple of three."
+          }
+        }
+      },
+      "reviews": [
+        {
+          "item_id": "DP-002",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "edit",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": "Name the paper that introduces J.",
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": {
+            "answer": "Beta replaces the scalar coupling J of Alpha by a tuple of three."
+          }
+        }
+      ],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v2/DP-003",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/items/DP-003",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DP-003",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "Which paper in the demo corpus reports a relaxation time above one hour?",
+        "answer": "No paper in the corpus reports it.",
+        "form": "unanswerable",
+        "content": "other",
+        "corpus": "demo-corpus",
+        "gold_papers": [],
+        "writer": "ana",
+        "split": "test",
+        "search_record": {
+          "corpus": "demo-corpus",
+          "terms": ["relaxation time", "T1", "hour"],
+          "date": "2026-01-01"
+        }
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v2/DP-004",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/items/DP-004",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DP-004",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "What echo time does the synthetic paper Gamma report for its toy qubit?",
+        "answer": "8.6 ms",
+        "form": "single",
+        "content": "other",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+            "arxiv": "0000.00003v1",
+            "doc": "gamma.pdf",
+            "passages": [
+              {
+                "md_file": "demo/gamma/document.md",
+                "md_text": "The echo time of the toy qubit is 8.6 ms, measured once in the methods.",
+                "source_text": "The echo time of the toy qubit is 8.6 ms, measured once in the methods."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "split": "dev",
+        "key_facts": [
+          {
+            "type": "num",
+            "value": 8.6,
+            "unit": "ms",
+            "rel": 0.02
+          }
+        ],
+        "choices": {
+          "distractors": ["0.98 ms", "3.1 ms", "12.5 ms"],
+          "shuffle_seed": 7
+        },
+        "tags": {
+          "qtype": "numeric"
+        },
+        "reviewer": "ana"
+      },
+      "review": {
+        "state": "rejected",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": {
+          "item_id": "DP-004",
+          "target": "item",
+          "reviewer": "beto",
+          "role": "human",
+          "verdict": "reject",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": "The method is ambiguous.",
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": null
+        }
+      },
+      "reviews": [
+        {
+          "item_id": "DP-004",
+          "target": "item",
+          "reviewer": "beto",
+          "role": "human",
+          "verdict": "reject",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": "The method is ambiguous.",
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": null
+        }
+      ],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v2/DP-005",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/items/DP-005",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DP-005",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "Which paper reports the three-coupling generalization, Alpha or its follow-up?",
+        "answer": "The follow-up (Beta).",
+        "form": "neardup",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "arxiv": "0000.00002v1",
+            "doc": "beta.pdf",
+            "passages": [
+              {
+                "md_file": "demo/beta/document.md",
+                "md_text": "The follow-up replaces the single scalar J by a tuple of three couplings.",
+                "source_text": "The follow-up replaces the single scalar J by a tuple of three couplings."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "confusers": [
+          {
+            "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "relation": "follow-up",
+            "answers_too": false
+          }
+        ]
+      },
+      "review": {
+        "state": "none",
+        "gold": false,
+        "accepted_by": [],
+        "deciding": null
+      },
+      "reviews": [],
+      "validation": []
+    }
+  },
+  {
+    "name": "item demo-papers/v2/DP-007",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/items/DP-007",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "item": {
+        "id": "DP-007",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "How many couplings does the synthetic paper Beta use?",
+        "answer": "Three.",
+        "form": "single",
+        "content": "math",
+        "corpus": "demo-corpus",
+        "gold_papers": [
+          {
+            "doc_id": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            "arxiv": "0000.00002v1",
+            "doc": "beta.pdf",
+            "passages": [
+              {
+                "md_file": "demo/beta/document.md",
+                "md_text": "The follow-up replaces the single scalar J by a tuple of three couplings.",
+                "source_text": "The follow-up replaces the single scalar J by a tuple of three couplings."
+              }
+            ]
+          }
+        ],
+        "writer": "ana",
+        "key_facts": [
+          {
+            "type": "text",
+            "value": "three",
+            "alts": ["3"]
+          }
+        ]
+      },
+      "review": {
+        "state": "needs_second",
+        "gold": false,
+        "accepted_by": ["ana"],
+        "deciding": {
+          "item_id": "DP-007",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": null
+        }
+      },
+      "reviews": [
+        {
+          "item_id": "DP-007",
+          "target": "item",
+          "reviewer": "ana",
+          "role": "human",
+          "verdict": "accept",
+          "date": "2026-01-01T00:00:00+00:00",
+          "note": null,
+          "set_md5": "08ff57f82af04a41374b1f145e868a6b",
+          "edit": null
+        }
+      ],
+      "validation": []
+    }
+  },
+  {
+    "name": "freeze demo-papers/v2",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/freeze",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "plan": {
+        "items_before": 7,
+        "items_after": 6,
+        "accepted": ["DP-001", "DP-007"],
+        "edited": ["DP-002"],
+        "rejected": ["DP-004"],
+        "unreviewed": ["DP-001-es", "DP-003", "DP-005"],
+        "needs_second": ["DP-007"],
+        "stale": [],
+        "unknown": [],
+        "etag": "\"cd9b24cdde4d0d57e81ed4c7e37060ef\""
+      }
+    }
+  },
+  {
+    "name": "put 422",
+    "method": "PUT",
+    "path": "/sets/demo-papers/versions/v2/items/DP-003",
+    "request": {
+      "id": "DP-003",
+      "lang": "fr",
+      "form": "single",
+      "corpus": "c",
+      "gold_papers": [
+        {
+          "doc_id": "zz"
+        }
+      ],
+      "colour": "x"
+    },
+    "status": 422,
+    "response": {
+      "type": "urn:research-api:problem:invalid-input",
+      "title": "Unprocessable Entity",
+      "status": 422,
+      "detail": "The item is not a valid qset/1 item.",
+      "instance": "/api/v1/sets/demo-papers/versions/v2/items/DP-003",
+      "errors": [
+        {
+          "path": "/question",
+          "message": "'question' is a required property"
+        },
+        {
+          "path": "/colour",
+          "message": "Additional properties are not allowed ('colour' was unexpected)"
+        },
+        {
+          "path": "/gold_papers/0/passages",
+          "message": "'passages' is a required property"
+        },
+        {
+          "path": "/gold_papers/0/doc_id",
+          "message": "'zz' does not match '^[0-9a-f]{16}([0-9a-f]{48})?$'"
+        },
+        {
+          "path": "/lang",
+          "message": "'fr' is not one of ['en', 'es']"
+        }
+      ]
+    }
+  },
+  {
+    "name": "put 409 stale",
+    "method": "PUT",
+    "path": "/sets/demo-papers/versions/v2/items/DP-003",
+    "request": {
+      "id": "DP-003",
+      "lang": "en",
+      "lang_origin": "native",
+      "question": "Which paper in the demo corpus reports a relaxation time above one hour?",
+      "answer": "No paper in the corpus reports it.",
+      "form": "unanswerable",
+      "content": "other",
+      "corpus": "demo-corpus",
+      "gold_papers": [],
+      "writer": "ana",
+      "split": "test",
+      "search_record": {
+        "corpus": "demo-corpus",
+        "terms": ["relaxation time", "T1", "hour"],
+        "date": "2026-01-01"
+      }
+    },
+    "status": 409,
+    "response": {
+      "type": "urn:research-api:problem:conflict",
+      "title": "Conflict",
+      "status": 409,
+      "detail": "The draft changed since you read it. Read it again.",
+      "instance": "/api/v1/sets/demo-papers/versions/v2/items/DP-003"
+    }
+  },
+  {
+    "name": "put 428",
+    "method": "PUT",
+    "path": "/sets/demo-papers/versions/v2/items/DP-003",
+    "request": {
+      "id": "DP-003",
+      "lang": "en",
+      "lang_origin": "native",
+      "question": "Which paper in the demo corpus reports a relaxation time above one hour?",
+      "answer": "No paper in the corpus reports it.",
+      "form": "unanswerable",
+      "content": "other",
+      "corpus": "demo-corpus",
+      "gold_papers": [],
+      "writer": "ana",
+      "split": "test",
+      "search_record": {
+        "corpus": "demo-corpus",
+        "terms": ["relaxation time", "T1", "hour"],
+        "date": "2026-01-01"
+      }
+    },
+    "status": 428,
+    "response": {
+      "type": "urn:research-api:problem:precondition-required",
+      "title": "Precondition Required",
+      "status": 428,
+      "detail": "Send the version you read in an If-Match header.",
+      "instance": "/api/v1/sets/demo-papers/versions/v2/items/DP-003"
+    }
+  },
+  {
+    "name": "put 409 decisions",
+    "method": "PUT",
+    "path": "/sets/demo-papers/versions/v2/items/DP-001",
+    "request": {
+      "id": "DP-001",
+      "lang": "en",
+      "lang_origin": "native",
+      "question": "A changed question.",
+      "answer": "J, the exchange coupling.",
+      "form": "single",
+      "content": "math",
+      "corpus": "demo-corpus",
+      "gold_papers": [
+        {
+          "doc_id": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "arxiv": "0000.00001v1",
+          "doc": "alpha.pdf",
+          "passages": [
+            {
+              "md_file": "demo/alpha/document.md",
+              "md_text": "The exchange coupling between the two toy modes is written J throughout.",
+              "source_text": "The exchange coupling between the two toy modes is written J throughout."
+            }
+          ]
+        }
+      ],
+      "writer": "ana",
+      "split": "dev",
+      "key_facts": [
+        {
+          "type": "text",
+          "value": "J",
+          "alts": ["exchange coupling"]
+        }
+      ],
+      "tags": {
+        "category": "notation"
+      },
+      "reviewer": "beto"
+    },
+    "status": 409,
+    "response": {
+      "type": "urn:research-api:problem:item-has-decisions",
+      "title": "Conflict",
+      "status": 409,
+      "detail": "DP-001 has review decisions, so its text is fixed: they are about the text people read. Propose the change with an edit decision, or reject it and add a new item.",
+      "instance": "/api/v1/sets/demo-papers/versions/v2/items/DP-001"
+    }
+  },
+  {
+    "name": "put 403 member",
+    "method": "PUT",
+    "path": "/sets/demo-papers/versions/v2/items/DP-003",
+    "request": {
+      "id": "DP-003",
+      "lang": "en",
+      "lang_origin": "native",
+      "question": "Which paper in the demo corpus reports a relaxation time above one hour?",
+      "answer": "No paper in the corpus reports it.",
+      "form": "unanswerable",
+      "content": "other",
+      "corpus": "demo-corpus",
+      "gold_papers": [],
+      "writer": "ana",
+      "split": "test",
+      "search_record": {
+        "corpus": "demo-corpus",
+        "terms": ["relaxation time", "T1", "hour"],
+        "date": "2026-01-01"
+      }
+    },
+    "status": 403,
+    "response": {
+      "type": "urn:research-api:problem:forbidden",
+      "title": "Forbidden",
+      "status": 403,
+      "detail": "Only the owner of this draft or an admin can change it.",
+      "instance": "/api/v1/sets/demo-papers/versions/v2/items/DP-003"
+    }
+  },
+  {
+    "name": "review 409 stale",
+    "method": "POST",
+    "path": "/sets/demo-papers/versions/v2/reviews",
+    "request": {
+      "item_id": "DP-003",
+      "verdict": "accept"
+    },
+    "status": 409,
+    "response": {
+      "type": "urn:research-api:problem:conflict",
+      "title": "Conflict",
+      "status": 409,
+      "detail": "The draft changed since you read it. Read it again.",
+      "instance": "/api/v1/sets/demo-papers/versions/v2/reviews"
+    }
+  },
+  {
+    "name": "review 422 note",
+    "method": "POST",
+    "path": "/sets/demo-papers/versions/v2/reviews",
+    "request": {
+      "item_id": "DP-003",
+      "verdict": "reject"
+    },
+    "status": 422,
+    "response": {
+      "type": "urn:research-api:problem:invalid-input",
+      "title": "Unprocessable Entity",
+      "status": 422,
+      "detail": "The review is not valid.",
+      "instance": "/api/v1/sets/demo-papers/versions/v2/reviews",
+      "errors": [
+        {
+          "path": "/note",
+          "message": "'note' is a required property"
+        }
+      ]
+    }
+  },
+  {
+    "name": "freeze 409 stale",
+    "method": "POST",
+    "path": "/sets/demo-papers/versions/v2/freeze",
+    "request": null,
+    "status": 409,
+    "response": {
+      "type": "urn:research-api:problem:conflict",
+      "title": "Conflict",
+      "status": 409,
+      "detail": "The draft or its decisions changed since you read the plan. Read it again.",
+      "instance": "/api/v1/sets/demo-papers/versions/v2/freeze"
+    }
+  },
+  {
+    "name": "freeze 403 member",
+    "method": "GET",
+    "path": "/sets/demo-papers/versions/v2/freeze",
+    "request": null,
+    "status": 200,
+    "response": {
+      "version": {
+        "name": "demo-papers",
+        "version": "v2",
+        "status": "draft",
+        "owner": "beto",
+        "md5": "08ff57f82af04a41374b1f145e868a6b",
+        "etag": "\"08ff57f82af04a41374b1f145e868a6b\"",
+        "items": 7,
+        "corpus": "demo-corpus",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "frozen_at": null,
+        "review": null
+      },
+      "plan": {
+        "items_before": 7,
+        "items_after": 6,
+        "accepted": ["DP-001", "DP-007"],
+        "edited": ["DP-002"],
+        "rejected": ["DP-004"],
+        "unreviewed": ["DP-001-es", "DP-003", "DP-005"],
+        "needs_second": ["DP-007"],
+        "stale": [],
+        "unknown": [],
+        "etag": "\"cd9b24cdde4d0d57e81ed4c7e37060ef\""
+      }
+    }
+  },
+  {
+    "name": "validate bad",
+    "method": "POST",
+    "path": "/sets/validate",
+    "request": {
+      "item": {
+        "id": "X",
+        "lang": "fr"
+      }
+    },
+    "status": 200,
+    "response": {
+      "ok": false,
+      "errors": [
+        {
+          "path": "/answer",
+          "message": "'answer' is a required property"
+        },
+        {
+          "path": "/circuit",
+          "message": "'circuit' is a required property"
+        },
+        {
+          "path": "/corpus",
+          "message": "'corpus' is a required property"
+        },
+        {
+          "path": "/form",
+          "message": "'form' is a required property"
+        },
+        {
+          "path": "/gold_papers",
+          "message": "'gold_papers' is a required property"
+        },
+        {
+          "path": "/necessity",
+          "message": "'necessity' is a required property"
+        },
+        {
+          "path": "/search_record",
+          "message": "'search_record' is a required property"
+        },
+        {
+          "path": "/synthesis",
+          "message": "'synthesis' is a required property"
+        },
+        {
+          "path": "/lang",
+          "message": "'fr' is not one of ['en', 'es']"
+        }
+      ]
+    }
+  },
+  {
+    "name": "validate ok",
+    "method": "POST",
+    "path": "/sets/validate",
+    "request": {
+      "item": {
+        "id": "DP-003",
+        "lang": "en",
+        "lang_origin": "native",
+        "question": "Which paper in the demo corpus reports a relaxation time above one hour?",
+        "answer": "No paper in the corpus reports it.",
+        "form": "unanswerable",
+        "content": "other",
+        "corpus": "demo-corpus",
+        "gold_papers": [],
+        "writer": "ana",
+        "split": "test",
+        "search_record": {
+          "corpus": "demo-corpus",
+          "terms": ["relaxation time", "T1", "hour"],
+          "date": "2026-01-01"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "ok": true,
+      "errors": []
+    }
+  },
+  {
+    "name": "import 422",
+    "method": "POST",
+    "path": "/sets/import?name=refused",
+    "request": "{\"format\":\"qset/1\"}\nnot json\n",
+    "status": 422,
+    "response": {
+      "type": "urn:research-api:problem:invalid-input",
+      "title": "Unprocessable Entity",
+      "status": 422,
+      "detail": "The file is not a valid qset/1 file.",
+      "instance": "/api/v1/sets/import",
+      "errors": [
+        {
+          "path": "/lines/2",
+          "message": "not valid JSON: Expecting value: line 1 column 1 (char 0)"
+        }
+      ]
+    }
+  }
+]

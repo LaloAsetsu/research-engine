@@ -3337,7 +3337,7 @@ wheels = [
 
 [[package]]
 name = "qa-bench"
-version = "0.1.0"
+version = "0.2.1"
 source = { editable = "packages/qa-bench" }
 dependencies = [
     { name = "jsonschema" },
@@ -3601,8 +3601,10 @@ dependencies = [
     { name = "alembic" },
     { name = "docingest" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pwdlib", extra = ["argon2"] },
     { name = "pydantic" },
+    { name = "qa-bench" },
     { name = "quantum-sim" },
     { name = "sqlalchemy" },
     { name = "uvicorn" },
@@ -3615,7 +3617,6 @@ qa = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "import-linter" },
     { name = "pyright" },
     { name = "pytest" },
@@ -3629,8 +3630,10 @@ requires-dist = [
     { name = "docingest", editable = "packages/docingest" },
     { name = "docingest", extras = ["qa"], marker = "extra == 'qa'", editable = "packages/docingest" },
     { name = "fastapi", specifier = ">=0.159" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.1" },
     { name = "pydantic", specifier = ">=2.14" },
+    { name = "qa-bench", editable = "packages/qa-bench" },
     { name = "quantum-sim", editable = "packages/quantum-sim" },
     { name = "sqlalchemy", specifier = ">=2.1" },
     { name = "uvicorn", specifier = ">=0.54" },
@@ -3639,7 +3642,6 @@ provides-extras = ["qa"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28" },
     { name = "import-linter", specifier = ">=2.15" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.1.1" },

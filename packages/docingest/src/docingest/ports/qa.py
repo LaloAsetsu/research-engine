@@ -23,7 +23,7 @@ class QuestionAnswerer(Protocol):
         With ``contexts`` (chunks already retrieved, best first) the adapter answers from
         exactly those chunks and retrieves nothing. It then needs from ``documents`` only
         the manifests of the papers the chunks come from (for the citations): the
-        Markdown may be empty. An empty ``contexts`` list is a ``ValueError``: it would read as
-        an empty corpus, so the caller decides what no retrieved evidence means.
+        Markdown may be empty. An empty ``contexts`` list is a question with no evidence, not an
+        empty corpus to retrieve from: the adapter answers from nothing and retrieves nothing.
         """
         ...

@@ -219,9 +219,20 @@ def test_without_contexts_the_embedder_is_built_once(mock_llm, pinned_embedder):
     assert pinned_embedder == ["st-pinned-minilm"]
 
 
-def test_no_contexts_is_not_an_empty_corpus(qa_cfg):
-    with pytest.raises(ValueError, match="contexts is empty"):
-        asyncio.run(PaperQAAnswerer(qa_cfg).ask("q?", [(stored("a"), "")], print, contexts=[]))
+@pytest.mark.parametrize("skip_summary", [False, True])
+def test_an_empty_list_of_contexts_gets_paperqas_own_cannot_answer_and_no_model_request(
+    skip_summary, mock_llm, llm_calls, spy_evidence
+):
+    cfg = AppConfig.model_validate(
+        {"qa": {"llm": "openai/mock", "embedding": "sparse", "skip_summary": skip_summary}}
+    )
+    warnings: list[str] = []
+    answer = asyncio.run(
+        PaperQAAnswerer(cfg).ask("q?", [(stored("a"), "")], warnings.append, contexts=[])
+    )
+    assert answer == "Question: q?\n\nI cannot answer this question due to having no papers."
+    assert REPLY not in answer and llm_calls == [] and warnings == []  # the model was not asked
+    assert [(texts, docs) for texts, docs, _ in spy_evidence] == [([], [])]  # no evidence either
 
 
 def test_contexts_from_a_paper_that_was_not_given_are_refused(qa_cfg):

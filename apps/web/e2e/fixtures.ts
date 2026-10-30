@@ -4,7 +4,7 @@ import { ANA, createAuthMock, TEMP, type MockUser } from "../src/test/auth-mock"
 
 export { ANA, TEMP };
 
-/** A seeded member of the API in fake mode, used by the circuit screen's tests only. */
+/** A seeded member of the API in fake mode, used by the circuit and Ask screens' tests. */
 export const DANI: MockUser = {
   username: "dani",
   password: "test-password-dani-03",
@@ -31,6 +31,7 @@ const STATUS_BODY = {
   uptime_s: 12.5,
   ready: true,
   ask: { state: "ready", reason: null, index_generation: null, queued: 0, busy: false },
+  bench: { running_job: null, queued_runs: 0, scoring: false, queued_scores: 0 },
 };
 
 export const test = base.extend<Fixtures>({

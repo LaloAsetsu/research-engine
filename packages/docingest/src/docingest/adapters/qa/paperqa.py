@@ -18,6 +18,7 @@ from pathlib import Path
 
 from ...config import DEFAULT_LLM_BASE, AppConfig
 from ...domain.chunking import NAME_LENGTH, Chunk
+from ...domain.models import AnswerModel
 from ...domain.text import split_pages
 from ...ports import StoredDocument
 from ..models.huggingface import resolve
@@ -71,6 +72,17 @@ def llm_params(cfg: AppConfig) -> dict:
     if custom.startswith("openai/") and not os.environ.get("OPENAI_API_KEY"):
         params["api_key"] = "sk-local"
     return params
+
+
+def answer_model(cfg: AppConfig) -> AnswerModel:
+    """The model ``llm_params`` selects, without its address or key: the pinned model's
+    repository and revision, or the litellm string of ``DOCINGEST_LLM`` or ``[qa] llm``."""
+    custom = os.environ.get("DOCINGEST_LLM") or cfg.qa.llm
+    if custom is not None:
+        return AnswerModel(name=custom, revision=None)
+    rev = cfg.qa.llm_revision or cfg.ocr.revision
+    assert rev is not None
+    return AnswerModel(name=cfg.ocr.repo_id, revision=rev)
 
 
 def local_settings(cfg: AppConfig):
@@ -282,8 +294,6 @@ class PaperQAAnswerer:
         warn: Callable[[str], None],
         contexts: list[Chunk] | None = None,
     ) -> str:
-        if contexts is not None and not contexts:
-            raise ValueError("contexts is empty: nothing to answer from")
         settings = local_settings(self.cfg)
         if contexts is None:
             if self.cfg.qa.skip_summary:
@@ -294,7 +304,8 @@ class PaperQAAnswerer:
             embedding_model = settings.get_embedding_model()  # load the embedder once
             docs = await self._docs_from_corpus(documents, settings, embedding_model)
         else:
-            # Nothing is retrieved from given contexts, so nothing is embedded either.
+            # Nothing is retrieved from given contexts, so nothing is embedded either. With none
+            # (an empty list) PaperQA2 has nothing to read and answers "cannot answer" itself.
             embedding_model = _unused_embedding()
             if self.cfg.qa.skip_summary:
                 contexts = without_repeated_text(contexts)

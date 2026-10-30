@@ -18,10 +18,13 @@ from .auth import router as auth_router
 from .circuits import router as circuits_router
 from .guard import BindGuard, loopback_only, loopback_or_address
 from .hosts import HostGuard, hosts_allowed_by
+from .jobs import router as jobs_router
 from .nostore import NoStore
 from .origin import OriginGuard, origin_allowed_by
 from .problems import install_problem_handlers, use_problem_media_in_openapi
 from .routes import router
+from .sets import router as sets_router
+from .webapp import WebApp
 
 API_PREFIX = "/api/v1"
 
@@ -30,9 +33,11 @@ API_PREFIX = "/api/v1"
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     container: Container = app.state.container
     await container.asks.start()  # the GPU lane, and the engine warming up in the background
+    await container.bench.jobs.start()  # runs left by a stop are found, queued ones go on
     try:
         yield
     finally:
+        await container.bench.jobs.stop()
         await container.asks.stop()
         container.close()
 
@@ -53,7 +58,12 @@ def build_app(container: Container) -> FastAPI:
     # Added innermost first. A request meets, in order: the access log (so refusals are logged
     # too), the bind check (which also covers a start that skips `research-api serve`), the Host
     # check, the Origin check on writes, then the routes.
-    app.add_middleware(NoStore, prefixes=(f"{API_PREFIX}/asks", f"{API_PREFIX}/documents"))
+    app.add_middleware(
+        NoStore,
+        prefixes=tuple(
+            f"{API_PREFIX}/{name}" for name in ("asks", "documents", "runs", "scores", "jobs")
+        ),
+    )
     app.add_middleware(OriginGuard, allowed=origin_allowed_by(container.settings, fake=fake))
     app.add_middleware(HostGuard, allowed=hosts_allowed_by(container.settings, fake=fake))
     app.add_middleware(
@@ -67,8 +77,15 @@ def build_app(container: Container) -> FastAPI:
     app.include_router(admin_router, prefix=API_PREFIX)
     app.include_router(asks_router, prefix=API_PREFIX)
     app.include_router(documents_router, prefix=API_PREFIX)
+    app.include_router(sets_router, prefix=API_PREFIX)
+    app.include_router(jobs_router, prefix=API_PREFIX)
     install_problem_handlers(app)
     install_ask_handlers(app)
+    if container.settings.web_dir is not None:
+        # The router's fallback, not a mount: Starlette calls it only when no route matched, not
+        # even by path, so a wrong method on an API route still gets its 405 with `Allow`. It is
+        # also outside the schema.
+        app.router.default = WebApp(container.settings.web_dir)
 
     build_schema = app.openapi
 

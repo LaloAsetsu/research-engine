@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from helpers import SEED_FILE, sign_in_as_member
+from helpers import BELL, SEED_FILE, sign_in_as_member
 
 from research_api.bootstrap import Settings, build_container
 from research_api.bootstrap.seed import load_seed_users
@@ -18,16 +18,6 @@ PROBLEM = "application/problem+json"
 ClientFor = Callable[..., TestClient]
 JSON = {"content-type": "application/json"}
 
-BELL = {
-    "format": "circuit/1",
-    "wires": 2,
-    "parts": [
-        [
-            [{"kind": "gate", "label": "H", "targets": [1]}],
-            [{"kind": "x", "label": "X", "targets": [2], "controls": [1]}],
-        ]
-    ],
-}
 S2 = 0.7071067811865476
 
 

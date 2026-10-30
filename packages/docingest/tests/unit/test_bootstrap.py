@@ -262,3 +262,12 @@ def test_an_adapter_that_cannot_be_built_from_its_table_is_a_config_error():
     container = Container(cfg, log=lambda _: None, overrides={"index": FakeIndex()})
     with pytest.raises(InvalidConfigError, match="unknown embedder adapter"):
         container.ask._retrieval()
+
+
+def test_the_container_names_the_answer_model_and_only_for_the_paperqa_adapter(cfg, monkeypatch):
+    monkeypatch.delenv("DOCINGEST_LLM", raising=False)
+    model = Container(cfg, log=lambda _: None).answer_model
+    assert (model.name, model.revision) == (cfg.ocr.repo_id, cfg.ocr.revision)
+    cfg.adapters.qa = "other"
+    with pytest.raises(NotConfiguredError, match="only"):
+        _ = Container(cfg, log=lambda _: None).answer_model

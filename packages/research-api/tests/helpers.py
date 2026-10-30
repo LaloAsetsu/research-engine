@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,10 +25,37 @@ def arun[**P, R](test: Callable[P, Awaitable[R]]) -> Callable[P, R]:
     return wrapper  # type: ignore[return-value]
 
 
+def past_the_tick(path: Path, ctime_ns: int, bound: float = 3.0) -> None:
+    """Wait until the filesystem clock has moved past ``ctime_ns``, so a write that follows is told
+    from the one that made it (the change time has the clock of the modification time)."""
+    probe, deadline = path.with_name("probe"), time.monotonic() + bound
+    try:
+        while True:
+            probe.write_bytes(b"")
+            if probe.stat().st_ctime_ns != ctime_ns:
+                return
+            assert time.monotonic() < deadline, "the filesystem clock did not move"
+            time.sleep(0.01)
+    finally:
+        probe.unlink(missing_ok=True)
+
+
 LOOPBACK = "http://127.0.0.1:8090"
 MEMBER = {"username": "beto", "password": "test-password-beto-02"}
 ORIGIN = {"Origin": LOOPBACK}
 SEED_FILE = Path(__file__).parent / "fixtures" / "seed-users.json"
+
+# H on wire 1, then X on wire 2 controlled by wire 1: the circuit the HTTP tests send as a good one.
+BELL = {
+    "format": "circuit/1",
+    "wires": 2,
+    "parts": [
+        [
+            [{"kind": "gate", "label": "H", "targets": [1]}],
+            [{"kind": "x", "label": "X", "targets": [2], "controls": [1]}],
+        ]
+    ],
+}
 
 
 class MovableClock:

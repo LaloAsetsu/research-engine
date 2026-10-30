@@ -2,6 +2,9 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { createAuthMock, type AuthMock } from "./auth-mock";
 import { circuitHandlers } from "./circuits-api";
+import { askHandlers } from "./ask-api";
+import { setsHandlers } from "./sets-api";
+import { benchHandlers } from "./benchmarks-api";
 
 export let authMock: AuthMock = createAuthMock();
 
@@ -17,10 +20,12 @@ export const STATUS_BODY = {
   uptime_s: 12.5,
   ready: true,
   ask: { state: "ready", reason: null, index_generation: null, queued: 0, busy: false },
+  bench: { running_job: null, queued_runs: 0, scoring: false, queued_scores: 0 },
 } as const;
 
 export const server = setupServer(
   ...circuitHandlers,
+  ...setsHandlers,
   http.get("*/api/v1/status", () => HttpResponse.json(STATUS_BODY)),
   http.all("*/api/v1/auth/*", async ({ request }) => {
     const path = new URL(request.url).pathname;
@@ -37,4 +42,6 @@ export const server = setupServer(
       ? new HttpResponse(null, { status: answer.status, headers })
       : HttpResponse.json(answer.body, { status: answer.status, headers });
   }),
+  ...askHandlers,
+  ...benchHandlers,
 );

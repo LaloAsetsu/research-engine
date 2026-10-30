@@ -1,3 +1,4 @@
+import { mockBenchmarkReads } from "./benchmarks-helpers";
 import { ANA, expect, expectNoAxeViolations, TEMP, signIn, test } from "./fixtures";
 
 // The page loads in each scheme, so no scan reads a page that is still switching colors.
@@ -44,6 +45,7 @@ test.describe("login", () => {
     authMock,
   }) => {
     void authMock;
+    await mockBenchmarkReads(page);
     await page.goto("/benchmarks");
     await signIn(page, ANA);
     await expect(page).toHaveURL(/\/benchmarks$/);
@@ -57,6 +59,15 @@ test.describe("login", () => {
 
   test("walks the four screens", async ({ page, authMock }) => {
     void authMock;
+    // The mock signs in, but the real API behind it would refuse the question-set calls (no real
+    // session); the screens themselves are tested against the real API in sets.spec.ts.
+    await page.route("**/api/v1/sets", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
+    await page.route("**/api/v1/sets/import/shapes", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
+    );
+    await mockBenchmarkReads(page);
     await page.goto("/login");
     await signIn(page, ANA);
     const nav = page.getByRole("navigation", { name: "Main" });
