@@ -189,6 +189,53 @@
     outline: none;
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
   }
+  /* A table scrolls sideways inside its own box, so a wide one never widens the page. */
+  .markdown .table-scroll {
+    /* Without it a grid or flex parent grows to the table's width and the box has nothing to scroll. */
+    contain: inline-size;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+  }
+  .markdown .table-scroll:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent);
+  }
+  .markdown table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.925em;
+    line-height: 1.5;
+  }
+  .markdown :is(th, td) {
+    min-width: 4.5rem;
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.7rem;
+    text-align: left;
+    vertical-align: top;
+    /* Break between words, not inside them: a table that cannot fit scrolls instead of crumbling. */
+    overflow-wrap: normal;
+  }
+  /* The box has the outer border. */
+  .markdown tr > :first-child {
+    border-left: 0;
+  }
+  .markdown tr > :last-child {
+    border-right: 0;
+  }
+  .markdown thead tr:first-child > * {
+    border-top: 0;
+  }
+  .markdown tbody tr:last-child > * {
+    border-bottom: 0;
+  }
+  .markdown th {
+    background: var(--muted);
+    font-weight: 600;
+  }
+  .markdown tbody tr:nth-child(even) {
+    background: color-mix(in oklab, var(--muted) 45%, transparent);
+  }
   .markdown .katex-display {
     overflow-x: auto;
     overflow-y: hidden;

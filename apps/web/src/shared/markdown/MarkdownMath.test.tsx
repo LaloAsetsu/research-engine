@@ -237,3 +237,131 @@ describe("Markdown with math", () => {
     expect(container.querySelector("pre code")).toHaveTextContent("code");
   });
 });
+
+describe("pipe tables", () => {
+  const table =
+    "| Gate | Qubits | Note |\n| :--- | ---: | --- |\n| H | 1 | one qubit |\n| CNOT | 2 | two qubits |";
+
+  it("renders a pipe table as a table, with a header row and aligned columns", () => {
+    const { container } = render(<MarkdownMath>{table}</MarkdownMath>);
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
+      "Gate",
+      "Qubits",
+      "Note",
+    ]);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(screen.getByRole("cell", { name: "CNOT" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "2" })).toHaveStyle({ textAlign: "right" });
+    expect(container.textContent).not.toContain("| H |");
+  });
+
+  it("renders math inside a cell, in the header and the body", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {"| State $\\vert\\psi\\rangle$ | Value |\n| --- | --- |\n| $x^2$ | $\\alpha_1$ |"}
+      </MarkdownMath>,
+    );
+    const annotations = (selector: string) =>
+      Array.from(container.querySelectorAll(`${selector} annotation`)).map((n) => n.textContent);
+    expect(annotations("th")).toEqual(["\\vert\\psi\\rangle"]);
+    expect(annotations("td")).toEqual(["x^2", "\\alpha_1"]);
+    expect(container.textContent).not.toContain("$x^2$");
+  });
+
+  it("shows a footnote as the text it was, with no Footnotes section", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {"A claim[^a] here.\n\n[^a]: The note.\n\n[^b]: A note whose reference is on another page."}
+      </MarkdownMath>,
+    );
+    expect(container.querySelector("section, sup, h2, h3, h4")).toBeNull();
+    expect(container.textContent).toContain("A claim[^a] here.");
+    expect(container.textContent).toContain("[^a]: The note.");
+    expect(container.textContent).toContain("[^b]: A note whose reference is on another page.");
+    expect(container.textContent).not.toContain("Footnotes");
+  });
+
+  it("does not read a single tilde as strikethrough, in text, in a cell or in a formula", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {
+          "Between ~5 and 10~ qubits, or ~10 gates.\n\n| a | b |\n| --- | --- |\n| ~1 to 5~ | 2 |\n\nThen $x \\sim y$ and $a~b$."
+        }
+      </MarkdownMath>,
+    );
+    expect(container.querySelector("del, s")).toBeNull();
+    expect(container.textContent).toContain("Between ~5 and 10~ qubits, or ~10 gates.");
+    expect(screen.getByRole("cell", { name: "~1 to 5~" })).toBeInTheDocument();
+  });
+
+  it("still strikes text through with a double tilde", () => {
+    const { container } = render(<MarkdownMath>{"This is ~~wrong~~ text."}</MarkdownMath>);
+    expect(container.querySelector("del")).toHaveTextContent("wrong");
+  });
+
+  it("puts the table in a box of its own that scrolls sideways", () => {
+    const { container } = render(<MarkdownMath>{table}</MarkdownMath>);
+    const box = container.querySelector(".table-scroll");
+    expect(box).not.toBeNull();
+    expect(box?.querySelector(":scope > table")).not.toBeNull();
+    expect(container.querySelectorAll("table")).toHaveLength(1);
+  });
+
+  it("gives the box the keyboard focus only while the table is wider than it", () => {
+    const observers = new Set<() => void>();
+    let wide = true;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        private readonly callback: () => void;
+        constructor(callback: () => void) {
+          this.callback = callback;
+        }
+        observe() {
+          observers.add(this.callback);
+        }
+        disconnect() {
+          observers.delete(this.callback);
+        }
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.classList.contains("table-scroll") ? (wide ? 900 : 300) : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.classList.contains("table-scroll") ? 300 : 0;
+    });
+    try {
+      const { container } = render(<MarkdownMath>{table}</MarkdownMath>);
+      const box = () => container.querySelector(".table-scroll");
+      expect(box()).toHaveAttribute("tabindex", "0");
+      wide = false;
+      act(() => observers.forEach((callback) => callback()));
+      expect(box()).not.toHaveAttribute("tabindex");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("adds no raw HTML path: tags in a cell stay text and links stay safe", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {
+          '| a | b |\n| --- | --- |\n| <b onclick="x()">hi</b> | [js](javascript:alert(1)) [ok](https://example.org) |\n\nSee www.example.org and <script>1</script>.'
+        }
+      </MarkdownMath>,
+    );
+    expect(container.querySelector("b, script, [onclick]")).toBeNull();
+    expect(container.textContent).toContain('<b onclick="x()">hi</b>');
+    expect(container.querySelector("input, img")).toBeNull();
+    for (const link of container.querySelectorAll("a")) {
+      expect(link.getAttribute("href")).toMatch(/^https?:\/\//);
+    }
+  });
+});

@@ -2,8 +2,10 @@ import "katex/dist/katex.min.css";
 import { type ComponentProps, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import Markdown, { type Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { cn } from "@/shared/lib/utils";
+import { remarkPlainFootnotes } from "./plainFootnotes";
 
 /**
  * KaTeX renders the formulas to HTML plus MathML (the MathML is what a screen reader reads).
@@ -19,7 +21,17 @@ const KATEX_OPTIONS = {
   maxSize: 10,
 } as const;
 
-const REMARK_PLUGINS = [remarkMath];
+/**
+ * GFM brings pipe tables (plus strikethrough, task lists and bare web addresses).
+ * `singleTilde: false` keeps a lone `~` (an approximation in text or in a formula) from striking
+ * text through; only `~~double~~` does. Its footnotes are turned back into the text they were
+ * (see `plainFootnotes.ts`).
+ */
+const REMARK_PLUGINS = [
+  remarkMath,
+  [remarkGfm, { singleTilde: false }],
+  remarkPlainFootnotes,
+] as ComponentProps<typeof Markdown>["remarkPlugins"];
 const REHYPE_PLUGINS = [[rehypeKatex, KATEX_OPTIONS]] as ComponentProps<
   typeof Markdown
 >["rehypePlugins"];
@@ -103,7 +115,39 @@ function KatexSpan({ children, ...rest }: ComponentProps<"span">) {
   );
 }
 
+/**
+ * A table cannot wrap below the width of its longest word, so a wide table would widen the page.
+ * It sits in a box of its own that scrolls sideways, and the box takes the keyboard focus only
+ * while there is something to scroll.
+ */
+function ScrollTable({ children }: { children?: ReactNode }) {
+  const own = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useLayoutEffect(() => {
+    const box = own.current;
+    if (!box || typeof ResizeObserver === "undefined") return;
+    const measure = () => setScrolls(box.scrollWidth > box.clientWidth + 1);
+    measure();
+    const watcher = new ResizeObserver(measure);
+    // The box does not follow its table (it is size-contained), so the table is watched too.
+    watcher.observe(box);
+    if (box.firstElementChild) watcher.observe(box.firstElementChild);
+    return () => watcher.disconnect();
+  }, []);
+  return (
+    <div
+      ref={own}
+      className="table-scroll"
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+      tabIndex={scrolls ? 0 : undefined}
+    >
+      <table>{children}</table>
+    </div>
+  );
+}
+
 const SAFE_COMPONENTS: Components = {
+  table: ({ children }) => <ScrollTable>{children}</ScrollTable>,
   // react-markdown also hands the syntax node to a custom component; left in `rest` it would
   // reach the DOM as `node="[object Object]"`.
   span: ({ className, children, node, ...rest }) => {
