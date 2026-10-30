@@ -21,6 +21,13 @@ const KATEX_OPTIONS = {
   output: "htmlAndMathml",
   // Sizes a formula asks for (`\rule{1000em}{1000em}`) stop at 10 em, so text cannot cover the page.
   maxSize: 10,
+  // Papers copy `\label{eq:1}` into their formulas and KaTeX has no `\label`: it takes its one
+  // argument and shows nothing (`\@secondoftwo` is KaTeX's own, and needs no `trust`).
+  // A getter, so each formula gets a macros object of its own: KaTeX writes the `\gdef` of a
+  // formula into it, and a shared one would carry that to every later formula.
+  get macros() {
+    return { "\\label": "\\@secondoftwo{#1}{}" };
+  },
 } as const;
 
 /**

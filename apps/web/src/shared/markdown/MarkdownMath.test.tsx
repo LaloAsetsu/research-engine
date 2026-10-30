@@ -151,6 +151,34 @@ describe("Markdown with math", () => {
     expect(container.querySelector("a")).toBeNull();
   });
 
+  it("drops \\label{...} from a formula instead of showing it as an error", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {
+          "$$x \\label{eq:1}$$ and\n\n$$\n\\begin{equation}\ny^2 \\label{eq:a_b}\n\\end{equation}\n$$"
+        }
+      </MarkdownMath>,
+    );
+    expect(container.querySelectorAll(".katex")).toHaveLength(2);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    const shown = Array.from(container.querySelectorAll(".katex-html"), (n) => n.textContent);
+    expect(shown.join(" ")).not.toMatch(/eq|label/);
+    expect(shown[0]).toBe("x");
+    expect(shown[1]).toContain("y2");
+  });
+
+  it("keeps a macro a formula defines to that formula", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {"$\\gdef\\alpha{BETA}\\alpha$ then $\\alpha$ and $x \\label{a}$"}
+      </MarkdownMath>,
+    );
+    const shown = Array.from(container.querySelectorAll(".katex-html"), (n) => n.textContent);
+    expect(shown[0]).toContain("BETA");
+    expect(shown[1]).not.toContain("BETA");
+    expect(shown[2]).toBe("x");
+  });
+
   it("caps the size a formula can ask for", () => {
     const { container } = render(
       <MarkdownMath>{"$\\rule{1000em}{1000em}$ and $$\\rule{900em}{900em}$$"}</MarkdownMath>,
