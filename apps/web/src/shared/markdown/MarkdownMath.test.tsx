@@ -269,6 +269,19 @@ describe("pipe tables", () => {
     expect(container.textContent).not.toContain("$x^2$");
   });
 
+  it("keeps a bar inside a formula of a cell from cutting the row", () => {
+    const { container } = render(
+      <MarkdownMath>
+        {"| State | Norm |\n| --- | --- |\n| $|\\psi\\rangle$ | $||x||$ |\n| a | $|S|$ |"}
+      </MarkdownMath>,
+    );
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+    for (const row of container.querySelectorAll("tr")) {
+      expect(row.querySelectorAll("th, td")).toHaveLength(2);
+    }
+    expect(container.querySelectorAll("td .katex")).toHaveLength(3);
+  });
+
   it("shows a footnote as the text it was, with no Footnotes section", () => {
     const { container } = render(
       <MarkdownMath>

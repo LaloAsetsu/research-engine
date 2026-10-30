@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { cn } from "@/shared/lib/utils";
 import { remarkPlainFootnotes } from "./plainFootnotes";
+import { escapeBarsInTableMath } from "./tableMath";
 
 /**
  * KaTeX renders the formulas to HTML plus MathML (the MathML is what a screen reader reads).
@@ -190,7 +191,7 @@ export function MarkdownMath({ children, components, className }: MarkdownMathPr
         rehypePlugins={REHYPE_PLUGINS}
         components={{ ...SAFE_COMPONENTS, ...components }}
       >
-        {children}
+        {escapeBarsInTableMath(children)}
       </Markdown>
     </div>
   );
